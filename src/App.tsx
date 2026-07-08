@@ -348,8 +348,8 @@ export default function App() {
 		}
 		if (modelMode.current) {
 			const ws = wsRef.current;
-			const idx = parseInt(text);
-			const model = availableModels.current[idx];
+			const model = availableModels.current.find((m: any) =>
+			m.name === text || m.id === text);
 			if (model && ws?.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({
 					type: "set_model",
