@@ -119,6 +119,18 @@ body {
   color: #7ee787;
 }
 
+/* 스트리밍 / 도구 상태 */
+.turk-thinking {
+  color: var(--turk-text-dim);
+  font-style: italic;
+}
+
+.turk-tool {
+  color: #d29922;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
 /* 버튼 그리드 */
 .turk-grid {
   display: grid;

@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
+  const backendPort = env.TURK_BACKEND_PORT || "3001";
+
   return {
     plugins: [react()],
     define: {
@@ -12,13 +14,16 @@ export default defineConfig(({ mode }) => {
       host: "127.0.0.1",
       port: 3000,
       proxy: {
-        "/api": {
-          target: env.VITE_OLLAMA_BASE_URL || "https://ollama.com",
+        // WebSocket → 백엔드 (pi RPC 브로드캐스트)
+        "/ws": {
+          target: `ws://localhost:${backendPort}`,
+          ws: true,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api/, "/v1"),
-          headers: {
-            Authorization: `Bearer ${env.VITE_OLLAMA_API_KEY || ""}`,
-          },
+        },
+        // 헬스체크 API → 백엔드
+        "/api": {
+          target: `http://localhost:${backendPort}`,
+          changeOrigin: true,
         },
       },
     },

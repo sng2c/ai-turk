@@ -3,40 +3,43 @@
 ## 프로젝트 개요
 
 React + Vite + TypeScript 기반 AI UI 컨트롤러. 동적 버튼 그리드를 생성하는 챗봇 인터페이스.
-Ollama Cloud API를 Vite 프록시로 호출 (API 키 서버 측 주입).
+`pi --mode rpc`를 영구 백엔드로 사용 (WebSocket 통신, 세션 컨텍스트 자동 관리, 도구 지원).
 
 ## 기술 스택
 
-- **프레임워크**: React 19 + TypeScript
-- **빌드**: Vite 8
-- **API**: Vite dev server proxy → Ollama Cloud (`/api/chat/completions`)
-- **설정**: `.env.local` (API 키, URL, 모델, CLI 에이전트 명령어)
+- **프론트엔드**: React 19 + TypeScript + Vite 8
+- **백엔드**: Node.js + `ws` (WebSocket) + `pi --mode rpc` (JSONL 프로토콜)
+- **통신**: WebSocket (`/ws`) — 실시간 스트리밍 (`text_delta` 이벤트)
+- **설정**: `.env` (백엔드), `.env.local` (Vite 개발 서버)
 
 ## 아키텍처
 
 ```
-브라우저 (React) → /api/chat/completions → Vite proxy → Ollama Cloud API
-                                              ↑
-                                    .env.local에서 API 키 주입
+브라우저 (React) ←WebSocket→ 백엔드 서버 ←stdin/stdout→ pi --mode rpc
+                                   ↑
+                            .env에서 모델/API 설정
 ```
 
-### CLI 에이전트 설정
+### pi RPC 프로토콜
 
-`.env.local`의 `TURK_CLI_CMD`로 CLI 에이전트 명령어 템플릿 저장:
-```
-TURK_CLI_CMD=pi --session-id {session} --model {model} --no-tools -p {prompt}
-```
-- `{session}` → 세션 ID (컨텍스트 유지)
-- `{model}` → 모델명
-- `{prompt}` → 질의
-- `pi`는 `--session-id`로 대화 맥락 유지, `--no-tools`로 빠른 응답
+- **명령 (stdin → JSONL)**: `prompt`, `abort`, `new_session`, `set_model`, `bash` 등
+- **이벤트 (stdout → JSONL)**: `agent_start`, `message_update` (text_delta), `agent_end` 등
+- **스트리밍**: `text_delta` 이벤트로 실시간 텍스트 출력
+- **세션**: `--no-session` 모드 (프로세스 생명주기 = 세션)
 
 ### 상태 관리 (React)
 
-- `messages`: 대화 히스토리 (시스템 프롬프트 + 사용자/어시스턴트)
 - `state`: 현재 버튼 그리드 + 메시지 (`{message, buttons}`)
-- `rows`, `cols`: 그리드 크기
-- `initialized`: 시스템 프롬프트 전송 여부
+- `streamingText`: `text_delta` 누적 (실시간 표시)
+- `toolStatus`: 도구 실행 상태 (`{name, args}`)
+- `sessionInitRef`: 시스템 지시 전송 여부 (첫 메시지에만 포함)
+- `connected`, `piReady`: WebSocket/pi 연결 상태
+
+### 시스템 지시
+
+- 세션 첫 메시지에만 시스템 지시 포함 (JSON 버튼 그리드 형식)
+- 이후 메시지는 사용자 입력만 전송 — pi가 컨텍스트 유지
+- 그리드 변경 시 `new_session`으로 리셋 → 다시 첫 메시지에 시스템 지시 포함
 
 ## /start — 의존성 해결 + 서버 실행
 
@@ -46,33 +49,47 @@ cd ~/ai-turk
 # 1. 의존성 설치
 npm install
 
-# 2. .env.local 없으면 생성
-if [ ! -f .env.local ]; then
-  cp .env.example .env.local
-  echo "⚠️ .env.local 생성됨 — API 키 입력: nano .env.local"
+# 2. .env 없으면 생성
+if [ ! -f .env ]; then
+  cp .env.example .env
+  echo "⚠️ .env 생성됨 — 필요시 수정: nano .env"
 fi
 
 # 3. 기존 서버 중지
-fuser -k 3000/tcp 2>/dev/null; fuser -k 3001/tcp 2>/dev/null; sleep 1
+pkill -f "tsx server.ts" 2>/dev/null; fuser -k 3001/tcp 2>/dev/null; sleep 1
 
-# 4. 개발 서버 실행
-nohup npm run dev > /tmp/ai-turk.log 2>&1 &
+# 4. 백엔드 서버 실행 (pi RPC + WebSocket)
+nohup npx tsx server.ts > /tmp/ai-turk-server.log 2>&1 &
 
 sleep 4
-PORT=$(grep -oP 'port \K\d+' /tmp/ai-turk.log 2>/dev/null || echo "3000")
+
+# 5. 개발 모드: Vite도 실행 (프론트엔드 + WebSocket 프록시)
+# 프로덕션 모드: 백엔드가 dist/ 정적 파일 서빙
+if [ ! -d dist ]; then
+  nohup npm run dev > /tmp/ai-turk-vite.log 2>&1 &
+  sleep 3
+  PORT=3000
+else
+  PORT=3001
+fi
+
 if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/" | grep -q 200; then
   echo "✅ 서버 실행됨: http://127.0.0.1:$PORT"
+  echo "   백엔드: http://127.0.0.1:3001"
+  echo "   WebSocket: ws://127.0.0.1:$PORT/ws"
 else
   echo "❌ 서버 시작 실패 — /doctor 로 확인"
-  cat /tmp/ai-turk.log
+  cat /tmp/ai-turk-server.log
+  cat /tmp/ai-turk-vite.log 2>/dev/null
 fi
 ```
 
 ## /stop — 서버 중지
 
 ```bash
-fuser -k 3000/tcp 2>/dev/null; fuser -k 3001/tcp 2>/dev/null
+pkill -f "tsx server.ts" 2>/dev/null
 pkill -f "vite" 2>/dev/null
+fuser -k 3000/tcp 2>/dev/null; fuser -k 3001/tcp 2>/dev/null
 echo "✅ 서버 중지됨"
 ```
 
@@ -84,54 +101,57 @@ cd ~/ai-turk
 # Node 버전
 node --version
 
+# pi 버전
+pi --version 2>/dev/null || echo "❌ pi 미설치"
+
 # 의존성
 [ -d node_modules ] && echo "✅ node_modules 존재" || echo "❌ npm install 필요"
 
-# .env.local
-[ -f .env.local ] && echo "✅ .env.local 존재" || echo "❌ .env.local 없음 — cp .env.example .env.local"
-
-# 설정값
-grep -q 'VITE_OLLAMA_API_KEY=.\+' .env.local 2>/dev/null && echo "✅ API 키 설정됨" || echo "❌ API 키 미설정"
+# .env
+[ -f .env ] && echo "✅ .env 존재" || echo "❌ .env 없음 — cp .env.example .env"
 
 # TypeScript 컴파일
 npx tsc -b --noEmit 2>&1 | tail -3
 
-# 포트 상태
-if fuser 3000/tcp &>/dev/null || fuser 3001/tcp &>/dev/null; then
-  PORT=$(fuser 3000/tcp 2>/dev/null && echo "3000" || echo "3001")
-  echo "✅ 서버 실행 중 (포트 $PORT)"
+# 백엔드 상태
+if curl -s http://127.0.0.1:3001/api/health 2>/dev/null | grep -q '"ok":true'; then
+  echo "✅ 백엔드 실행 중"
+  curl -s http://127.0.0.1:3001/api/health
+  echo
 else
-  echo "⚪ 서버 미실행 — /start 로 시작"
+  echo "⚪ 백엔드 미실행 — npx tsx server.ts"
 fi
 
-# API 연결 테스트
-if [ -f .env.local ] && grep -q 'VITE_OLLAMA_API_KEY=.\+' .env.local 2>/dev/null; then
-  API_KEY=$(grep '^VITE_OLLAMA_API_KEY=' .env.local | cut -d= -f2 | tr -d "'\"")
-  curl -s -o /dev/null -w "API 상태: %{http_code}" -H "Authorization: Bearer $API_KEY" https://ollama.com/v1/models 2>/dev/null
-  echo
+# 프론트엔드 상태
+if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/ 2>/dev/null | grep -q 200; then
+  echo "✅ Vite 개발 서버 실행 중 (포트 3000)"
 fi
 ```
 
 ## 코딩 규칙
 
 - 한국어 주석 사용
-- 컴포넌트는 `src/` 아래 단일 파일 유지
-- CSS는 `src/App.css` (글로벌 스타일, CSS 변수)
-- API 호출은 `/api/chat/completions` (Vite 프록시가 `/v1/chat/completions`으로 변환)
-- `.env.local` 변경 후 서버 재시작 필요
+- 프론트엔드: `src/App.tsx` (단일 컴포넌트), `src/App.css`
+- 백엔드: `server.ts` (Express 없이 Node.js 내장 http + ws)
+- WebSocket 프로토콜: pi 이벤트를 그대로 브로드캐스트, 클라이언트 명령을 pi stdin에 전달
+- `.env` 변경 후 백엔드 재시작 필요
 
-## 프로덕션 빌드
+## 개발 명령
 
 ```bash
-npm run build    # dist/ 에 빌드
-npm run preview  # 프로덕션 빌드 로컬 프리뷰
+npm run dev        # Vite 개발 서버 (포트 3000, /ws 프록시 → 3001)
+npm run server     # 백엔드 서버 (포트 3001, pi RPC + WebSocket)
+npm run dev:full   # Vite + 백엔드 동시 실행
+npm run build      # 프로덕션 빌드 → dist/
+npm start          # 프로덕션 서버 (백엔드가 dist/ 서빙 + WebSocket)
 ```
 
 ## 트러블슈팅
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| `[HTTP 401]` | API 키 오류 | `.env.local`에서 키 확인 |
-| `[파싱실패]` | 모델이 JSON 외 텍스트 출력 | 모델 변경 또는 시스템 프롬프트 수정 |
-| 프록시 에러 | Vite 프록시 설정 오류 | `vite.config.ts`에서 target 확인 |
-| 빌드 실패 | TypeScript 에러 | `npx tsc -b` 로 타입 체크 |
+| `🔴 연결 끊김` | 백엔드 미실행 | `npm run server` |
+| `🟡 pi 시작중` | pi 프로세스 시작 대기 | 몇 초 대기, 안 되면 `/doctor` |
+| `[파싱실패]` | 모델이 JSON 외 텍스트 출력 | 시스템 프롬프트 수정 또는 `--no-tools` |
+| `EADDRINUSE` | 포트 충돌 | `fuser -k 3001/tcp` 후 재시작 |
+| 빌드 실패 | TypeScript 에러 | `npx tsc -b --noEmit` |

@@ -1,25 +1,35 @@
 {
   "name": "ai-turk",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "tsx server.ts",
+    "dev:full": "concurrently -k -n VITE,API \"npm:dev\" \"npm:server\"",
     "build": "tsc -b && vite build",
+    "start": "tsx server.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^9.1.0",
     "oxlint": "^1.71.0",
+    "tsx": "^4.19.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
