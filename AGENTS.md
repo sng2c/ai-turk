@@ -56,40 +56,32 @@ if [ ! -f .env ]; then
 fi
 
 # 3. 기존 서버 중지
-pkill -f "tsx server.ts" 2>/dev/null; fuser -k 3001/tcp 2>/dev/null; sleep 1
+pkill -f "vite" 2>/dev/null; pkill -f "tsx server.ts" 2>/dev/null; fuser -k 3000/tcp 2>/dev/null; sleep 1
 
-# 4. 백엔드 서버 실행 (pi RPC + WebSocket)
-nohup npx tsx server.ts > /tmp/ai-turk-server.log 2>&1 &
-
-sleep 4
-
-# 5. 개발 모드: Vite도 실행 (프론트엔드 + WebSocket 프록시)
-# 프로덕션 모드: 백엔드가 dist/ 정적 파일 서빙
-if [ ! -d dist ]; then
-  nohup npm run dev > /tmp/ai-turk-vite.log 2>&1 &
-  sleep 3
-  PORT=3000
+# 4. 서버 실행 (개발: Vite 통합 / 프로덕션: server.ts)
+if [ -d dist ]; then
+  nohup npm start > /tmp/ai-turk.log 2>&1 &
 else
-  PORT=3001
+  nohup npm run dev > /tmp/ai-turk.log 2>&1 &
 fi
 
-if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/" | grep -q 200; then
-  echo "✅ 서버 실행됨: http://127.0.0.1:$PORT"
-  echo "   백엔드: http://127.0.0.1:3001"
-  echo "   WebSocket: ws://127.0.0.1:$PORT/ws"
+sleep 4
+if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3000/" | grep -q 200; then
+  echo "✅ 서버 실행됨: http://127.0.0.1:3000"
+  echo "   WebSocket: ws://127.0.0.1:3000/ws"
 else
   echo "❌ 서버 시작 실패 — /doctor 로 확인"
-  cat /tmp/ai-turk-server.log
-  cat /tmp/ai-turk-vite.log 2>/dev/null
+  cat /tmp/ai-turk.log
 fi
 ```
 
 ## /stop — 서버 중지
 
 ```bash
-pkill -f "tsx server.ts" 2>/dev/null
 pkill -f "vite" 2>/dev/null
-fuser -k 3000/tcp 2>/dev/null; fuser -k 3001/tcp 2>/dev/null
+pkill -f "tsx server.ts" 2>/dev/null
+pkill -f "pi --mode rpc" 2>/dev/null
+fuser -k 3000/tcp 2>/dev/null
 echo "✅ 서버 중지됨"
 ```
 
@@ -113,18 +105,16 @@ pi --version 2>/dev/null || echo "❌ pi 미설치"
 # TypeScript 컴파일
 npx tsc -b --noEmit 2>&1 | tail -3
 
-# 백엔드 상태
-if curl -s http://127.0.0.1:3001/api/health 2>/dev/null | grep -q '"ok":true'; then
-  echo "✅ 백엔드 실행 중"
-  curl -s http://127.0.0.1:3001/api/health
+# 백엔드 상태 (프로덕션)
+if curl -s http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true'; then
+  echo "✅ 프로덕션 서버 실행 중 (포트 3000)"
+  curl -s http://127.0.0.1:3000/api/health
   echo
-else
-  echo "⚪ 백엔드 미실행 — npx tsx server.ts"
 fi
 
-# 프론트엔드 상태
+# Vite 개발 서버 상태
 if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/ 2>/dev/null | grep -q 200; then
-  echo "✅ Vite 개발 서버 실행 중 (포트 3000)"
+  echo "✅ 개발 서버 실행 중 (포트 3000)"
 fi
 ```
 
@@ -136,22 +126,29 @@ fi
 - WebSocket 프로토콜: pi 이벤트를 그대로 브로드캐스트, 클라이언트 명령을 pi stdin에 전달
 - `.env` 변경 후 백엔드 재시작 필요
 
-## 개발 명령
+## 실행 명령
 
 ```bash
-npm run dev        # Vite 개발 서버 (포트 3000, /ws 프록시 → 3001)
-npm run server     # 백엔드 서버 (포트 3001, pi RPC + WebSocket)
-npm run dev:full   # Vite + 백엔드 동시 실행
+npm run dev        # 개발: Vite + pi RPC + WebSocket (단일 프로세스, 포트 3000)
 npm run build      # 프로덕션 빌드 → dist/
-npm start          # 프로덕션 서버 (백엔드가 dist/ 서빙 + WebSocket)
+npm start          # 프로덕션: server.ts가 dist/ 서빙 + pi RPC + WebSocket (포트 3000)
 ```
+
+### 개발 vs 프로덕션
+
+| | 개발 (`npm run dev`) | 프로덕션 (`npm start`) |
+|---|---|---|
+| **프론트엔드** | Vite HMR (소스 코드) | dist/ 정적 파일 |
+| **pi RPC** | Vite 플러그인 (`vite.config.ts`) | `server.ts` |
+| **WebSocket** | Vite HTTP 서버 `/ws` | Node HTTP 서버 `/ws` |
+| **포트** | 3000 | 3000 (또는 `PORT` 환경변수) |
 
 ## 트러블슈팅
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| `🔴 연결 끊김` | 백엔드 미실행 | `npm run server` |
+| `🔴 연결 끊김` | 서버 미실행 | `npm run dev` (개발) 또는 `npm start` (프로덕션) |
 | `🟡 pi 시작중` | pi 프로세스 시작 대기 | 몇 초 대기, 안 되면 `/doctor` |
 | `[파싱실패]` | 모델이 JSON 외 텍스트 출력 | 시스템 프롬프트 수정 또는 `--no-tools` |
-| `EADDRINUSE` | 포트 충돌 | `fuser -k 3001/tcp` 후 재시작 |
+| `EADDRINUSE` | 포트 충돌 | `fuser -k 3000/tcp` 후 재시작 |
 | 빌드 실패 | TypeScript 에러 | `npx tsc -b --noEmit` |
