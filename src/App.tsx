@@ -45,7 +45,7 @@ message는 최대 5줄 이내, 한 줄당 총 42자(한글 2자, 영문/숫자 1
 
 function emptyState(rows: number, cols: number): TurkState {
 	return {
-		message: `기계 튀르크 — LLM이 버튼 그리드를 생성하는 인터페이스입니다.\n명령을 입력하세요.\n\n**/session** — 세션 정보\n**/new** — 새 세션`,
+		message: `기계 튀르크에 오신 것을 환영합니다.\n저는 LLM으로 버튼 그리드를 생성합니다.\n명령을 입력하거나 버튼을 눌러주세요.\n대화하며 원하는 기능을 찾아드립니다.\n지금 바로 시작해보세요!`,
 		buttons: Object.fromEntries(
 			Array.from({ length: rows * cols }, (_, i) => [String(i), ""])
 		),
