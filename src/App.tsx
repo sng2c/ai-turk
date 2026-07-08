@@ -42,7 +42,7 @@ function systemPrompt(rows: number, cols: number): string {
 
 function emptyState(rows: number, cols: number): TurkState {
 	return {
-		message: `**AI Turk** 🤖\n\n기계 튀르크 — LLM이 버튼 그리드를 생성하는 인터페이스입니다.\n명령을 입력하거나 버튼을 눌러 대화를 시작하세요.\n\n**/session** — 세션 정보\n**/new** — 새 세션`,
+		message: `기계 튀르크 — LLM이 버튼 그리드를 생성하는 인터페이스입니다.\n명령을 입력하거나 버튼을 눌러 대화를 시작하세요.\n\n**/session** — 세션 정보\n**/new** — 새 세션`,
 		buttons: Object.fromEntries(
 			Array.from({ length: rows * cols }, (_, i) => [String(i), ""])
 		),
