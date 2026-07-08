@@ -104,6 +104,8 @@ export default function App() {
 	const sessionInitRef = useRef(false);
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	const shouldReconnect = useRef(true);
+	const reconnectDelay = useRef(1000);
 	const gridRef = useRef({ rows: DEFAULT_ROWS, cols: DEFAULT_COLS });
 	gridRef.current = { rows, cols };
 
@@ -112,14 +114,18 @@ export default function App() {
 		const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`;
 		const ws = new WebSocket(wsUrl);
 		wsRef.current = ws;
+		shouldReconnect.current = true;
 
-		ws.onopen = () => setConnected(true);
+		ws.onopen = () => { setConnected(true); reconnectDelay.current = 1000; };
 
-		ws.onclose = () => {
+		ws.onclose = (ev) => {
 			setConnected(false);
 			setPiReady(false);
-			// 자동 재연결 (3초 후)
-			reconnectTimer.current = setTimeout(connect, 3000);
+			if (shouldReconnect.current) {
+				console.debug(`[WS] 종료 code=${ev.code} — ${reconnectDelay.current}ms 후 재연결`);
+				reconnectTimer.current = setTimeout(connect, reconnectDelay.current);
+				reconnectDelay.current = Math.min(reconnectDelay.current * 2, 10000);
+			}
 		};
 
 		ws.onerror = () => ws.close();
@@ -137,6 +143,7 @@ export default function App() {
 	useEffect(() => {
 		connect();
 		return () => {
+			shouldReconnect.current = false;
 			clearTimeout(reconnectTimer.current);
 			wsRef.current?.close();
 		};

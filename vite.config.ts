@@ -84,7 +84,16 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		configureServer(server) {
 			startPi();
 
-			const wss = new WebSocketServer({ server: server.httpServer as any, path: "/ws" });
+			// noServer 모드: Vite HMR 업그레이드 핸들러와 충돌 방지
+			const wss = new WebSocketServer({ noServer: true });
+			server.httpServer!.on("upgrade", (req, socket, head) => {
+				const url = new URL(req.url || "", "http://localhost");
+				if (url.pathname === "/ws") {
+					wss.handleUpgrade(req, socket as any, head, (ws) => {
+						wss.emit("connection", ws, req);
+					});
+				}
+			});
 			wss.on("connection", (ws) => {
 				console.log("[Turk] 클라이언트 연결");
 				clients.add(ws);
