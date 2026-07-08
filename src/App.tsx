@@ -107,7 +107,7 @@ export default function App() {
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
 	const [piReady, setPiReady] = useState(false);
-	const [sessionId, setSessionId] = useState("");
+	const [, setSessionId] = useState("");
 	const [currentModel, setCurrentModel] = useState("");
 	const currentModelRef = useRef("");
 	currentModelRef.current = currentModel;
@@ -412,7 +412,12 @@ export default function App() {
 		<div className="turk-app">
 			<header className="turk-header">
 				<h1>🤖 AI Turk</h1>
-				<span className="turk-mode">{statusIcon} {statusText}{sessionId ? ` #${sessionId.slice(-8)}` : ""} <button className="turk-new-btn" onClick={() => {
+				<span className="turk-mode">{statusIcon} {statusText} <button className="turk-model-btn" onClick={() => {
+					const ws = wsRef.current;
+					if (ws?.readyState === WebSocket.OPEN) {
+						ws.send(JSON.stringify({ type: "get_available_models" }));
+					}
+				}} title="모델 선택">{currentModel || "모델 선택"}</button> <button className="turk-new-btn" onClick={() => {
 				if (!confirm("새 세션을 시작할까요?")) return;
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {

@@ -117,7 +117,26 @@ body {
 	transition: color 0.1s;
 }
 
+.turk-model-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	font-size: var(--turk-font-size);
+	padding: 2px 4px;
+	color: var(--accent-foreground);
+	line-height: 1;
+	transition: color 0.1s;
+	max-width: 120px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .turk-new-btn:hover {
+	color: var(--success);
+}
+
+.turk-model-btn:hover {
 	color: var(--success);
 }
 
