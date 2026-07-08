@@ -142,10 +142,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 // ── WebSocket 서버 ──────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: "/ws" });
-const passthrough = [
-	"prompt", "steer", "follow_up", "abort", "new_session",
-	"set_model", "set_thinking_level", "bash", "extension_ui_response",
-];
+const customCommands = ["restart_pi"];
 
 wss.on("connection", (ws) => {
 	console.log("[Turk] 클라이언트 연결");
@@ -155,11 +152,13 @@ wss.on("connection", (ws) => {
 	ws.on("message", (raw) => {
 		try {
 			const msg = JSON.parse(raw.toString());
-			if (passthrough.includes(msg.type)) {
+			if (customCommands.includes(msg.type)) {
+				if (msg.type === "restart_pi") {
+					if (piProcess) { piProcess.kill("SIGTERM"); piProcess = null; }
+					setTimeout(() => startPi(), 500);
+				}
+			} else {
 				sendPi(msg);
-			} else if (msg.type === "restart_pi") {
-				if (piProcess) { piProcess.kill("SIGTERM"); piProcess = null; }
-				setTimeout(() => startPi(), 500);
 			}
 		} catch (e) {
 			console.error("[Turk] 메시지 파싱 오류:", e);

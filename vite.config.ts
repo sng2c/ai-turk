@@ -76,10 +76,8 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		piProcess.stdin.write(JSON.stringify(cmd) + "\n");
 	}
 
-	const passthrough = [
-		"prompt", "steer", "follow_up", "abort", "new_session",
-		"set_model", "set_thinking_level", "bash", "extension_ui_response",
-	];
+	// restart_pi만 제외하고 모든 명령을 pi에 전달
+	const customCommands = ["restart_pi"];
 
 	return {
 		name: "turk-rpc",
@@ -95,11 +93,13 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				ws.on("message", (raw) => {
 					try {
 						const msg = JSON.parse(raw.toString());
-						if (passthrough.includes(msg.type)) {
+						if (customCommands.includes(msg.type)) {
+							if (msg.type === "restart_pi") {
+								if (piProcess) { piProcess.kill("SIGTERM"); piProcess = null; }
+								setTimeout(() => startPi(), 500);
+							}
+						} else {
 							sendPi(msg);
-						} else if (msg.type === "restart_pi") {
-							if (piProcess) { piProcess.kill("SIGTERM"); piProcess = null; }
-							setTimeout(() => startPi(), 500);
 						}
 					} catch (e) {
 						console.error("[Turk] 메시지 파싱 오류:", e);
