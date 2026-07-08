@@ -1,0 +1,199 @@
+:root {
+  --turk-bg: #0e1117;
+  --turk-surface: #1a1d23;
+  --turk-border: #2d333b;
+  --turk-text: #e6edf3;
+  --turk-text-dim: #8b949e;
+  --turk-accent: #58a6ff;
+  --turk-success: #3fb950;
+  --turk-btn: #21262d;
+  --turk-btn-hover: #30363d;
+  --turk-btn-active: #388bfd26;
+  --turk-radius: 8px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--turk-bg);
+  color: var(--turk-text);
+  min-height: 100dvh;
+}
+
+.turk-app {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100dvh;
+}
+
+/* 헤더 */
+.turk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.turk-header h1 {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.turk-mode {
+  font-size: 0.8rem;
+  color: var(--turk-text-dim);
+}
+
+.turk-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 그리드 설정 */
+.turk-grid-setup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--turk-text-dim);
+}
+
+.turk-grid-setup label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.turk-grid-setup input {
+  width: 52px;
+  padding: 4px 6px;
+  border: 1px solid var(--turk-border);
+  border-radius: 4px;
+  background: var(--turk-surface);
+  color: var(--turk-text);
+  font-size: 0.85rem;
+}
+
+.turk-grid-setup button {
+  padding: 4px 12px;
+  border: 1px solid var(--turk-border);
+  border-radius: 4px;
+  background: var(--turk-btn);
+  color: var(--turk-text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.turk-grid-setup button:hover {
+  background: var(--turk-btn-hover);
+}
+
+/* 메시지 */
+.turk-message {
+  background: #1a2e1a;
+  border: 1px solid #2d4a2d;
+  border-radius: var(--turk-radius);
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--turk-success);
+}
+
+.turk-message code {
+  background: var(--turk-btn);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+.turk-message strong {
+  color: #7ee787;
+}
+
+/* 버튼 그리드 */
+.turk-grid {
+  display: grid;
+  gap: 2px;
+}
+
+.turk-btn {
+  padding: 8px 4px;
+  border: 1px solid var(--turk-border);
+  border-radius: 4px;
+  background: var(--turk-btn);
+  color: var(--turk-text);
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.1s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.turk-btn:hover:not(:disabled) {
+  background: var(--turk-btn-hover);
+}
+
+.turk-btn:active:not(:disabled) {
+  background: var(--turk-btn-active);
+  border-color: var(--turk-accent);
+}
+
+.turk-btn:disabled {
+  opacity: 1;
+}
+
+.turk-btn-empty {
+  opacity: 0.15;
+  cursor: default;
+}
+
+/* 입력 */
+.turk-input {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.turk-input input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--turk-border);
+  border-radius: 20px;
+  background: var(--turk-surface);
+  color: var(--turk-text);
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.turk-input input:focus {
+  border-color: var(--turk-accent);
+}
+
+.turk-input button {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 20px;
+  background: var(--turk-accent);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.turk-input button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
