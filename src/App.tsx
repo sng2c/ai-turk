@@ -92,6 +92,7 @@ export default function App() {
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
 	const [piReady, setPiReady] = useState(false);
+	const [sessionId, setSessionId] = useState("");
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
@@ -105,6 +106,7 @@ export default function App() {
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const shouldReconnect = useRef(true);
+	const showSessionDetail = useRef(false);
 	const reconnectDelay = useRef(1000);
 	const gridRef = useRef({ rows: DEFAULT_ROWS, cols: DEFAULT_COLS });
 	gridRef.current = { rows, cols };
@@ -154,6 +156,7 @@ export default function App() {
 		switch (msg.type) {
 			case "pi_ready":
 				setPiReady(true);
+				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				break;
 			case "pi_starting":
 				setPiReady(false);
@@ -220,6 +223,25 @@ export default function App() {
 				setToolStatus(null);
 				break;
 
+			case "response":
+				if (msg.command === "get_state" && msg.success && msg.data) {
+					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
+					if (showSessionDetail.current) {
+						const d = msg.data;
+						const info = [
+							`**세션 ID**: ${d.sessionId ?? "—"}`,
+							`**세션명**: ${d.sessionName ?? "—"}`,
+							`**모델**: ${d.model?.name ?? d.model?.id ?? "—"}`,
+							`**메시지 수**: ${d.messageCount ?? 0}`,
+							`**사고 레벨**: ${d.thinkingLevel ?? "—"}`,
+							`**스트리밍**: ${d.isStreaming ? "예" : "아니오"}`,
+						].join("\n");
+						setState((s) => ({ message: info, buttons: s.buttons }));
+						showSessionDetail.current = false;
+					}
+				}
+				break;
+
 			case "extension_ui_request":
 				// 간단 처리: confirm/confirm은 기본값, input/select는 취소
 				if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -270,6 +292,14 @@ export default function App() {
 
 	const handleSend = (text: string) => {
 		setInput("");
+		if (text === "/session") {
+			const ws = wsRef.current;
+			if (ws?.readyState === WebSocket.OPEN) {
+				showSessionDetail.current = true;
+				ws.send(JSON.stringify({ type: "get_state" }));
+			}
+			return;
+		}
 		sendPrompt(text);
 	};
 
@@ -291,7 +321,7 @@ export default function App() {
 		<div className="turk-app">
 			<header className="turk-header">
 				<h1>🤖 AI Turk</h1>
-				<span className="turk-mode">{statusIcon} {statusText}</span>
+				<span className="turk-mode">{statusIcon} {statusText}{sessionId ? ` #${sessionId.slice(0, 8)}` : ""}</span>
 			</header>
 
 			<div className="turk-grid-setup">
