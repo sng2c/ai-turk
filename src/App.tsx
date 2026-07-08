@@ -127,6 +127,8 @@ export default function App() {
 	const showSessionDetail = useRef(false);
 	const modelMode = useRef(false);
 	const availableModels = useRef<any[]>([]);
+	const modelPage = useRef(0);
+	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 2; // 23 (나머지 2칸은 이전/다음)
 	const reconnectDelay = useRef(1000);
 	const gridRef = useRef({ rows: DEFAULT_ROWS, cols: DEFAULT_COLS });
 	gridRef.current = { rows, cols };
@@ -276,17 +278,8 @@ export default function App() {
 				}
 				if (msg.command === "get_available_models" && msg.success && msg.data?.models) {
 					availableModels.current = msg.data.models;
-					const models = msg.data.models;
-					const buttons: Record<string, string> = {};
-					models.forEach((m: any, i: number) => {
-						buttons[String(i)] = m.name || m.id || `model-${i}`;
-					});
-					// 남은 버튼은 빈칸
-					for (let i = models.length; i < DEFAULT_ROWS * DEFAULT_COLS; i++) {
-						buttons[String(i)] = "";
-					}
-					modelMode.current = true;
-					setState({ message: `현재 모델: ${currentModelRef.current || "—"}\n모델을 선택하세요.`, buttons });
+					modelPage.current = 0;
+					renderModelGrid();
 				}
 				break;
 
@@ -304,6 +297,27 @@ export default function App() {
 
 	// ref 동기화 — 항상 최신 handleEvent 유지
 	handleEventRef.current = handleEvent;
+
+	// ── 모델 그리드 렌더 ───────────────────────────────────────────────
+	const renderModelGrid = () => {
+		const models = availableModels.current;
+		const page = modelPage.current;
+		const totalPages = Math.ceil(models.length / MODELS_PER_PAGE);
+		const start = page * MODELS_PER_PAGE;
+		const pageModels = models.slice(start, start + MODELS_PER_PAGE);
+		const buttons: Record<string, string> = {};
+		pageModels.forEach((m: any, i: number) => {
+			buttons[String(i)] = `${m.provider}/${m.name || m.id}`;
+		});
+		for (let i = pageModels.length; i < MODELS_PER_PAGE; i++) {
+			buttons[String(i)] = "";
+		}
+		// 이전/다음 버튼
+		buttons[String(MODELS_PER_PAGE)] = page > 0 ? "←이전" : "";
+		buttons[String(MODELS_PER_PAGE + 1)] = page < totalPages - 1 ? "다음→" : "";
+		modelMode.current = true;
+		setState({ message: `현재 모델: ${currentModelRef.current || "—"}\n페이지 ${page + 1}/${totalPages} — 모델을 선택하세요.`, buttons });
+	};
 
 	// ── 프롬프트 전송 ───────────────────────────────────────────────────
 	const sendPrompt = useCallback((userText: string) => {
@@ -351,9 +365,21 @@ export default function App() {
 			return;
 		}
 		if (modelMode.current) {
+			// 페이지 이동
+			if (text === "←이전") {
+				modelPage.current = Math.max(0, modelPage.current - 1);
+				renderModelGrid();
+				return;
+			}
+			if (text === "다음→") {
+				modelPage.current++;
+				renderModelGrid();
+				return;
+			}
+			// 모델 선택
 			const ws = wsRef.current;
 			const model = availableModels.current.find((m: any) =>
-			m.name === text || m.id === text);
+				`${m.provider}/${m.name || m.id}` === text);
 			if (model && ws?.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({
 					type: "set_model",
@@ -361,7 +387,7 @@ export default function App() {
 					modelId: model.id,
 				}));
 				modelMode.current = false;
-				setState({ message: `모델 변경: ${model.name || model.id}`, buttons: emptyState(DEFAULT_ROWS, DEFAULT_COLS).buttons });
+				setState({ message: `모델 변경: ${model.provider}/${model.name || model.id}`, buttons: emptyState(DEFAULT_ROWS, DEFAULT_COLS).buttons });
 			}
 			return;
 		}
