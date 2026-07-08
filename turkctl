@@ -2,7 +2,7 @@
 # turkctl — AI Turk 제어 스크립트
 set -euo pipefail
 
-TURK_DIR="$(cd "$(dirname "$0")" && pwd)"
+TURK_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 LOG_FILE="/tmp/ai-turk.log"
 PORT="${PORT:-3000}"
 
