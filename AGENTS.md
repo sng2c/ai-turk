@@ -58,17 +58,14 @@ fi
 # 3. 기존 서버 중지
 pkill -f "vite" 2>/dev/null; pkill -f "tsx server.ts" 2>/dev/null; fuser -k 3000/tcp 2>/dev/null; sleep 1
 
-# 4. 서버 실행 (개발: Vite 통합 / 프로덕션: server.ts)
-if [ -d dist ]; then
-  nohup npm start > /tmp/ai-turk.log 2>&1 &
-else
-  nohup npm run dev > /tmp/ai-turk.log 2>&1 &
-fi
+# 4. 개발 서버 실행 (Vite + pi RPC + WebSocket 통합)
+nohup npm run dev > /tmp/ai-turk.log 2>&1 &
 
-sleep 4
+sleep 5
 if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3000/" | grep -q 200; then
   echo "✅ 서버 실행됨: http://127.0.0.1:3000"
   echo "   WebSocket: ws://127.0.0.1:3000/ws"
+  echo "   모드: Vite 개발 (HMR + pi RPC 통합)"
 else
   echo "❌ 서버 시작 실패 — /doctor 로 확인"
   cat /tmp/ai-turk.log
@@ -105,16 +102,11 @@ pi --version 2>/dev/null || echo "❌ pi 미설치"
 # TypeScript 컴파일
 npx tsc -b --noEmit 2>&1 | tail -3
 
-# 백엔드 상태 (프로덕션)
-if curl -s http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true'; then
-  echo "✅ 프로덕션 서버 실행 중 (포트 3000)"
-  curl -s http://127.0.0.1:3000/api/health
-  echo
-fi
-
-# Vite 개발 서버 상태
+# 서버 상태 (개발 모드: npm run dev)
 if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/ 2>/dev/null | grep -q 200; then
   echo "✅ 개발 서버 실행 중 (포트 3000)"
+else
+  echo "⚪ 서버 미실행 — /start 로 시작"
 fi
 ```
 
