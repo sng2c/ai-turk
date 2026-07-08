@@ -95,6 +95,9 @@ export default function App() {
 
 	// 스트리밍 상태
 	const [streamingText, setStreamingText] = useState("");
+	const [thinkingText, setThinkingText] = useState("");
+	const [showThinking, setShowThinking] = useState(false);
+	const [thinkingExpanded, setThinkingExpanded] = useState(false);
 	const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null);
 
 	// 세션 초기화 추적
@@ -162,12 +165,16 @@ export default function App() {
 			case "agent_start":
 				setLoading(true);
 				setStreamingText("");
+				setThinkingText("");
+				setShowThinking(false);
+				setThinkingExpanded(false);
 				setToolStatus(null);
 				break;
 
 			case "agent_end":
 				setLoading(false);
 				setToolStatus(null);
+				setShowThinking(false);
 				// 마지막 assistant 메시지에서 JSON 파싱
 				if (msg.messages?.length) {
 					const text = extractAssistantText(msg.messages);
@@ -185,7 +192,11 @@ export default function App() {
 			case "message_update": {
 				const delta = msg.assistantMessageEvent;
 				if (!delta) break;
-				if (delta.type === "text_delta") {
+				if (delta.type === "thinking_start") {
+					setShowThinking(true);
+				} else if (delta.type === "thinking_delta") {
+					setThinkingText((prev) => prev + (delta.delta || ""));
+				} else if (delta.type === "text_delta") {
 					setStreamingText((prev) => prev + (delta.delta || ""));
 				}
 				break;
@@ -238,7 +249,9 @@ export default function App() {
 		setCols(c);
 		setState(emptyState(r, c));
 		setStreamingText("");
+		setThinkingText("");
 		setToolStatus(null);
+		setShowThinking(false);
 
 		// pi에 새 세션 요청
 		const ws = wsRef.current;
@@ -287,6 +300,15 @@ export default function App() {
 				</label>
 				<button onClick={handleGridChange}>변경</button>
 			</div>
+
+			{(showThinking || thinkingText) && (
+				<div className={`turk-thinking-area${thinkingExpanded ? " expanded" : ""}`} onClick={() => setThinkingExpanded(e => !e)}>
+					<span className="turk-thinking-label">💭 {showThinking ? "사고 중" : "사고 완료"}</span>
+					<div className="turk-thinking-text">
+						{thinkingText || "..."}
+					</div>
+				</div>
+			)}
 
 			<div className="turk-message">
 				{loading && streamingText ? (

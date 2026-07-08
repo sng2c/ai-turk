@@ -131,6 +131,49 @@ body {
   font-size: 0.85rem;
 }
 
+/* 사고 영역 (메시지 위, 2줄 클램프) */
+.turk-thinking-area {
+  background: var(--turk-surface);
+  border: 1px solid var(--turk-border);
+  border-radius: var(--turk-radius);
+  padding: 6px 12px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.turk-thinking-area.expanded {
+  /* 클릭 시 펼치기는 JS에서 처리 */
+}
+
+.turk-thinking-label {
+  font-size: 0.7rem;
+  color: var(--turk-text-dim);
+  display: block;
+  margin-bottom: 2px;
+  user-select: none;
+}
+
+.turk-thinking-text {
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: var(--turk-text-dim);
+  font-style: italic;
+  white-space: pre-wrap;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-height: 2.6em;
+}
+
+.turk-thinking-area.expanded .turk-thinking-text {
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 /* 버튼 그리드 */
 .turk-grid {
   display: grid;
