@@ -30,7 +30,7 @@
 
 /* 다크 테마 (AI Turk 기본) */
 :root {
-	--turk-font-size: 0.8rem;
+	--turk-font-size: 1rem;
 	--radius: 0rem;
 	--background: oklch(0.17 0 0);
 	--foreground: oklch(0.985 0 0);
