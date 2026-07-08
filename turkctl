@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# turkctl — AI Turk 제어 스크립트
+set -euo pipefail
+
+TURK_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOG_FILE="/tmp/ai-turk.log"
+PORT="${PORT:-3000}"
+
+usage() {
+  cat <<EOF
+AI Turk 제어 도구
+
+사용법: turkctl <명령>
+
+명령:
+  start     개발 서버 시작 (npm run dev, 백그라운드)
+  stop      서버 및 pi 프로세스 종료
+  restart   서버 재시작
+  status    실행 상태 확인
+  logs      최근 로그 출력 (tail -f)
+  build     프로덕션 빌드
+  pi        pi RPC 프로세스 상태
+  ws        WebSocket 연결 테스트
+  session   현재 세션 정보 (HTTP)
+  help      이 도움말
+
+예시:
+  turkctl start
+  turkctl status
+  turkctl logs
+EOF
+}
+
+is_running() {
+  curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/" 2>/dev/null | grep -q 200
+}
+
+cmd_start() {
+  if is_running; then
+    echo "✅ 이미 실행 중: http://127.0.0.1:$PORT"
+    return 0
+  fi
+  echo "▶ 서버 시작 중..."
+  cd "$TURK_DIR"
+  pkill -f "vite" 2>/dev/null || true
+  pkill -f "pi --mode rpc" 2>/dev/null || true
+  fuser -k "$PORT/tcp" 2>/dev/null || true
+  sleep 1
+  nohup npm run dev > "$LOG_FILE" 2>&1 &
+  sleep 5
+  if is_running; then
+    echo "✅ 서버 실행됨: http://127.0.0.1:$PORT"
+    echo "   WebSocket: ws://127.0.0.1:$PORT/ws"
+  else
+    echo "❌ 시작 실패 — 로그 확인: turkctl logs"
+    tail -5 "$LOG_FILE" 2>/dev/null
+    return 1
+  fi
+}
+
+cmd_stop() {
+  pkill -f "vite" 2>/dev/null || true
+  pkill -f "tsx server" 2>/dev/null || true
+  pkill -f "pi --mode rpc" 2>/dev/null || true
+  fuser -k "$PORT/tcp" 2>/dev/null || true
+  echo "✅ 서버 중지됨"
+}
+
+cmd_restart() {
+  cmd_stop
+  sleep 2
+  cmd_start
+}
+
+cmd_status() {
+  if is_running; then
+    echo "✅ 서버 실행 중 (포트 $PORT)"
+    # pi 상태
+    local health
+    health=$(curl -s "http://127.0.0.1:$PORT/api/health" 2>/dev/null || echo "{}")
+    echo "   $health"
+    # WebSocket 클라이언트 수 (로그에서 추정)
+    local ws_count
+    ws_count=$(grep -c "클라이언트 연결" "$LOG_FILE" 2>/dev/null || echo "0")
+    echo "   로그: $LOG_FILE"
+  else
+    echo "⚪ 서버 미실행 — turkctl start"
+  fi
+  # 프로세스
+  local procs
+  procs=$(ps aux | grep -E "vite|pi --mode rpc" | grep -v grep | wc -l)
+  echo "   관련 프로세스: ${procs}개"
+}
+
+cmd_logs() {
+  if [ -f "$LOG_FILE" ]; then
+    tail -f "$LOG_FILE"
+  else
+    echo "❌ 로그 파일 없음: $LOG_FILE"
+  fi
+}
+
+cmd_build() {
+  cd "$TURK_DIR"
+  echo "▶ 빌드 중..."
+  npm run build
+  echo "✅ 빌드 완료: $TURK_DIR/dist/"
+}
+
+cmd_pi() {
+  if is_running; then
+    echo "=== pi 프로세스 ==="
+    ps aux | grep "pi --mode rpc" | grep -v grep || echo "  pi 프로세스 없음"
+    echo "=== 헬스체크 ==="
+    curl -s "http://127.0.0.1:$PORT/api/health" 2>/dev/null || echo "  응답 없음"
+    echo
+  else
+    echo "⚪ 서버 미실행"
+  fi
+}
+
+cmd_ws() {
+  if ! is_running; then
+    echo "⚪ 서버 미실행"
+    return 1
+  fi
+  echo "=== WebSocket 테스트 ==="
+  cd "$TURK_DIR"
+  npx tsx -e '
+import WebSocket from "ws";
+const ws = new WebSocket("ws://127.0.0.1:'"$PORT"'/ws");
+ws.on("open", () => { console.log("✅ WS 연결됨"); ws.send(JSON.stringify({ type: "get_state" })); });
+ws.on("message", (raw) => {
+  const msg = JSON.parse(raw.toString());
+  if (msg.type === "pi_ready") console.log("✅ pi 준비됨");
+  if (msg.type === "response" && msg.command === "get_state") {
+    console.log("세션:", msg.data?.sessionId ?? "—");
+    console.log("메시지 수:", msg.data?.messageCount ?? 0);
+    ws.close(); process.exit(0);
+  }
+});
+ws.on("error", (e) => { console.error("❌ WS 오류:", e.message); process.exit(1); });
+setTimeout(() => { console.log("타임아웃"); process.exit(1); }, 10000);
+' 2>&1
+}
+
+cmd_session() {
+  if ! is_running; then
+    echo "⚪ 서버 미실행"
+    return 1
+  fi
+  cd "$TURK_DIR"
+  npx tsx -e '
+import WebSocket from "ws";
+const ws = new WebSocket("ws://127.0.0.1:'"$PORT"'/ws");
+ws.on("open", () => ws.send(JSON.stringify({ type: "get_state" })));
+ws.on("message", (raw) => {
+  const msg = JSON.parse(raw.toString());
+  if (msg.type === "response" && msg.command === "get_state" && msg.success) {
+    const d = msg.data;
+    console.log("세션 ID:", d.sessionId ?? "—");
+    console.log("세션명:", d.sessionName ?? "—");
+    console.log("모델:", d.model?.name ?? d.model?.id ?? "—");
+    console.log("메시지 수:", d.messageCount ?? 0);
+    console.log("사고 레벨:", d.thinkingLevel ?? "—");
+    console.log("스트리밍:", d.isStreaming ? "예" : "아니오");
+    ws.close(); process.exit(0);
+  }
+});
+setTimeout(() => { console.log("타임아웃"); process.exit(1); }, 10000);
+' 2>&1
+}
+
+# ── 메인 ────────────────────────────────────────────────────────────────
+case "${1:-help}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_restart ;;
+  status)  cmd_status ;;
+  logs)    cmd_logs ;;
+  build)   cmd_build ;;
+  pi)      cmd_pi ;;
+  ws)      cmd_ws ;;
+  session) cmd_session ;;
+  help|--help|-h) usage ;;
+  *) echo "알 수 없는 명령: $1"; usage; exit 1 ;;
+esac
