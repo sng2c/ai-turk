@@ -205,6 +205,7 @@ export default function App() {
 				setLoading(false);
 				setToolStatus(null);
 				setShowThinking(false);
+				setThinkingText("");
 				// 마지막 assistant 메시지에서 JSON 파싱
 				if (msg.messages?.length) {
 					const text = extractAssistantText(msg.messages);
