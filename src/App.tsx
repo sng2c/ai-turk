@@ -344,7 +344,14 @@ export default function App() {
 		<div className="turk-app">
 			<header className="turk-header">
 				<h1>🤖 AI Turk</h1>
-				<span className="turk-mode">{statusIcon} {statusText}{sessionId ? ` #${sessionId.slice(-8)}` : ""}</span>
+				<span className="turk-mode">{statusIcon} {statusText}{sessionId ? ` #${sessionId.slice(-8)}` : ""} <button className="turk-new-btn" onClick={() => {
+				const ws = wsRef.current;
+				if (ws?.readyState === WebSocket.OPEN) {
+					ws.send(JSON.stringify({ type: "new_session" }));
+					sessionInitRef.current = false;
+					setState(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
+				}
+			}} title="새 세션">➕</button></span>
 			</header>
 
 			<div className={`turk-message${loading ? " turk-message-loading" : ""}`}>

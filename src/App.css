@@ -101,6 +101,24 @@ body {
 	font-size: var(--turk-font-size);
 	color: var(--muted-foreground);
 	font-family: "NeoDunggeunmo", monospace;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.turk-new-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	font-size: var(--turk-font-size);
+	padding: 2px 4px;
+	color: var(--muted-foreground);
+	line-height: 1;
+	transition: color 0.1s;
+}
+
+.turk-new-btn:hover {
+	color: var(--success);
 }
 
 /* 메시지 영역 */
