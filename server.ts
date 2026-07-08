@@ -9,7 +9,8 @@
 import { ChildProcess, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import { readFile, readFileSync, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
