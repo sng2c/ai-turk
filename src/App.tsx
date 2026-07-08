@@ -108,6 +108,9 @@ export default function App() {
 	const [connected, setConnected] = useState(false);
 	const [piReady, setPiReady] = useState(false);
 	const [sessionId, setSessionId] = useState("");
+	const [currentModel, setCurrentModel] = useState("");
+	const currentModelRef = useRef("");
+	currentModelRef.current = currentModel;
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
@@ -256,6 +259,7 @@ export default function App() {
 				}
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
+					if (msg.data.model) setCurrentModel(msg.data.model.name || msg.data.model.id || "");
 					if (showSessionDetail.current) {
 						const d = msg.data;
 						const info = [
@@ -282,7 +286,7 @@ export default function App() {
 						buttons[String(i)] = "";
 					}
 					modelMode.current = true;
-					setState({ message: "모델을 선택하세요.", buttons });
+					setState({ message: `현재 모델: ${currentModelRef.current || "—"}\n모델을 선택하세요.`, buttons });
 				}
 				break;
 
