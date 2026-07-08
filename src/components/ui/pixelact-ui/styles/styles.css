@@ -2,7 +2,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap");
 
 :root {
-	--box-shadow-width: 4px;
+	--box-shadow-width: 3px;
 	--pixel-box-shadow: calc(-1 * (var(--box-shadow-width))) 0 0 0 black,
 		var(--box-shadow-width) 0 0 0 black, 0 var(--box-shadow-width) 0 0 black,
 		0 calc(-1 * (var(--box-shadow-width))) 0 0 black;

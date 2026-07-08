@@ -68,6 +68,7 @@ body {
 	background: var(--background);
 	color: var(--foreground);
 	min-height: 100dvh;
+	font-size: 12px;
 }
 
 /* ── AI Turk 레이아웃 ──────────────────────────────────────────────────── */
@@ -90,12 +91,12 @@ body {
 }
 
 .turk-header h1 {
-	font-size: 0.7rem;
+	font-size: 1rem;
 	font-weight: 400;
 }
 
 .turk-mode {
-	font-size: 0.5rem;
+	font-size: 0.65rem;
 	color: var(--muted-foreground);
 }
 
@@ -112,7 +113,7 @@ body {
 	border: 2px solid var(--foreground);
 	background: var(--background);
 	color: var(--foreground);
-	font-size: 0.5rem;
+	font-size: 0.7rem;
 	font-family: "Press Start 2P", monospace;
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
@@ -124,9 +125,9 @@ body {
 	border: 2px solid var(--foreground);
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
-	padding: 10px 14px;
-	font-size: 0.55rem;
-	line-height: 1.6;
+	padding: 12px 14px;
+	font-size: 0.8rem;
+	line-height: 1.8;
 	color: var(--success);
 	word-break: break-word;
 }
@@ -159,7 +160,7 @@ body {
 }
 
 .turk-thinking-label {
-	font-size: 0.45rem;
+	font-size: 0.6rem;
 	color: var(--muted-foreground);
 	display: block;
 	margin-bottom: 4px;
@@ -167,8 +168,8 @@ body {
 }
 
 .turk-thinking-text {
-	font-size: 0.45rem;
-	line-height: 1.4;
+	font-size: 0.6rem;
+	line-height: 1.6;
 	color: var(--muted-foreground);
 	font-style: italic;
 	white-space: pre-wrap;
@@ -177,7 +178,7 @@ body {
 	-webkit-line-clamp: 2;
 	line-clamp: 2;
 	-webkit-box-orient: vertical;
-	max-height: 2.8em;
+	max-height: 2em;
 }
 
 .turk-thinking-area.expanded .turk-thinking-text {
@@ -194,7 +195,7 @@ body {
 
 .turk-tool {
 	color: var(--warning);
-	font-size: 0.5rem;
+	font-size: 0.65rem;
 }
 
 /* 버튼 그리드 */
@@ -204,14 +205,14 @@ body {
 }
 
 .turk-grid-btn {
-	padding: 8px 4px;
+	padding: 10px 4px;
 	border: 2px solid var(--foreground);
 	background: var(--secondary);
 	color: var(--foreground);
 	cursor: pointer;
 	font-family: "Press Start 2P", monospace;
-	font-size: 0.45rem;
-	line-height: 1.3;
+	font-size: 0.6rem;
+	line-height: 1.4;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -255,7 +256,7 @@ body {
 	background: var(--background);
 	color: var(--foreground);
 	font-family: "Press Start 2P", monospace;
-	font-size: 0.5rem;
+	font-size: 0.7rem;
 	outline: none;
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
@@ -276,7 +277,7 @@ body {
 	color: var(--success-foreground);
 	cursor: pointer;
 	font-family: "Press Start 2P", monospace;
-	font-size: 0.5rem;
+	font-size: 0.7rem;
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
 	transition: all 0.1s;
@@ -298,7 +299,7 @@ body {
 	color: var(--foreground);
 	cursor: pointer;
 	font-family: "Press Start 2P", monospace;
-	font-size: 0.5rem;
+	font-size: 0.7rem;
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
 	transition: all 0.1s;
