@@ -351,7 +351,7 @@ export default function App() {
 					sessionInitRef.current = false;
 					setState(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 				}
-			}} title="새 세션">➕</button></span>
+			}} title="새 세션">↻</button></span>
 			</header>
 
 			<div className={`turk-message${loading ? " turk-message-loading" : ""}`}>
