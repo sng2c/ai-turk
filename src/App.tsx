@@ -300,6 +300,17 @@ export default function App() {
 			}
 			return;
 		}
+		if (text === "/new") {
+			const ws = wsRef.current;
+			if (ws?.readyState === WebSocket.OPEN) {
+				ws.send(JSON.stringify({ type: "new_session" }));
+				sessionInitRef.current = false;
+				setState(emptyState(gridRef.current.rows, gridRef.current.cols));
+				setThinkingText("");
+				setShowThinking(false);
+			}
+			return;
+		}
 		sendPrompt(text);
 	};
 
