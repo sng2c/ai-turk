@@ -345,6 +345,7 @@ export default function App() {
 			<header className="turk-header">
 				<h1>🤖 AI Turk</h1>
 				<span className="turk-mode">{statusIcon} {statusText}{sessionId ? ` #${sessionId.slice(-8)}` : ""} <button className="turk-new-btn" onClick={() => {
+				if (!confirm("새 세션을 시작할까요?")) return;
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {
 					ws.send(JSON.stringify({ type: "new_session" }));
