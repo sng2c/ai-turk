@@ -64,11 +64,11 @@
 }
 
 body {
-	font-family: "Press Start 2P", system-ui, sans-serif;
+	font-family: "VT323", "Press Start 2P", monospace;
 	background: var(--background);
 	color: var(--foreground);
 	min-height: 100dvh;
-	font-size: 13px;
+	font-size: 14px;
 }
 
 /* ── AI Turk 레이아웃 ──────────────────────────────────────────────────── */
@@ -126,10 +126,11 @@ body {
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
 	padding: 12px 14px;
-	font-size: 0.9rem;
+	font-size: 1rem;
 	line-height: 1.8;
 	color: var(--success);
 	word-break: break-word;
+	font-family: "VT323", monospace;
 }
 
 .turk-message-loading {
@@ -168,7 +169,7 @@ body {
 }
 
 .turk-thinking-text {
-	font-size: 0.7rem;
+	font-size: 0.9rem;
 	line-height: 1.6;
 	color: var(--muted-foreground);
 	font-style: italic;
@@ -179,6 +180,7 @@ body {
 	line-clamp: 2;
 	-webkit-box-orient: vertical;
 	max-height: 2em;
+	font-family: "VT323", monospace;
 }
 
 .turk-thinking-area.expanded .turk-thinking-text {
