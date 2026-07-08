@@ -239,6 +239,9 @@ export default function App() {
 						setState((s) => ({ message: info, buttons: s.buttons }));
 						showSessionDetail.current = false;
 					}
+					if (msg.command === "new_session" && msg.success) {
+						wsRef.current?.send(JSON.stringify({ type: "get_state" }));
+					}
 				}
 				break;
 
