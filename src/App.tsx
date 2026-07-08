@@ -36,7 +36,8 @@ const DEFAULT_COLS = 5;
 function systemPrompt(rows: number, cols: number): string {
 	const nb = rows * cols;
 	const ex = Array.from({ length: nb }, (_, i) => `"${i}": ""`).join(", ");
-	return `[중요 지시] 당신은 UI 컨트롤러입니다. 반드시 순수 JSON만 응답. 코드블록(\`\`\`) 금지.\n버튼 ${nb}개, ${rows}행×${cols}열 그리드. 키 "0"~"${nb - 1}".\n빈 버튼은 "". 관련 기능은 같은 행, 주요 버튼은 가운데, 라벨은 간결(이모지 가능).\n형식: {"message":"마크다운 텍스트","buttons":{${ex}}}`;
+	return `[중요 지시] 당신은 UI 컨트롤러입니다. 반드시 순수 JSON만 응답. 코드블록(\`\`\`) 금지.\n버튼 ${nb}개, ${rows}행×${cols}열 그리드. 키 "0"~"${nb - 1}".\n빈 버튼은 "". 관련 기능은 같은 행, 주요 버튼은 가운데, 라벨은 간결(이모지 가능).\nmessage는 최대 5줄 이내로 간결하게 작성.
+형식: {"message":"마크다운 텍스트","buttons":{${ex}}}`;
 }
 
 function emptyState(rows: number, cols: number): TurkState {

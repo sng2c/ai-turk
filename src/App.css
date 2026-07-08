@@ -115,6 +115,8 @@ body {
 	color: var(--success);
 	word-break: break-word;
 	font-family: "NeoDunggeunmo", monospace;
+	height: calc(var(--turk-font-size) * 1.8 * 5 + 24px);
+	overflow-y: auto;
 }
 
 .turk-message-loading {
@@ -194,6 +196,7 @@ body {
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	height: calc(var(--turk-font-size) * 1.8 * 2 + 16px);
 	padding: 8px 4px;
 	border: 2px solid var(--foreground);
 	background: var(--secondary);
