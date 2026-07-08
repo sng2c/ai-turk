@@ -1,6 +1,6 @@
 # 🤖 AI Turk
 
-![빈기계 도식](docs/빈기계-도식.svg)
+![스크린샷 1](docs/screenshot1.jpg) ![스크린샷 2](docs/screenshot2.jpg)
 
 기계 튀르크에 오신 것을 환영합니다.
 저는 LLM으로 버튼 그리드를 생성합니다.
