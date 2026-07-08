@@ -65,7 +65,7 @@
 }
 
 body {
-	font-family: "VT323", "NeoDunggeunmo", monospace;
+	font-family: "NeoDunggeunmo", monospace;
 	background: var(--background);
 	color: var(--foreground);
 	min-height: 100dvh;
@@ -94,7 +94,7 @@ body {
 .turk-header h1 {
 	font-size: var(--turk-font-size);
 	font-weight: 400;
-	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
+	font-family: "NeoDunggeunmo", monospace;
 }
 
 .turk-mode {
@@ -117,7 +117,7 @@ body {
 	background: var(--background);
 	color: var(--foreground);
 	font-size: var(--turk-font-size);
-	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
+	font-family: "NeoDunggeunmo", monospace;
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
 }
@@ -133,7 +133,7 @@ body {
 	line-height: 1.8;
 	color: var(--success);
 	word-break: break-word;
-	font-family: "VT323", "NeoDunggeunmo", monospace;
+	font-family: "NeoDunggeunmo", monospace;
 }
 
 .turk-message-loading {
@@ -183,7 +183,7 @@ body {
 	line-clamp: 2;
 	-webkit-box-orient: vertical;
 	max-height: 2em;
-	font-family: "VT323", "NeoDunggeunmo", monospace;
+	font-family: "NeoDunggeunmo", monospace;
 }
 
 .turk-thinking-area.expanded .turk-thinking-text {
@@ -210,14 +210,17 @@ body {
 }
 
 .turk-grid-btn {
-	padding: 10px 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 8px 4px;
 	border: 2px solid var(--foreground);
 	background: var(--secondary);
 	color: var(--foreground);
 	cursor: pointer;
-	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
+	font-family: "NeoDunggeunmo", monospace;
 	font-size: var(--turk-font-size);
-	line-height: 1.4;
+	line-height: 1.2;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -227,6 +230,7 @@ body {
 	position: relative;
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
+	text-align: center;
 }
 
 .turk-grid-btn:hover:not(:disabled) {
@@ -260,7 +264,7 @@ body {
 	border: 2px solid var(--foreground);
 	background: var(--background);
 	color: var(--foreground);
-	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
+	font-family: "NeoDunggeunmo", monospace;
 	font-size: var(--turk-font-size);
 	outline: none;
 	box-shadow: var(--pixel-box-shadow);
@@ -276,12 +280,14 @@ body {
 }
 
 .turk-submit-btn {
-	padding: 8px 16px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	border: 2px solid var(--foreground);
 	background: var(--success);
 	color: var(--success-foreground);
 	cursor: pointer;
-	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
+	font-family: "NeoDunggeunmo", monospace;
 	font-size: var(--turk-font-size);
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
@@ -298,12 +304,14 @@ body {
 }
 
 .turk-setup-btn {
-	padding: 4px 12px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	border: 2px solid var(--foreground);
 	background: var(--secondary);
 	color: var(--foreground);
 	cursor: pointer;
-	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
+	font-family: "NeoDunggeunmo", monospace;
 	font-size: var(--turk-font-size);
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);

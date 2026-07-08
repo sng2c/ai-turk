@@ -1,5 +1,5 @@
 /* Pixelact UI — 픽셀 아트 스타일 */
-@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap");
+/* Neo둥근모는 index.html에서 로드 */
 
 :root {
 	--box-shadow-width: 3px;
@@ -16,7 +16,7 @@
 }
 
 .pixel-font {
-	font-family: "Press Start 2P", "NeoDunggeunmo", system-ui, -apple-system, sans-serif;
+	font-family: "NeoDunggeunmo", monospace;
 	line-height: 1.5;
 	letter-spacing: 0.5px;
 }
