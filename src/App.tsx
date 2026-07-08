@@ -1,4 +1,21 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, Component, type ReactNode } from "react";
+
+// ── 에러 바운더리 (하얀 화면 방지) ──────────────────────────────────────
+export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+	state = { hasError: false };
+	static getDerivedStateFromError() { return { hasError: true }; }
+	render() {
+		if (this.state.hasError) {
+			return (
+				<div style={{ padding: 20, color: "#e6edf3", background: "#0e1117", minHeight: "100dvh", fontFamily: "sans-serif" }}>
+					<p>⚠️ 렌더링 오류 발생</p>
+					<button onClick={() => location.reload()} style={{ marginTop: 8, padding: "6px 16px", cursor: "pointer" }}>새로고침</button>
+				</div>
+			);
+		}
+		return this.props.children;
+	}
+}
 
 // ── 타입 ──────────────────────────────────────────────────────────────
 interface TurkState {
@@ -111,6 +128,9 @@ export default function App() {
 	const gridRef = useRef({ rows: DEFAULT_ROWS, cols: DEFAULT_COLS });
 	gridRef.current = { rows, cols };
 
+	// handleEvent stale closure 방지: 항상 최신 콜백 참조
+	const handleEventRef = useRef<(msg: any) => void>(() => {});
+
 	// ── WebSocket 연결 ──────────────────────────────────────────────────
 	const connect = useCallback(() => {
 		const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`;
@@ -135,7 +155,7 @@ export default function App() {
 		ws.onmessage = (ev) => {
 			try {
 				const msg = JSON.parse(ev.data);
-				handleEvent(msg);
+				handleEventRef.current(msg);
 			} catch (e) {
 				console.error("메시지 파싱 오류:", e);
 			}
@@ -256,6 +276,9 @@ export default function App() {
 				break;
 		}
 	}, [loading]);
+
+	// ref 동기화 — 항상 최신 handleEvent 유지
+	handleEventRef.current = handleEvent;
 
 	// ── 프롬프트 전송 ───────────────────────────────────────────────────
 	const sendPrompt = useCallback((userText: string) => {
