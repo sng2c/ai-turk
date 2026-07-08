@@ -413,6 +413,14 @@ export default function App() {
 			<header className="turk-header">
 				<h1>🤖 AI Turk</h1>
 				<span className="turk-mode">{statusIcon} {statusText} <button className="turk-model-btn" onClick={() => {
+					if (modelMode.current) {
+						modelMode.current = false;
+						const ws2 = wsRef.current;
+						if (ws2?.readyState === WebSocket.OPEN) {
+							ws2.send(JSON.stringify({ type: "get_last_assistant_text" }));
+						}
+						return;
+					}
 					const ws = wsRef.current;
 					if (ws?.readyState === WebSocket.OPEN) {
 						ws.send(JSON.stringify({ type: "get_available_models" }));
