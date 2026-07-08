@@ -108,6 +108,11 @@ body {
   color: var(--turk-success);
 }
 
+.turk-message-loading {
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+
 .turk-message code {
   background: var(--turk-btn);
   padding: 1px 5px;

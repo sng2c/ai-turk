@@ -317,11 +317,9 @@ export default function App() {
 				</div>
 			)}
 
-			<div className="turk-message">
+			<div className={`turk-message${loading ? " turk-message-loading" : ""}`}>
 				{loading && toolStatus ? (
 					<span className="turk-tool">🔧 {toolStatus.name}: {toolStatus.args}</span>
-				) : loading ? (
-					<span className="turk-thinking">✨ 생성 중...</span>
 				) : (
 					<Md text={state.message} />
 				)}
