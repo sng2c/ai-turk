@@ -10,7 +10,7 @@ import { WebSocketServer, WebSocket } from "ws";
  * npm run dev 하나로 Vite + pi RPC + WebSocket 모두 실행
  */
 function turkPlugin(env: Record<string, string>): Plugin {
-	const model = env.TURK_RPC_MODEL || "ollama-cloud/gemini-3-flash-preview";
+	const model = env.TURK_RPC_MODEL || "";
 	const bin = env.TURK_RPC_BIN || "pi";
 	const extraArgs = (env.TURK_RPC_ARGS || "").split(/\s+/).filter(Boolean);
 
@@ -26,7 +26,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 	}
 
 	function startPi(): void {
-		const args = ["--mode", "rpc", "--no-session", "--model", model, ...extraArgs];
+		const args = ["--mode", "rpc", "--no-session", ...(model ? ["--model", model] : []), ...extraArgs];
 		console.log(`[Turk] ${bin} ${args.join(" ")} 시작`);
 		piProcess = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"] });
 		piReady = true;

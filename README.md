@@ -20,6 +20,16 @@ AI Turk도 같은 원리 — 기계 안에 **LLM이 숨어** 버튼 그리드를
 
 ## 구동 방법
 
+pi 에이전트에게 `/start` 명령으로 시작하세요.
+
+```
+/start
+```
+
+에이전트가 의존성 설치, 서버 실행, 상태 확인을 자동으로 수행합니다.
+
+### 수동 구동
+
 ```bash
 git clone https://github.com/sng2c/ai-turk.git
 cd ai-turk
@@ -28,8 +38,6 @@ turkctl start
 ```
 
 접속: `http://127.0.0.1:3000`
-
-pi 에이전트에게 `/start` 명령으로도 시작할 수 있습니다.
 
 ## 스스로 수정 가능
 

@@ -31,7 +31,7 @@ try {
 // ── 설정 ────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || "3000");
 const PI_BIN = process.env.TURK_RPC_BIN || "pi";
-const PI_MODEL = process.env.TURK_RPC_MODEL || "ollama-cloud/gemini-3-flash-preview";
+const PI_MODEL = process.env.TURK_RPC_MODEL || "";
 const PI_EXTRA_ARGS = (process.env.TURK_RPC_ARGS || "").split(/\s+/).filter(Boolean);
 const DIST_DIR = join(__dirname, "dist");
 
@@ -53,7 +53,7 @@ let piReady = false;
 const clients = new Set<WebSocket>();
 
 function startPi(): void {
-	const args = ["--mode", "rpc", "--no-session", "--model", PI_MODEL, ...PI_EXTRA_ARGS];
+	const args = ["--mode", "rpc", "--no-session", ...(PI_MODEL ? ["--model", PI_MODEL] : []), ...PI_EXTRA_ARGS];
 	console.log(`[Turk] ${PI_BIN} ${args.join(" ")} 시작`);
 	piProcess = spawn(PI_BIN, args, { stdio: ["pipe", "pipe", "pipe"], cwd: __dirname });
 	piReady = true;
