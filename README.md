@@ -1,6 +1,6 @@
 # 🤖 AI Turk
 
-![스크린샷 1](docs/screenshot1.jpg) ![스크린샷 2](docs/screenshot2.jpg)
+![스크린샷](docs/screenshot2.jpg)
 
 기계 튀르크에 오신 것을 환영합니다.
 저는 LLM으로 버튼 그리드를 생성합니다.
@@ -21,14 +21,15 @@ AI Turk도 같은 원리 — 기계 안에 **LLM이 숨어** 버튼 그리드를
 ## 구동 방법
 
 ```bash
-turkctl start    # 서버 시작
-turkctl stop     # 서버 종료
-turkctl status   # 상태 확인
+git clone https://github.com/sng2c/ai-turk.git
+cd ai-turk
+npm install
+turkctl start
 ```
 
 접속: `http://127.0.0.1:3000`
 
-> 항상 `turkctl`로 구동 제어.
+pi 에이전트에게 `/start` 명령으로도 시작할 수 있습니다.
 
 ## 스스로 수정 가능
 
