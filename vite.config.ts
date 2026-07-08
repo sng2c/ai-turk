@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv, type Plugin } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { ChildProcess, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
@@ -125,13 +125,9 @@ function turkPlugin(env: Record<string, string>): Plugin {
 	};
 }
 
-export default defineConfig(({ mode }) => {
-	const env = loadEnv(mode, process.cwd(), "");
+export default defineConfig(() => {
 	return {
-		plugins: [react(), turkPlugin(env)],
-		define: {
-			"import.meta.env.VITE_OLLAMA_MODEL": JSON.stringify(env.VITE_OLLAMA_MODEL || "gemini-3-flash-preview"),
-		},
+		plugins: [react(), turkPlugin(process.env as Record<string, string>)],
 		server: {
 			host: "127.0.0.1",
 			port: 3000,
