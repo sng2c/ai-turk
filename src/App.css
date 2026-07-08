@@ -228,7 +228,7 @@ body {
 	opacity: 1;
 }
 
-.turk-grid-btn-empty {
+.turk-grid-btn.turk-grid-btn-empty {
 	opacity: 0.15;
 	cursor: default;
 	background: var(--muted);
