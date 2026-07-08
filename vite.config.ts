@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { ChildProcess, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { WebSocketServer, WebSocket } from "ws";
@@ -127,7 +128,12 @@ function turkPlugin(env: Record<string, string>): Plugin {
 
 export default defineConfig(() => {
 	return {
-		plugins: [react(), turkPlugin(process.env as Record<string, string>)],
+		plugins: [react(), tailwindcss(), turkPlugin(process.env as Record<string, string>)],
+		resolve: {
+			alias: {
+				"@": "/root/ai-turk/src",
+			},
+		},
 		server: {
 			host: "127.0.0.1",
 			port: 3000,

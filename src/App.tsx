@@ -362,7 +362,7 @@ export default function App() {
 			</header>
 
 			<div className="turk-grid-setup">
-				<label>
+				<label style={{ fontSize: "0.5rem" }}>
 					N:
 					<input
 						type="number"
@@ -372,7 +372,7 @@ export default function App() {
 						onChange={(e) => setTotalInput(Number(e.target.value))}
 					/>
 				</label>
-				<button onClick={handleGridChange}>변경</button>
+				<button className="turk-setup-btn" onClick={handleGridChange}>변경</button>
 			</div>
 
 			{(showThinking || thinkingText) && (
@@ -397,33 +397,34 @@ export default function App() {
 					label ? (
 						<button
 							key={idx}
-							className="turk-btn"
+							className="turk-grid-btn"
 							disabled={loading || !piReady}
 							onClick={() => handleSend(label)}
 						>
 							{label}
 						</button>
 					) : (
-						<button key={idx} className="turk-btn turk-btn-empty" disabled />
+						<button key={idx} className="turk-grid-btn turk-grid-btn-empty" disabled />
 					)
 				)}
 			</div>
 
 			<form
-				className="turk-input"
+				className="turk-input-form"
 				onSubmit={(e) => {
 					e.preventDefault();
 					if (input.trim() && !loading && piReady) handleSend(input.trim());
 				}}
 			>
 				<input
+					className="turk-input-field"
 					value={input}
 					onChange={(e) => setInput(e.target.value)}
 					placeholder={piReady ? "명령어 입력..." : "pi 대기중..."}
 					disabled={loading || !piReady}
 					autoFocus
 				/>
-				<button type="submit" disabled={loading || !input.trim() || !piReady}>
+				<button type="submit" className="turk-submit-btn" disabled={loading || !input.trim() || !piReady}>
 					전송
 				</button>
 			</form>

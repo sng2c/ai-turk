@@ -1,259 +1,309 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-success: var(--success);
+	--color-warning: var(--warning);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+	--color-link: var(--link);
+}
+
+/* 다크 테마 (AI Turk 기본) */
 :root {
-  --turk-bg: #0e1117;
-  --turk-surface: #1a1d23;
-  --turk-border: #2d333b;
-  --turk-text: #e6edf3;
-  --turk-text-dim: #8b949e;
-  --turk-accent: #58a6ff;
-  --turk-success: #3fb950;
-  --turk-btn: #21262d;
-  --turk-btn-hover: #30363d;
-  --turk-btn-active: #388bfd26;
-  --turk-radius: 8px;
+	--radius: 0rem;
+	--background: oklch(0.17 0 0);
+	--foreground: oklch(0.985 0 0);
+	--popover: oklch(0.17 0 0);
+	--popover-foreground: oklch(0.985 0 0);
+	--primary: oklch(0.922 0 0);
+	--primary-foreground: oklch(0.205 0 0);
+	--secondary: oklch(0.269 0 0);
+	--secondary-foreground: oklch(0.985 0 0);
+	--muted: oklch(0.269 0 0);
+	--muted-foreground: oklch(0.708 0 0);
+	--accent: oklch(0.269 0 0);
+	--accent-foreground: oklch(0.985 0 0);
+	--destructive: oklch(0.62 0.24 25.94);
+	--destructive-foreground: oklch(0.985 0 0);
+	--success: oklch(0.74 0.19 146.02);
+	--success-foreground: oklch(0.205 0 0);
+	--warning: oklch(0.82 0.17 87.89);
+	--warning-foreground: oklch(0.145 0 0);
+	--link: oklch(68.661% 0.09175 311.473);
+	--border: oklch(1 0 0 / 10%);
+	--input: oklch(1 0 0 / 15%);
+	--ring: oklch(0.556 0 0);
+	--card: oklch(0.205 0 0);
+	--card-foreground: oklch(0.985 0 0);
 }
 
 * {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--turk-bg);
-  color: var(--turk-text);
-  min-height: 100dvh;
+	font-family: "Press Start 2P", system-ui, sans-serif;
+	background: var(--background);
+	color: var(--foreground);
+	min-height: 100dvh;
 }
 
+/* ── AI Turk 레이아웃 ──────────────────────────────────────────────────── */
+
 .turk-app {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: 12px 16px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 100dvh;
+	max-width: 480px;
+	margin: 0 auto;
+	padding: 12px 16px 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-height: 100dvh;
 }
 
 /* 헤더 */
 .turk-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
 }
 
 .turk-header h1 {
-  font-size: 1.2rem;
-  font-weight: 600;
+	font-size: 0.7rem;
+	font-weight: 400;
 }
 
 .turk-mode {
-  font-size: 0.8rem;
-  color: var(--turk-text-dim);
-}
-
-.turk-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+	font-size: 0.5rem;
+	color: var(--muted-foreground);
 }
 
 /* 그리드 설정 */
 .turk-grid-setup {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
-  color: var(--turk-text-dim);
-}
-
-.turk-grid-setup label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
 }
 
 .turk-grid-setup input {
-  width: 52px;
-  padding: 4px 6px;
-  border: 1px solid var(--turk-border);
-  border-radius: 4px;
-  background: var(--turk-surface);
-  color: var(--turk-text);
-  font-size: 0.85rem;
+	width: 52px;
+	padding: 4px 6px;
+	border: 2px solid var(--foreground);
+	background: var(--background);
+	color: var(--foreground);
+	font-size: 0.5rem;
+	font-family: "Press Start 2P", monospace;
+	box-shadow: var(--pixel-box-shadow);
+	margin: var(--box-shadow-width);
 }
 
-.turk-grid-setup button {
-  padding: 4px 12px;
-  border: 1px solid var(--turk-border);
-  border-radius: 4px;
-  background: var(--turk-btn);
-  color: var(--turk-text);
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.turk-grid-setup button:hover {
-  background: var(--turk-btn-hover);
-}
-
-/* 메시지 */
+/* 메시지 영역 */
 .turk-message {
-  background: #1a2e1a;
-  border: 1px solid #2d4a2d;
-  border-radius: var(--turk-radius);
-  padding: 10px 14px;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: var(--turk-success);
+	background: var(--card);
+	border: 2px solid var(--foreground);
+	box-shadow: var(--pixel-box-shadow);
+	margin: var(--box-shadow-width);
+	padding: 10px 14px;
+	font-size: 0.55rem;
+	line-height: 1.6;
+	color: var(--success);
+	word-break: break-word;
 }
 
 .turk-message-loading {
-  opacity: 0.4;
-  transition: opacity 0.2s;
+	opacity: 0.4;
+	transition: opacity 0.2s;
 }
 
 .turk-message code {
-  background: var(--turk-btn);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 0.85em;
+	background: var(--muted);
+	padding: 1px 5px;
+	border-radius: 0;
+	font-size: 0.85em;
 }
 
 .turk-message strong {
-  color: #7ee787;
+	color: var(--success);
 }
 
-/* 스트리밍 / 도구 상태 */
-.turk-thinking {
-  color: var(--turk-text-dim);
-  font-style: italic;
-}
-
-.turk-tool {
-  color: #d29922;
-  font-family: monospace;
-  font-size: 0.85rem;
-}
-
-/* 사고 영역 (메시지 위, 2줄 클램프) */
+/* 사고 영역 */
 .turk-thinking-area {
-  background: var(--turk-surface);
-  border: 1px solid var(--turk-border);
-  border-radius: var(--turk-radius);
-  padding: 6px 12px;
-  cursor: pointer;
-  overflow: hidden;
-}
-
-.turk-thinking-area.expanded {
-  /* 클릭 시 펼치기는 JS에서 처리 */
+	background: var(--muted);
+	border: 2px solid var(--muted-foreground);
+	box-shadow: var(--pixel-box-shadow);
+	margin: var(--box-shadow-width);
+	padding: 6px 12px;
+	cursor: pointer;
+	overflow: hidden;
 }
 
 .turk-thinking-label {
-  font-size: 0.7rem;
-  color: var(--turk-text-dim);
-  display: block;
-  margin-bottom: 2px;
-  user-select: none;
+	font-size: 0.45rem;
+	color: var(--muted-foreground);
+	display: block;
+	margin-bottom: 4px;
+	user-select: none;
 }
 
 .turk-thinking-text {
-  font-size: 0.75rem;
-  line-height: 1.3;
-  color: var(--turk-text-dim);
-  font-style: italic;
-  white-space: pre-wrap;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  max-height: 2.6em;
+	font-size: 0.45rem;
+	line-height: 1.4;
+	color: var(--muted-foreground);
+	font-style: italic;
+	white-space: pre-wrap;
+	overflow: hidden;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	max-height: 2.8em;
 }
 
 .turk-thinking-area.expanded .turk-thinking-text {
-  -webkit-line-clamp: unset;
-  line-clamp: unset;
-  max-height: 200px;
-  overflow-y: auto;
+	-webkit-line-clamp: unset;
+	line-clamp: unset;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+.turk-thinking {
+	color: var(--muted-foreground);
+	font-style: italic;
+}
+
+.turk-tool {
+	color: var(--warning);
+	font-size: 0.5rem;
 }
 
 /* 버튼 그리드 */
 .turk-grid {
-  display: grid;
-  gap: 2px;
+	display: grid;
+	gap: 2px;
 }
 
-.turk-btn {
-  padding: 8px 4px;
-  border: 1px solid var(--turk-border);
-  border-radius: 4px;
-  background: var(--turk-btn);
-  color: var(--turk-text);
-  cursor: pointer;
-  font-size: 0.8rem;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: background 0.1s;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
+.turk-grid-btn {
+	padding: 8px 4px;
+	border: 2px solid var(--foreground);
+	background: var(--secondary);
+	color: var(--foreground);
+	cursor: pointer;
+	font-family: "Press Start 2P", monospace;
+	font-size: 0.45rem;
+	line-height: 1.3;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	transition: all 0.1s;
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
+	position: relative;
+	box-shadow: var(--pixel-box-shadow);
+	margin: var(--box-shadow-width);
 }
 
-.turk-btn:hover:not(:disabled) {
-  background: var(--turk-btn-hover);
+.turk-grid-btn:hover:not(:disabled) {
+	background: var(--accent);
 }
 
-.turk-btn:active:not(:disabled) {
-  background: var(--turk-btn-active);
-  border-color: var(--turk-accent);
+.turk-grid-btn:active:not(:disabled) {
+	transform: translateY(3px);
 }
 
-.turk-btn:disabled {
-  opacity: 1;
+.turk-grid-btn:disabled {
+	opacity: 1;
 }
 
-.turk-btn-empty {
-  opacity: 0.15;
-  cursor: default;
+.turk-grid-btn-empty {
+	opacity: 0.15;
+	cursor: default;
+	background: var(--muted);
 }
 
-/* 입력 */
-.turk-input {
-  display: flex;
-  gap: 8px;
-  margin-top: auto;
+/* 입력 폼 */
+.turk-input-form {
+	display: flex;
+	gap: 4px;
+	margin-top: auto;
 }
 
-.turk-input input {
-  flex: 1;
-  padding: 10px 14px;
-  border: 1px solid var(--turk-border);
-  border-radius: 20px;
-  background: var(--turk-surface);
-  color: var(--turk-text);
-  font-size: 0.9rem;
-  outline: none;
+.turk-input-field {
+	flex: 1;
+	padding: 8px 12px;
+	border: 2px solid var(--foreground);
+	background: var(--background);
+	color: var(--foreground);
+	font-family: "Press Start 2P", monospace;
+	font-size: 0.5rem;
+	outline: none;
+	box-shadow: var(--pixel-box-shadow);
+	margin: var(--box-shadow-width);
 }
 
-.turk-input input:focus {
-  border-color: var(--turk-accent);
+.turk-input-field:focus {
+	border-color: var(--success);
 }
 
-.turk-input button {
-  padding: 10px 18px;
-  border: none;
-  border-radius: 20px;
-  background: var(--turk-accent);
-  color: #fff;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 600;
+.turk-input-field::placeholder {
+	color: var(--muted-foreground);
 }
 
-.turk-input button:disabled {
-  opacity: 0.4;
-  cursor: default;
+.turk-submit-btn {
+	padding: 8px 16px;
+	border: 2px solid var(--foreground);
+	background: var(--success);
+	color: var(--success-foreground);
+	cursor: pointer;
+	font-family: "Press Start 2P", monospace;
+	font-size: 0.5rem;
+	box-shadow: var(--pixel-box-shadow);
+	margin: var(--box-shadow-width);
+	transition: all 0.1s;
+}
+
+.turk-submit-btn:active:not(:disabled) {
+	transform: translateY(3px);
+}
+
+.turk-submit-btn:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.turk-setup-btn {
+	padding: 4px 12px;
+	border: 2px solid var(--foreground);
+	background: var(--secondary);
+	color: var(--foreground);
+	cursor: pointer;
+	font-family: "Press Start 2P", monospace;
+	font-size: 0.5rem;
+	box-shadow: var(--pixel-box-shadow);
+	margin: var(--box-shadow-width);
+	transition: all 0.1s;
+}
+
+.turk-setup-btn:active:not(:disabled) {
+	transform: translateY(3px);
 }

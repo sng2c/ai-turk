@@ -126,6 +126,11 @@ npm run build      # 프로덕션 빌드 → dist/
 npm start          # 프로덕션: server.ts가 dist/ 서빙 + pi RPC + WebSocket (포트 3000)
 ```
 
+> **참고**: `npm run dev`는 HMR(Hot Module Replacement)을 지원하므로
+> 코드 수정 후 서버 재시작 없이 자동 반영됩니다.
+> 단, `vite.config.ts`나 `.env` 변경 시에만 Vite 서버가 재시작됩니다.
+> 빌드가 필요한 경우에만 `npm run build` 후 `npm start`를 사용하세요.
+
 ### 개발 vs 프로덕션
 
 | | 개발 (`npm run dev`) | 프로덕션 (`npm start`) |
