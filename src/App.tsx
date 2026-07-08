@@ -332,7 +332,7 @@ export default function App() {
 		<div className="turk-app">
 			<header className="turk-header">
 				<h1>🤖 AI Turk</h1>
-				<span className="turk-mode">{statusIcon} {statusText}{sessionId ? ` #${sessionId.slice(0, 8)}` : ""}</span>
+				<span className="turk-mode">{statusIcon} {statusText}{sessionId ? ` #${sessionId.slice(-8)}` : ""}</span>
 			</header>
 
 			<div className="turk-grid-setup">
