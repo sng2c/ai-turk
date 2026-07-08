@@ -36,7 +36,10 @@ const DEFAULT_COLS = 5;
 function systemPrompt(rows: number, cols: number): string {
 	const nb = rows * cols;
 	const ex = Array.from({ length: nb }, (_, i) => `"${i}": ""`).join(", ");
-	return `[중요 지시] 당신은 UI 컨트롤러입니다. 반드시 순수 JSON만 응답. 코드블록(\`\`\`) 금지.\n버튼 ${nb}개, ${rows}행×${cols}열 그리드. 키 "0"~"${nb - 1}".\n빈 버튼은 "". 관련 기능은 같은 행, 주요 버튼은 가운데, 라벨은 간결(이모지 가능).\nmessage는 최대 5줄 이내로 간결하게 작성.
+	return `[중요 지시] 당신은 UI 컨트롤러입니다. 반드시 순수 JSON만 응답. 코드블록(\`\`\`) 금지.
+버튼 ${nb}개, ${rows}행×${cols}열 그리드. 키 "0"~"${nb - 1}".
+빈 버튼은 "". 관련 기능은 같은 행, 주요 버튼은 가운데, 라벨은 간결(한글 4자, 영문 8자 이내).
+message는 최대 5줄 이내, 한 줄당 총 42자(한글 2자, 영문/숫자 1자 계산) 이내로 작성.
 형식: {"message":"마크다운 텍스트","buttons":{${ex}}}`;
 }
 
@@ -108,9 +111,9 @@ export default function App() {
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
-	const [thinkingText, setThinkingText] = useState("");
+	const [, setThinkingText] = useState("");
 	const [showThinking, setShowThinking] = useState(false);
-	const [thinkingExpanded, setThinkingExpanded] = useState(false);
+	const [, setThinkingExpanded] = useState(false);
 	const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null);
 
 	// 세션 초기화 추적
@@ -172,6 +175,7 @@ export default function App() {
 			case "pi_ready":
 				setPiReady(true);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
+				wsRef.current?.send(JSON.stringify({ type: "get_last_assistant_text" }));
 				break;
 			case "pi_starting":
 				setPiReady(false);
@@ -240,6 +244,14 @@ export default function App() {
 				break;
 
 			case "response":
+				if (msg.command === "new_session" && msg.success) {
+					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
+				}
+				if (msg.command === "get_last_assistant_text" && msg.success && msg.data?.text) {
+					const parsed = parseTurkJSON(msg.data.text);
+					if (parsed) setState(parsed);
+					sessionInitRef.current = true;
+				}
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
 					if (showSessionDetail.current) {
@@ -254,9 +266,6 @@ export default function App() {
 						].join("\n");
 						setState((s) => ({ message: info, buttons: s.buttons }));
 						showSessionDetail.current = false;
-					}
-					if (msg.command === "new_session" && msg.success) {
-						wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 					}
 				}
 				break;
@@ -328,8 +337,8 @@ export default function App() {
 		gridRows.push(row);
 	}
 
-	const statusIcon = !connected ? "🔴" : !piReady ? "🟡" : loading ? "⏳" : "🟢";
-	const statusText = !connected ? "연결 끊김" : !piReady ? "pi 시작중" : loading ? "생성중" : "준비";
+	const statusIcon = !connected ? "🔴" : !piReady ? "🟡" : showThinking ? "💭" : loading ? "⏳" : "🟢";
+	const statusText = !connected ? "연결 끊김" : !piReady ? "pi 시작중" : showThinking ? "사고중" : loading ? "생성중" : "준비";
 
 	return (
 		<div className="turk-app">
@@ -337,15 +346,6 @@ export default function App() {
 				<h1>🤖 AI Turk</h1>
 				<span className="turk-mode">{statusIcon} {statusText}{sessionId ? ` #${sessionId.slice(-8)}` : ""}</span>
 			</header>
-
-			{(showThinking || thinkingText) && (
-				<div className={`turk-thinking-area${thinkingExpanded ? " expanded" : ""}`} onClick={() => setThinkingExpanded(e => !e)}>
-					<span className="turk-thinking-label">💭 {showThinking ? "사고 중" : "사고 완료"}</span>
-					<div className="turk-thinking-text">
-						{thinkingText || "..."}
-					</div>
-				</div>
-			)}
 
 			<div className={`turk-message${loading ? " turk-message-loading" : ""}`}>
 				{loading && toolStatus ? (

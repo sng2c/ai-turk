@@ -77,7 +77,7 @@ body {
 .turk-app {
 	max-width: 480px;
 	margin: 0 auto;
-	padding: 12px 16px 16px;
+	padding: 8px 12px 12px;
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
@@ -109,13 +109,13 @@ body {
 	border: 2px solid var(--foreground);
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
-	padding: 12px 14px;
+	padding: 8px 10px;
 	font-size: var(--turk-font-size);
 	line-height: 1.8;
 	color: var(--success);
-	word-break: break-word;
+	word-break: break-all;
 	font-family: "NeoDunggeunmo", monospace;
-	height: calc(var(--turk-font-size) * 1.8 * 5 + 24px);
+	height: calc(var(--turk-font-size) * 1.8 * 5 + 16px);
 	overflow-y: auto;
 }
 
@@ -196,8 +196,8 @@ body {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	height: calc(var(--turk-font-size) * 1.8 * 2 + 16px);
-	padding: 8px 8px;
+	height: calc(var(--turk-font-size) * 1.8 * 2 + 12px);
+	padding: 6px 4px;
 	border: 2px solid var(--foreground);
 	background: var(--secondary);
 	color: var(--foreground);
@@ -205,9 +205,8 @@ body {
 	font-family: "NeoDunggeunmo", monospace;
 	font-size: var(--turk-font-size);
 	line-height: 1.2;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	white-space: normal;
+	word-break: break-all;
 	transition: all 0.1s;
 	user-select: none;
 	-webkit-tap-highlight-color: transparent;
