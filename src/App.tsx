@@ -122,6 +122,8 @@ export default function App() {
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const shouldReconnect = useRef(true);
 	const showSessionDetail = useRef(false);
+	const modelMode = useRef(false);
+	const availableModels = useRef<any[]>([]);
 	const reconnectDelay = useRef(1000);
 	const gridRef = useRef({ rows: DEFAULT_ROWS, cols: DEFAULT_COLS });
 	gridRef.current = { rows, cols };
@@ -268,6 +270,20 @@ export default function App() {
 						showSessionDetail.current = false;
 					}
 				}
+				if (msg.command === "get_available_models" && msg.success && msg.data?.models) {
+					availableModels.current = msg.data.models;
+					const models = msg.data.models;
+					const buttons: Record<string, string> = {};
+					models.forEach((m: any, i: number) => {
+						buttons[String(i)] = m.name || m.id || `model-${i}`;
+					});
+					// 남은 버튼은 빈칸
+					for (let i = models.length; i < DEFAULT_ROWS * DEFAULT_COLS; i++) {
+						buttons[String(i)] = "";
+					}
+					modelMode.current = true;
+					setState({ message: "모델을 선택하세요.", buttons });
+				}
 				break;
 
 			case "extension_ui_request":
@@ -320,6 +336,28 @@ export default function App() {
 				setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 				setThinkingText("");
 				setShowThinking(false);
+			}
+			return;
+		}
+		if (text === "/model") {
+			const ws = wsRef.current;
+			if (ws?.readyState === WebSocket.OPEN) {
+				ws.send(JSON.stringify({ type: "get_available_models" }));
+			}
+			return;
+		}
+		if (modelMode.current) {
+			const ws = wsRef.current;
+			const idx = parseInt(text);
+			const model = availableModels.current[idx];
+			if (model && ws?.readyState === WebSocket.OPEN) {
+				ws.send(JSON.stringify({
+					type: "set_model",
+					provider: model.provider,
+					modelId: model.id,
+				}));
+				modelMode.current = false;
+				setState({ message: `모델 변경: ${model.name || model.id}`, buttons: emptyState(DEFAULT_ROWS, DEFAULT_COLS).buttons });
 			}
 			return;
 		}
