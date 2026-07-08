@@ -30,6 +30,7 @@
 
 /* 다크 테마 (AI Turk 기본) */
 :root {
+	--turk-font-size: 0.8rem;
 	--radius: 0rem;
 	--background: oklch(0.17 0 0);
 	--foreground: oklch(0.985 0 0);
@@ -91,13 +92,13 @@ body {
 }
 
 .turk-header h1 {
-	font-size: 1.2rem;
+	font-size: var(--turk-font-size);
 	font-weight: 400;
 	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
 }
 
 .turk-mode {
-	font-size: 0.75rem;
+	font-size: var(--turk-font-size);
 	color: var(--muted-foreground);
 	font-family: "NeoDunggeunmo", monospace;
 }
@@ -115,7 +116,7 @@ body {
 	border: 2px solid var(--foreground);
 	background: var(--background);
 	color: var(--foreground);
-	font-size: 0.8rem;
+	font-size: var(--turk-font-size);
 	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
@@ -128,7 +129,7 @@ body {
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
 	padding: 12px 14px;
-	font-size: 1rem;
+	font-size: var(--turk-font-size);
 	line-height: 1.8;
 	color: var(--success);
 	word-break: break-word;
@@ -163,7 +164,7 @@ body {
 }
 
 .turk-thinking-label {
-	font-size: 0.7rem;
+	font-size: var(--turk-font-size);
 	color: var(--muted-foreground);
 	display: block;
 	margin-bottom: 4px;
@@ -171,7 +172,7 @@ body {
 }
 
 .turk-thinking-text {
-	font-size: 0.9rem;
+	font-size: var(--turk-font-size);
 	line-height: 1.6;
 	color: var(--muted-foreground);
 	font-style: italic;
@@ -199,7 +200,7 @@ body {
 
 .turk-tool {
 	color: var(--warning);
-	font-size: 0.75rem;
+	font-size: var(--turk-font-size);
 }
 
 /* 버튼 그리드 */
@@ -215,7 +216,7 @@ body {
 	color: var(--foreground);
 	cursor: pointer;
 	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
-	font-size: 0.7rem;
+	font-size: var(--turk-font-size);
 	line-height: 1.4;
 	white-space: nowrap;
 	overflow: hidden;
@@ -260,7 +261,7 @@ body {
 	background: var(--background);
 	color: var(--foreground);
 	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
-	font-size: 0.8rem;
+	font-size: var(--turk-font-size);
 	outline: none;
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
@@ -281,7 +282,7 @@ body {
 	color: var(--success-foreground);
 	cursor: pointer;
 	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
-	font-size: 0.8rem;
+	font-size: var(--turk-font-size);
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
 	transition: all 0.1s;
@@ -303,7 +304,7 @@ body {
 	color: var(--foreground);
 	cursor: pointer;
 	font-family: "Press Start 2P", "NeoDunggeunmo", monospace;
-	font-size: 0.8rem;
+	font-size: var(--turk-font-size);
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
 	transition: all 0.1s;
