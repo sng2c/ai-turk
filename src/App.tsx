@@ -32,11 +32,6 @@ interface ToolStatus {
 const DEFAULT_ROWS = 5;
 const DEFAULT_COLS = 5;
 
-function bestGrid(n: number): [number, number] {
-	let c = Math.max(1, Math.min(Math.round(Math.sqrt(n)), 10));
-	while (n % c && c > 1) c--;
-	return [Math.ceil(n / c), c];
-}
 
 function systemPrompt(rows: number, cols: number): string {
 	const nb = rows * cols;
@@ -99,12 +94,11 @@ function Md({ text }: { text: string }) {
 
 // ── 앱 ─────────────────────────────────────────────────────────────────
 export default function App() {
-	const [rows, setRows] = useState(DEFAULT_ROWS);
-	const [cols, setCols] = useState(DEFAULT_COLS);
+	const rows = DEFAULT_ROWS;
+	const cols = DEFAULT_COLS;
 	const [state, setState] = useState<TurkState>(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 	const [loading, setLoading] = useState(false);
 	const [input, setInput] = useState("");
-	const [totalInput, setTotalInput] = useState(DEFAULT_ROWS * DEFAULT_COLS);
 
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
@@ -298,25 +292,6 @@ export default function App() {
 		ws.send(JSON.stringify({ type: "prompt", message }));
 	}, [piReady]);
 
-	// ── 그리드 변경 (새 세션) ──────────────────────────────────────────
-	const handleGridChange = () => {
-		const [r, c] = bestGrid(totalInput);
-		setRows(r);
-		setCols(c);
-		setState(emptyState(r, c));
-		setStreamingText("");
-		setThinkingText("");
-		setToolStatus(null);
-		setShowThinking(false);
-
-		// pi에 새 세션 요청
-		const ws = wsRef.current;
-		if (ws?.readyState === WebSocket.OPEN) {
-			ws.send(JSON.stringify({ type: "new_session" }));
-		}
-		sessionInitRef.current = false;
-	};
-
 	const handleSend = (text: string) => {
 		setInput("");
 		if (text === "/session") {
@@ -361,20 +336,6 @@ export default function App() {
 				<h1>🤖 AI Turk</h1>
 				<span className="turk-mode">{statusIcon} {statusText}{sessionId ? ` #${sessionId.slice(-8)}` : ""}</span>
 			</header>
-
-			<div className="turk-grid-setup">
-				<label style={{ fontSize: "0.5rem" }}>
-					N:
-					<input
-						type="number"
-						min={1}
-						max={100}
-						value={totalInput}
-						onChange={(e) => setTotalInput(Number(e.target.value))}
-					/>
-				</label>
-				<button className="turk-setup-btn" onClick={handleGridChange}>변경</button>
-			</div>
 
 			{(showThinking || thinkingText) && (
 				<div className={`turk-thinking-area${thinkingExpanded ? " expanded" : ""}`} onClick={() => setThinkingExpanded(e => !e)}>
