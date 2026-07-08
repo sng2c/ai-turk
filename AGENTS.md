@@ -7,18 +7,27 @@ React + Vite + TypeScript 기반 AI UI 컨트롤러. 동적 버튼 그리드를 
 
 ## 기술 스택
 
-- **프론트엔드**: React 19 + TypeScript + Vite 8
+- **프론트엔드**: React 19 + TypeScript + Vite 8 + Tailwind v4 + Pixelact UI
+- **폰트**: Neo둥근모 (한글/영문 픽셀 폰트, jsDelivr CDN)
 - **백엔드**: Node.js + `ws` (WebSocket) + `pi --mode rpc` (JSONL 프로토콜)
 - **통신**: WebSocket (`/ws`) — 실시간 스트리밍 (`text_delta` 이벤트)
-- **설정**: `.env` (백엔드), `.env.local` (Vite 개발 서버)
+- **설정**: `.env` (포트, 모델)
+- **제어**: `turkctl` 스크립트 (서버 구동/제어)
 
 ## 아키텍처
 
 ```
-브라우저 (React) ←WebSocket→ 백엔드 서버 ←stdin/stdout→ pi --mode rpc
+브라우저 (React) ←WebSocket→ Vite 서버 ←stdin/stdout→ pi --mode rpc
                                    ↑
                             .env에서 모델/API 설정
 ```
+
+### 핵심: HMR 자동 반영
+
+`npm run dev`는 HMR(Hot Module Replacement)을 지원합니다.
+코드 수정 시 **서버 재시작 없이** 브라우저에 자동 반영됩니다.
+에이전트가 코드를 고치면 즉시 화면에 적용되므로, 빌드 없이 `turkctl start` 한 번으로 개발합니다.
+단, `vite.config.ts`나 `.env` 변경 시에만 Vite 서버가 재시작됩니다.
 
 ### pi RPC 프로토콜
 
@@ -27,59 +36,25 @@ React + Vite + TypeScript 기반 AI UI 컨트롤러. 동적 버튼 그리드를 
 - **스트리밍**: `text_delta` 이벤트로 실시간 텍스트 출력
 - **세션**: `--no-session` 모드 (프로세스 생명주기 = 세션)
 
-### 상태 관리 (React)
-
-- `state`: 현재 버튼 그리드 + 메시지 (`{message, buttons}`)
-- `streamingText`: `text_delta` 누적 (실시간 표시)
-- `toolStatus`: 도구 실행 상태 (`{name, args}`)
-- `sessionInitRef`: 시스템 지시 전송 여부 (첫 메시지에만 포함)
-- `connected`, `piReady`: WebSocket/pi 연결 상태
-
-### 시스템 지시
-
-- 세션 첫 메시지에만 시스템 지시 포함 (JSON 버튼 그리드 형식)
-- 이후 메시지는 사용자 입력만 전송 — pi가 컨텍스트 유지
-- 그리드 변경 시 `new_session`으로 리셋 → 다시 첫 메시지에 시스템 지시 포함
-
-## /start — 의존성 해결 + 서버 실행
+## /start — 서버 실행
 
 ```bash
 cd ~/ai-turk
-
-# 1. 의존성 설치
-npm install
-
-# 2. .env 없으면 생성
-if [ ! -f .env ]; then
-  cp .env.example .env
-  echo "⚠️ .env 생성됨 — 필요시 수정: nano .env"
-fi
-
-# 3. 기존 서버 중지
-pkill -f "vite" 2>/dev/null; pkill -f "tsx server.ts" 2>/dev/null; fuser -k 3000/tcp 2>/dev/null; sleep 1
-
-# 4. 개발 서버 실행 (Vite + pi RPC + WebSocket 통합)
-nohup npm run dev > /tmp/ai-turk.log 2>&1 &
-
-sleep 5
-if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3000/" | grep -q 200; then
-  echo "✅ 서버 실행됨: http://127.0.0.1:3000"
-  echo "   WebSocket: ws://127.0.0.1:3000/ws"
-  echo "   모드: Vite 개발 (HMR + pi RPC 통합)"
-else
-  echo "❌ 서버 시작 실패 — /doctor 로 확인"
-  cat /tmp/ai-turk.log
-fi
+npm install 2>/dev/null
+[ -f .env ] || cp .env.example .env
+turkctl start
 ```
 
 ## /stop — 서버 중지
 
 ```bash
-pkill -f "vite" 2>/dev/null
-pkill -f "tsx server.ts" 2>/dev/null
-pkill -f "pi --mode rpc" 2>/dev/null
-fuser -k 3000/tcp 2>/dev/null
-echo "✅ 서버 중지됨"
+turkctl stop
+```
+
+## /restart — 서버 재시작
+
+```bash
+turkctl restart
 ```
 
 ## /doctor — 상태 진단
@@ -87,27 +62,30 @@ echo "✅ 서버 중지됨"
 ```bash
 cd ~/ai-turk
 
-# Node 버전
+# 기본 상태
+turkctl status
+
+# pi 프로세스
+turkctl pi
+
+# WebSocket 연결 테스트
+turkctl ws
+
+# 세션 정보
+turkctl session
+
+# 환경 확인
 node --version
-
-# pi 버전
 pi --version 2>/dev/null || echo "❌ pi 미설치"
-
-# 의존성
 [ -d node_modules ] && echo "✅ node_modules 존재" || echo "❌ npm install 필요"
-
-# .env
-[ -f .env ] && echo "✅ .env 존재" || echo "❌ .env 없음 — cp .env.example .env"
-
-# TypeScript 컴파일
+[ -f .env ] && echo "✅ .env 존재" || echo "❌ .env 없음"
 npx tsc -b --noEmit 2>&1 | tail -3
+```
 
-# 서버 상태 (개발 모드: npm run dev)
-if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/ 2>/dev/null | grep -q 200; then
-  echo "✅ 개발 서버 실행 중 (포트 3000)"
-else
-  echo "⚪ 서버 미실행 — /start 로 시작"
-fi
+## /logs — 실시간 로그
+
+```bash
+turkctl logs
 ```
 
 ## 코딩 규칙
@@ -116,36 +94,32 @@ fi
 - 프론트엔드: `src/App.tsx` (단일 컴포넌트), `src/App.css`
 - 백엔드: `server.ts` (Express 없이 Node.js 내장 http + ws)
 - WebSocket 프로토콜: pi 이벤트를 그대로 브로드캐스트, 클라이언트 명령을 pi stdin에 전달
-- `.env` 변경 후 백엔드 재시작 필요
+- **코드 수정 후 재시작 불필요** — HMR로 자동 반영
+- `vite.config.ts`나 `.env` 변경 시에만 `turkctl restart` 필요
 
-## 실행 명령
+## turkctl 명령어
 
-```bash
-npm run dev        # 개발: Vite + pi RPC + WebSocket (단일 프로세스, 포트 3000)
-npm run build      # 프로덕션 빌드 → dist/
-npm start          # 프로덕션: server.ts가 dist/ 서빙 + pi RPC + WebSocket (포트 3000)
+```
+turkctl start     # 개발 서버 시작 (npm run dev, 백그라운드, HMR)
+turkctl stop      # 서버 및 pi 프로세스 종료
+turkctl restart   # 서버 재시작
+turkctl status    # 실행 상태 + 헬스체크
+turkctl logs      # 실시간 로그 (tail -f)
+turkctl session    # 현재 세션 정보 조회
+turkctl ws        # WebSocket 연결 테스트
+turkctl pi        # pi RPC 프로세스 상태
+turkctl build     # 프로덕션 빌드 → dist/
 ```
 
-> **참고**: `npm run dev`는 HMR(Hot Module Replacement)을 지원하므로
-> 코드 수정 후 서버 재시작 없이 자동 반영됩니다.
-> 단, `vite.config.ts`나 `.env` 변경 시에만 Vite 서버가 재시작됩니다.
-> 빌드가 필요한 경우에만 `npm run build` 후 `npm start`를 사용하세요.
-
-### 개발 vs 프로덕션
-
-| | 개발 (`npm run dev`) | 프로덕션 (`npm start`) |
-|---|---|---|
-| **프론트엔드** | Vite HMR (소스 코드) | dist/ 정적 파일 |
-| **pi RPC** | Vite 플러그인 (`vite.config.ts`) | `server.ts` |
-| **WebSocket** | Vite HTTP 서버 `/ws` | Node HTTP 서버 `/ws` |
-| **포트** | 3000 | 3000 (또는 `PORT` 환경변수) |
+> **원칙**: 항상 `turkctl`로 구동 제어. 직접 `npm run dev`나 `pkill` 사용 금지.
 
 ## 트러블슈팅
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| `🔴 연결 끊김` | 서버 미실행 | `npm run dev` (개발) 또는 `npm start` (프로덕션) |
-| `🟡 pi 시작중` | pi 프로세스 시작 대기 | 몇 초 대기, 안 되면 `/doctor` |
+| `🔴 연결 끊김` | 서버 미실행 | `turkctl start` |
+| `🟡 pi 시작중` | pi 프로세스 시작 대기 | 몇 초 대기, 안 되면 `turkctl pi` |
 | `[파싱실패]` | 모델이 JSON 외 텍스트 출력 | 시스템 프롬프트 수정 또는 `--no-tools` |
-| `EADDRINUSE` | 포트 충돌 | `fuser -k 3000/tcp` 후 재시작 |
+| `EADDRINUSE` | 포트 충돌 | `turkctl restart` |
 | 빌드 실패 | TypeScript 에러 | `npx tsc -b --noEmit` |
+| CSS 미반영 | HMR 캐시 꼬임 | `turkctl restart` |
