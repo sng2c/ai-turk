@@ -93,8 +93,8 @@ export default function App() {
 	const [connected, setConnected] = useState(false);
 	const [piReady, setPiReady] = useState(false);
 
-	// 스트리밍 상태
-	const [streamingText, setStreamingText] = useState("");
+	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
+	const [, setStreamingText] = useState("");
 	const [thinkingText, setThinkingText] = useState("");
 	const [showThinking, setShowThinking] = useState(false);
 	const [thinkingExpanded, setThinkingExpanded] = useState(false);
@@ -311,12 +311,10 @@ export default function App() {
 			)}
 
 			<div className="turk-message">
-				{loading && streamingText ? (
-					<Md text={streamingText} />
-				) : loading && toolStatus ? (
+				{loading && toolStatus ? (
 					<span className="turk-tool">🔧 {toolStatus.name}: {toolStatus.args}</span>
 				) : loading ? (
-					<span className="turk-thinking">💭 생각 중...</span>
+					<span className="turk-thinking">✨ 생성 중...</span>
 				) : (
 					<Md text={state.message} />
 				)}
