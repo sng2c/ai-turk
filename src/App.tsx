@@ -139,6 +139,13 @@ export default function App() {
 	const currentModelRef = useRef("");
 	currentModelRef.current = currentModel;
 
+	// 씽킹 레벨 (기본 off) — off → L → M → H → X → off 사이클
+	const [thinkingLevel, setThinkingLevel] = useState<string>("off");
+	const thinkingLevelRef = useRef("off");
+	thinkingLevelRef.current = thinkingLevel;
+	const THINKING_CYCLE = ["off", "low", "medium", "high", "xhigh"] as const;
+	const THINKING_LABEL: Record<string, string> = { off: "", low: "1", medium: "2", high: "3", xhigh: "4" };
+
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
 	const [, setThinkingText] = useState("");
@@ -290,6 +297,7 @@ export default function App() {
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
 					if (msg.data.model) setCurrentModel(msg.data.model.name || msg.data.model.id || "");
+					if (msg.data.thinkingLevel !== undefined) setThinkingLevel(msg.data.thinkingLevel);
 					if (showSessionDetail.current) {
 						const d = msg.data;
 						const info = [
@@ -304,8 +312,15 @@ export default function App() {
 						showSessionDetail.current = false;
 					}
 				}
+				if (msg.command === "set_model" && msg.success) {
+					// 모델 변경 후 헤더 모델명 갱신
+					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
+				}
+				if (msg.command === "set_thinking_level" && msg.success) {
+					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
+				}
 				if (msg.command === "get_available_models" && msg.success && msg.data?.models) {
-					availableModels.current = msg.data.models;
+						availableModels.current = msg.data.models;
 					modelPage.current = 0;
 					renderModelGrid();
 				}
@@ -436,11 +451,25 @@ export default function App() {
 	const statusIcon = !connected ? "🔴" : !piReady ? "🟡" : showThinking ? "💭" : loading ? "⏳" : "🟢";
 	const statusText = !connected ? "연결 끊김" : !piReady ? "pi 시작중" : showThinking ? "사고중" : loading ? "생성중" : "준비";
 
+	const toggleThinking = () => {
+		const ws = wsRef.current;
+		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
+		const cur = thinkingLevelRef.current;
+		const idx = THINKING_CYCLE.indexOf(cur as typeof THINKING_CYCLE[number]);
+		const next = THINKING_CYCLE[(idx + 1) % THINKING_CYCLE.length];
+		ws.send(JSON.stringify({ type: "set_thinking_level", level: next }));
+		setThinkingLevel(next);
+	};
+
 	return (
 		<div className="turk-app">
 			<header className="turk-header">
 				<h1>🤖 AI Turk</h1>
-				<span className="turk-mode">{statusIcon} {statusText} <button className="turk-model-btn" onClick={() => {
+				<span className="turk-mode">
+				<button className="turk-thinking-btn" onClick={toggleThinking} title={`씽킹 레벨: ${thinkingLevel} (클릭하여 토글)`}>
+					{statusIcon} {statusText}{THINKING_LABEL[thinkingLevel] ? ` ✦${THINKING_LABEL[thinkingLevel]}` : ""}
+				</button>
+				<button className="turk-model-btn" onClick={() => {
 					if (modelMode.current) {
 						modelMode.current = false;
 						setState(emptyState(gridRef.current.rows, gridRef.current.cols));
