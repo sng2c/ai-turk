@@ -105,19 +105,54 @@ body {
 }
 
 /* 메시지 영역 */
+.turk-message-wrap {
+	position: relative;
+	margin: var(--box-shadow-width);
+}
+
 .turk-message {
 	background: var(--card);
 	border: 2px solid var(--foreground);
 	box-shadow: var(--pixel-box-shadow);
-	margin: var(--box-shadow-width);
 	padding: 8px 10px;
 	font-size: var(--turk-font-size);
 	line-height: 1.8;
 	color: var(--success);
 	word-break: break-all;
 	font-family: "NeoDunggeunmo", monospace;
-	height: calc(var(--turk-font-size) * 1.8 * 5 + 16px);
+	height: calc(var(--turk-font-size) * 1.8 * 5 + 22px);
 	overflow-y: auto;
+}
+
+.turk-scroll-arrow {
+	position: absolute;
+	right: 4px;
+	background: var(--card);
+	border: 2px solid var(--foreground);
+	box-shadow: var(--pixel-box-shadow);
+	color: var(--foreground);
+	font-size: var(--turk-font-size);
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	line-height: 1;
+	cursor: pointer;
+	z-index: 5;
+	opacity: 0.85;
+	transition: opacity 0.15s, transform 0.15s;
+}
+
+.turk-scroll-arrow:hover {
+	opacity: 1;
+	transform: scale(1.1);
+}
+
+.turk-scroll-up {
+	top: 2px;
+}
+
+.turk-scroll-down {
+	bottom: 2px;
 }
 
 .turk-message-loading {
