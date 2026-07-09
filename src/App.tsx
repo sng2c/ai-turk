@@ -209,6 +209,7 @@ export default function App() {
 
 			case "agent_end":
 				setLoading(false);
+				setInput("");
 				setToolStatus(null);
 				setShowThinking(false);
 				setThinkingText("");
@@ -337,7 +338,7 @@ export default function App() {
 	}, [piReady]);
 
 	const handleSend = (text: string) => {
-		setInput("");
+		setInput(text);
 		if (text === "/session") {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {

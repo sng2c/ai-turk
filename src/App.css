@@ -295,6 +295,11 @@ body {
 	border-color: var(--success);
 }
 
+.turk-input-field:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
 .turk-input-field::placeholder {
 	color: var(--muted-foreground);
 }
