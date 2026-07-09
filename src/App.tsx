@@ -21,6 +21,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
 interface TurkState {
 	message: string;
 	buttons: Record<string, string>;
+	colors?: Record<string, string>;
+	textColors?: Record<string, string>;
 }
 
 interface ToolStatus {
@@ -40,7 +42,9 @@ function systemPrompt(rows: number, cols: number): string {
 버튼 ${nb}개, ${rows}행×${cols}열 그리드. 키 "0"~"${nb - 1}".
 빈 버튼은 "". 관련 기능은 같은 행, 주요 버튼은 가운데, 라벨은 간결(한글 4자, 영문 8자 이내).
 message는 최대 5줄 이내, 한 줄당 총 42자(한글 2자, 영문/숫자 1자 계산) 이내로 작성.
-형식: {"message":"마크다운 텍스트","buttons":{${ex}}}`;
+색상 지원: colors (배경: success/warning/destructive/primary/secondary), textColors (글자: white/black/success/warning/destructive).
+글자 없는 색 버튼: textColors를 colors와 같게 설정하면 글자가 안 보임 (클릭 시 라벨 전송).
+형식: {"message":"마크다운 텍스트","buttons":{${ex}},"colors":{},"textColors":{}}`;
 }
 
 function emptyState(rows: number, cols: number): TurkState {
@@ -451,7 +455,7 @@ export default function App() {
 					label ? (
 						<button
 							key={idx}
-							className="turk-grid-btn"
+							className={`turk-grid-btn${state.colors?.[idx] ? ` turk-bg-${state.colors[idx]}` : ""}${state.textColors?.[idx] ? ` turk-fg-${state.textColors[idx]}` : ""}`}
 							disabled={loading || !piReady}
 							onClick={() => handleSend(label)}
 						>
