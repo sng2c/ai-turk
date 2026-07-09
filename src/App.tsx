@@ -469,6 +469,11 @@ export default function App() {
 					e.preventDefault();
 					if (input.trim() && !loading && piReady) handleSend(input.trim());
 				}}
+				onKeyDown={(e) => {
+					if (e.key === "Escape" && loading) {
+						wsRef.current?.send(JSON.stringify({ type: "abort" }));
+					}
+				}}
 			>
 				<input
 					className="turk-input-field"
@@ -478,8 +483,15 @@ export default function App() {
 					disabled={loading || !piReady}
 					autoFocus
 				/>
-				<button type="submit" className="turk-submit-btn" disabled={loading || !input.trim() || !piReady}>
-					전송
+				<button
+					type={loading ? "button" : "submit"}
+					className="turk-submit-btn"
+					disabled={!loading && (!input.trim() || !piReady)}
+					onClick={loading ? () => {
+						wsRef.current?.send(JSON.stringify({ type: "abort" }));
+					} : undefined}
+				>
+					{loading ? "취소" : "전송"}
 				</button>
 			</form>
 		</div>
