@@ -415,6 +415,7 @@ export default function App() {
 				<span className="turk-mode">{statusIcon} {statusText} <button className="turk-model-btn" onClick={() => {
 					if (modelMode.current) {
 						modelMode.current = false;
+						setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 						const ws2 = wsRef.current;
 						if (ws2?.readyState === WebSocket.OPEN) {
 							ws2.send(JSON.stringify({ type: "get_last_assistant_text" }));
