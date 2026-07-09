@@ -48,6 +48,13 @@ body {
 	gap: 4px;
 }
 
+.turk-status {
+	font-size: var(--turk-font-size);
+	color: var(--muted-foreground);
+	font-family: "NeoDunggeunmo", monospace;
+	line-height: 1;
+}
+
 .turk-thinking-btn {
 	background: none;
 	border: none;

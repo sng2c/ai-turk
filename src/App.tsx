@@ -139,12 +139,14 @@ export default function App() {
 	const currentModelRef = useRef("");
 	currentModelRef.current = currentModel;
 
-	// 씽킹 레벨 (기본 off) — off → L → M → H → X → off 사이클
+	// 씽킹 레벨 (기본 off) — 모델이 지원하는 레벨만 순환 (cycle_thinking_level)
 	const [thinkingLevel, setThinkingLevel] = useState<string>("off");
 	const thinkingLevelRef = useRef("off");
 	thinkingLevelRef.current = thinkingLevel;
-	const THINKING_CYCLE = ["off", "low", "medium", "high", "xhigh"] as const;
-	const THINKING_LABEL: Record<string, string> = { off: "", low: "1", medium: "2", high: "3", xhigh: "4" };
+	// OFF 순환 감지용: 첫 켜진 레벨(firstLevel)에 다시 도달하면 OFF로
+	const firstThinkingLevelRef = useRef<string | null>(null);
+	const thinkingCycleHitsRef = useRef(0);
+	const THINKING_LABEL: Record<string, string> = { off: "OFF", low: "LOW", medium: "MEDIUM", high: "HIGH", xhigh: "XHIGH" };
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
@@ -297,7 +299,13 @@ export default function App() {
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
 					if (msg.data.model) setCurrentModel(msg.data.model.name || msg.data.model.id || "");
-					if (msg.data.thinkingLevel !== undefined) setThinkingLevel(msg.data.thinkingLevel);
+					if (msg.data.thinkingLevel !== undefined) {
+					setThinkingLevel(msg.data.thinkingLevel);
+					if (msg.data.thinkingLevel === "off") {
+						firstThinkingLevelRef.current = null;
+						thinkingCycleHitsRef.current = 0;
+					}
+				}
 					if (showSessionDetail.current) {
 						const d = msg.data;
 						const info = [
@@ -318,6 +326,22 @@ export default function App() {
 				}
 				if (msg.command === "set_thinking_level" && msg.success) {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
+				}
+				if (msg.command === "cycle_thinking_level" && msg.success) {
+					const level = msg.data?.level ?? "off";
+					if (level === "off") {
+						setThinkingLevel("off");
+						firstThinkingLevelRef.current = null;
+						thinkingCycleHitsRef.current = 0;
+					} else {
+						if (firstThinkingLevelRef.current === null) {
+							firstThinkingLevelRef.current = level;
+							thinkingCycleHitsRef.current = 1;
+						} else if (firstThinkingLevelRef.current === level) {
+							thinkingCycleHitsRef.current++;
+						}
+						setThinkingLevel(level);
+					}
 				}
 				if (msg.command === "get_available_models" && msg.success && msg.data?.models) {
 						availableModels.current = msg.data.models;
@@ -451,14 +475,19 @@ export default function App() {
 	const statusIcon = !connected ? "🔴" : !piReady ? "🟡" : showThinking ? "💭" : loading ? "⏳" : "🟢";
 	const statusText = !connected ? "연결 끊김" : !piReady ? "pi 시작중" : showThinking ? "사고중" : loading ? "생성중" : "준비";
 
-	const toggleThinking = () => {
+	const cycleThinking = () => {
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
 		const cur = thinkingLevelRef.current;
-		const idx = THINKING_CYCLE.indexOf(cur as typeof THINKING_CYCLE[number]);
-		const next = THINKING_CYCLE[(idx + 1) % THINKING_CYCLE.length];
-		ws.send(JSON.stringify({ type: "set_thinking_level", level: next }));
-		setThinkingLevel(next);
+		// 켜져 있고 시작 레벨에 다시 도달(한 바퀴)했으면 OFF로
+		if (cur !== "off" && firstThinkingLevelRef.current === cur && thinkingCycleHitsRef.current >= 2) {
+			ws.send(JSON.stringify({ type: "set_thinking_level", level: "off" }));
+			setThinkingLevel("off");
+			firstThinkingLevelRef.current = null;
+			thinkingCycleHitsRef.current = 0;
+			return;
+		}
+		ws.send(JSON.stringify({ type: "cycle_thinking_level" }));
 	};
 
 	return (
@@ -466,8 +495,9 @@ export default function App() {
 			<header className="turk-header">
 				<h1>🤖 AI Turk</h1>
 				<span className="turk-mode">
-				<button className="turk-thinking-btn" onClick={toggleThinking} title={`씽킹 레벨: ${thinkingLevel} (클릭하여 토글)`}>
-					{statusIcon} {statusText}{THINKING_LABEL[thinkingLevel] ? ` ✦${THINKING_LABEL[thinkingLevel]}` : ""}
+				<span className="turk-status">{statusIcon} {statusText}</span>
+				<button className="turk-thinking-btn" onClick={cycleThinking} title={`씽킹 레벨 순환: ${thinkingLevel}`}>
+					✦{THINKING_LABEL[thinkingLevel]}
 				</button>
 				<button className="turk-model-btn" onClick={() => {
 					if (modelMode.current) {
