@@ -342,7 +342,6 @@ export default function App() {
 	}, [piReady]);
 
 	const handleSend = (text: string) => {
-		setInput(text);
 		if (text === "/session") {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
@@ -396,6 +395,7 @@ export default function App() {
 			}
 			return;
 		}
+		setInput(text);
 		sendPrompt(text);
 	};
 
