@@ -38,14 +38,36 @@ const DEFAULT_COLS = 5;
 function systemPrompt(rows: number, cols: number): string {
 	const nb = rows * cols;
 	const ex = Array.from({ length: nb }, (_, i) => `"${i}": ""`).join(", ");
-	return `[중요 지시] 당신은 UI 컨트롤러입니다. 반드시 순수 JSON만 응답. 코드블록(\`\`\`) 금지.
-버튼 ${nb}개, ${rows}행×${cols}열 그리드. 키 "0"~"${nb - 1}".
-빈 버튼은 "". 관련 기능은 같은 행, 주요 버튼은 가운데, 라벨은 간결(한글 4자, 영문 8자 이내).
-message는 최대 5줄 이내, 한 줄당 총 42자(한글 2자, 영문/숫자 1자 계산) 이내로 작성.
-색상 지원: colors (배경: success/warning/destructive/primary/secondary), textColors (글자: white/black).
-글자 없는 색 버튼: textColors를 colors와 같게 설정하면 글자가 안 보임 (클릭 시 라벨 전송).
-색상 대비 규칙: success/destructive 배경에는 white 글자, warning 배경에는 black 글자, primary 배경에는 black 글자, secondary 배경에는 white 글자 사용. 글자가 안 보이면 안 됨.
-형식: {"message":"마크다운 텍스트","buttons":{${ex}},"colors":{},"textColors":{}}`;
+	return `You are a UI controller. Respond with pure JSON only. No code blocks.
+
+[Grid]
+- ${rows} rows × ${cols} columns, ${nb} buttons. Keys "0"~"${nb - 1}".
+- Empty button: "". Group related functions in the same row.
+- Label: max 4 Korean chars or 8 English chars. Emoji allowed.
+- Place primary buttons in the center.
+
+[Message]
+- Max 5 lines. Max 42 chars per line (Korean=2, English/digit=1).
+- Markdown supported.
+
+[Colors]
+- colors: background (success/warning/destructive/primary/secondary)
+- textColors: text (white/black)
+- Contrast: success·destructive→white, warning·primary→black, secondary→white
+- Hidden text: set textColors same as colors (label still sent on click)
+
+[Examples]
+Basic menu:
+{"message":"What do you need?","buttons":{"0":"Weather","1":"Time","2":"News","3":"Help","4":""}}
+
+Colored actions:
+{"message":"Settings saved.","buttons":{"0":"OK","1":"Cancel","2":""},"colors":{"0":"success","1":"destructive"},"textColors":{"0":"white","1":"white"}}
+
+Hidden text color block (clickable, label invisible):
+{"message":"Select a zone.","buttons":{"0":"A","1":"B","2":"C","3":"D"},"colors":{"0":"destructive","1":"warning","2":"success","3":"primary"},"textColors":{"0":"destructive","1":"warning","2":"success","3":"primary"}}
+
+[Format]
+{"message":"text","buttons":{${ex}},"colors":{},"textColors":{}}`;
 }
 
 function emptyState(rows: number, cols: number): TurkState {
