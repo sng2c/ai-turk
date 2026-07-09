@@ -157,6 +157,20 @@ export default function App() {
 
 	// 세션 초기화 추적
 	const sessionInitRef = useRef(false);
+
+	// 메시지 박스 스크롤 — 출력 업데이트 시 맨 위로, 스크롤 포지션에 따라 화살표 표시
+	const messageRef = useRef<HTMLDivElement | null>(null);
+	const dragState = useRef<{ active: boolean; moved: boolean; lastY: number; velocity: number; lastTime: number }>({ active: false, moved: false, lastY: 0, velocity: 0, lastTime: 0 });
+	const inertiaRef = useRef<number | null>(null);
+	const [canScrollUp, setCanScrollUp] = useState(false);
+	const [canScrollDown, setCanScrollDown] = useState(false);
+
+	const updateScrollArrows = useCallback(() => {
+		const el = messageRef.current;
+		if (!el) return;
+		setCanScrollUp(el.scrollTop > 2);
+		setCanScrollDown(el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+	}, []);
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const shouldReconnect = useRef(true);
@@ -367,6 +381,84 @@ export default function App() {
 	// ref 동기화 — 항상 최신 handleEvent 유지
 	handleEventRef.current = handleEvent;
 
+	// 출력 업데이트 시 스크롤 맨 위로 초기화 + 화살표 갱신
+	useEffect(() => {
+		const el = messageRef.current;
+		if (el) {
+			el.scrollTop = 0;
+			// DOM 갱신 후 화살표 여부 계산
+			requestAnimationFrame(updateScrollArrows);
+		}
+	}, [state.message, loading, updateScrollArrows]);
+
+	// 화면 아무데나 위/아래 드래그 → 출력창 스크롤 + 플릭 시 관성 (입력창/메시지박스 내부는 제외)
+	useEffect(() => {
+		const startInertia = () => {
+			const decay = () => {
+				const el = messageRef.current;
+				if (!el) { inertiaRef.current = null; return; }
+				// velocity 단위: px/ms, 16ms 프레임당 이동
+				el.scrollTop += dragState.current.velocity * 16;
+				dragState.current.velocity *= 0.92; // 프레임당 감쇠
+				updateScrollArrows();
+				if (Math.abs(dragState.current.velocity) < 0.02) { inertiaRef.current = null; return; }
+				inertiaRef.current = requestAnimationFrame(decay);
+			};
+			inertiaRef.current = requestAnimationFrame(decay);
+		};
+		const onTouchStart = (e: TouchEvent) => {
+			const t = e.target as HTMLElement;
+			if (t.closest("input, textarea, .turk-message")) return;
+			// 새 터치 시 기존 관성 취소
+			if (inertiaRef.current !== null) { cancelAnimationFrame(inertiaRef.current); inertiaRef.current = null; }
+			const now = performance.now();
+			dragState.current = { active: true, moved: false, lastY: e.touches[0]?.clientY ?? 0, velocity: 0, lastTime: now };
+		};
+		const onTouchMove = (e: TouchEvent) => {
+			if (!dragState.current.active) return;
+			const y = e.touches[0]?.clientY ?? 0;
+			const dy = dragState.current.lastY - y;
+			// 드래그 시작 감지: 일정 거리 이상 이동 시 스크롤 모드 진입 (짧은 탭은 클릭 유지)
+			if (!dragState.current.moved && Math.abs(dy) < 8) return;
+			dragState.current.moved = true;
+			const el = messageRef.current;
+			if (el) {
+				el.scrollTop += dy;
+				const now = performance.now();
+				const dt = now - dragState.current.lastTime;
+				if (dt > 0) {
+					// 순간 속도(px/ms) — 이동평균으로 부드럽게
+					const inst = dy / dt;
+					dragState.current.velocity = dragState.current.velocity * 0.6 + inst * 0.4;
+				}
+				dragState.current.lastY = y;
+				dragState.current.lastTime = now;
+				updateScrollArrows();
+			}
+			e.preventDefault();
+		};
+		const onTouchEnd = (e: TouchEvent) => {
+			if (dragState.current.moved) {
+				e.preventDefault(); // 클릭 차단
+				// 충분한 속도면 관성 스크롤 시작
+				if (Math.abs(dragState.current.velocity) > 0.05) startInertia();
+			}
+			dragState.current.active = false;
+			dragState.current.moved = false;
+		};
+		window.addEventListener("touchstart", onTouchStart, { passive: true });
+		window.addEventListener("touchmove", onTouchMove, { passive: false });
+		window.addEventListener("touchend", onTouchEnd, { passive: false });
+		window.addEventListener("touchcancel", onTouchEnd, { passive: true });
+		return () => {
+			window.removeEventListener("touchstart", onTouchStart);
+			window.removeEventListener("touchmove", onTouchMove);
+			window.removeEventListener("touchend", onTouchEnd);
+			window.removeEventListener("touchcancel", onTouchEnd);
+			if (inertiaRef.current !== null) cancelAnimationFrame(inertiaRef.current);
+		};
+	}, [updateScrollArrows]);
+
 	// ── 모델 그리드 렌더 ───────────────────────────────────────────────
 	const renderModelGrid = () => {
 		const models = availableModels.current;
@@ -526,12 +618,24 @@ export default function App() {
 			}} title="새 세션">↻</button></span>
 			</header>
 
-			<div className={`turk-message${loading ? " turk-message-loading" : ""}`}>
-				{loading && toolStatus ? (
-					<span className="turk-tool">🔧 {toolStatus.name}: {toolStatus.args}</span>
-				) : (
-					<Md text={state.message} />
+			<div className="turk-message-wrap">
+				{canScrollUp && (
+					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로">↑</button>
 				)}
+				{canScrollDown && (
+					<button className="turk-scroll-arrow turk-scroll-down" onClick={() => messageRef.current?.scrollTo({ top: messageRef.current.scrollHeight, behavior: "smooth" })} title="맨 아래로">↓</button>
+				)}
+				<div
+					ref={messageRef}
+					className={`turk-message${loading ? " turk-message-loading" : ""}`}
+					onScroll={updateScrollArrows}
+				>
+					{loading && toolStatus ? (
+						<span className="turk-tool">🔧 {toolStatus.name}: {toolStatus.args}</span>
+					) : (
+						<Md text={state.message} />
+					)}
+				</div>
 			</div>
 
 			<div className="turk-grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
