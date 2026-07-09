@@ -162,6 +162,8 @@ export default function App() {
 	const shouldReconnect = useRef(true);
 	const showSessionDetail = useRef(false);
 	const modelMode = useRef(false);
+	// 모델 선택 진입 전 UI 상태(이전 메시지/버튼) 저장용
+	const prevStateRef = useRef<TurkState | null>(null);
 	const availableModels = useRef<any[]>([]);
 	const modelPage = useRef(0);
 	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 2; // 23 (나머지 2칸은 이전/다음)
@@ -426,6 +428,7 @@ export default function App() {
 		if (text === "/model") {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
+				prevStateRef.current = state;
 				ws.send(JSON.stringify({ type: "get_available_models" }));
 			}
 			return;
@@ -453,7 +456,8 @@ export default function App() {
 					modelId: model.id,
 				}));
 				modelMode.current = false;
-				setState({ message: `모델 변경: ${model.provider}/${model.name || model.id}`, buttons: emptyState(DEFAULT_ROWS, DEFAULT_COLS).buttons });
+				setState(prevStateRef.current ?? emptyState(DEFAULT_ROWS, DEFAULT_COLS));
+				prevStateRef.current = null;
 			}
 			return;
 		}
@@ -502,15 +506,13 @@ export default function App() {
 				<button className="turk-model-btn" onClick={() => {
 					if (modelMode.current) {
 						modelMode.current = false;
-						setState(emptyState(gridRef.current.rows, gridRef.current.cols));
-						const ws2 = wsRef.current;
-						if (ws2?.readyState === WebSocket.OPEN) {
-							ws2.send(JSON.stringify({ type: "get_last_assistant_text" }));
-						}
+						setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
+						prevStateRef.current = null;
 						return;
 					}
 					const ws = wsRef.current;
 					if (ws?.readyState === WebSocket.OPEN) {
+						prevStateRef.current = state;
 						ws.send(JSON.stringify({ type: "get_available_models" }));
 					}
 				}} title="모델 선택">{currentModel || "모델 선택"}</button> <button className="turk-new-btn" onClick={() => {
