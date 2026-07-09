@@ -213,6 +213,20 @@ body {
 	background: var(--muted);
 }
 
+/* 버튼 배경색 */
+.turk-bg-success { background: var(--success) !important; }
+.turk-bg-warning { background: var(--warning) !important; }
+.turk-bg-destructive { background: var(--destructive) !important; }
+.turk-bg-primary { background: var(--primary) !important; }
+.turk-bg-secondary { background: var(--secondary) !important; }
+
+/* 버튼 글자색 */
+.turk-fg-white { color: #fff !important; }
+.turk-fg-black { color: #000 !important; }
+.turk-fg-success { color: var(--success) !important; }
+.turk-fg-warning { color: var(--warning) !important; }
+.turk-fg-destructive { color: var(--destructive) !important; }
+
 /* 입력 폼 */
 .turk-input-form {
 	display: flex;
