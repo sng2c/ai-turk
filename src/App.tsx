@@ -42,8 +42,9 @@ function systemPrompt(rows: number, cols: number): string {
 버튼 ${nb}개, ${rows}행×${cols}열 그리드. 키 "0"~"${nb - 1}".
 빈 버튼은 "". 관련 기능은 같은 행, 주요 버튼은 가운데, 라벨은 간결(한글 4자, 영문 8자 이내).
 message는 최대 5줄 이내, 한 줄당 총 42자(한글 2자, 영문/숫자 1자 계산) 이내로 작성.
-색상 지원: colors (배경: success/warning/destructive/primary/secondary), textColors (글자: white/black/success/warning/destructive).
+색상 지원: colors (배경: success/warning/destructive/primary/secondary), textColors (글자: white/black).
 글자 없는 색 버튼: textColors를 colors와 같게 설정하면 글자가 안 보임 (클릭 시 라벨 전송).
+색상 대비 규칙: success/destructive 배경에는 white 글자, warning 배경에는 black 글자, primary 배경에는 black 글자, secondary 배경에는 white 글자 사용. 글자가 안 보이면 안 됨.
 형식: {"message":"마크다운 텍스트","buttons":{${ex}},"colors":{},"textColors":{}}`;
 }
 
