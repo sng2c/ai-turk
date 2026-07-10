@@ -449,12 +449,23 @@ export default function App() {
 		window.addEventListener("touchstart", onTouchStart, { passive: true });
 		window.addEventListener("touchmove", onTouchMove, { passive: false });
 		window.addEventListener("touchend", onTouchEnd, { passive: false });
-		window.addEventListener("touchcancel", onTouchEnd, { passive: true });
+		// 마우스 휠/트랙패드 스크롤도 화면 어디서나 출력창에 연동
+		const onWheel = (e: WheelEvent) => {
+			const t = e.target as HTMLElement;
+			if (t.closest("input, textarea")) return; // 입력창은 자체 스크롤 유지
+			const el = messageRef.current;
+			if (!el) return;
+			el.scrollTop += e.deltaY;
+			updateScrollArrows();
+			e.preventDefault();
+		};
+		window.addEventListener("wheel", onWheel, { passive: false });
 		return () => {
 			window.removeEventListener("touchstart", onTouchStart);
 			window.removeEventListener("touchmove", onTouchMove);
 			window.removeEventListener("touchend", onTouchEnd);
 			window.removeEventListener("touchcancel", onTouchEnd);
+			window.removeEventListener("wheel", onWheel);
 			if (inertiaRef.current !== null) cancelAnimationFrame(inertiaRef.current);
 		};
 	}, [updateScrollArrows]);
