@@ -149,6 +149,7 @@ export default function App() {
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
 	const [piReady, setPiReady] = useState(false);
+	const [backendKind, setBackendKind] = useState<string>("pi");
 	const [, setSessionId] = useState("");
 	const [currentModel, setCurrentModel] = useState("");
 	const currentModelRef = useRef("");
@@ -258,6 +259,7 @@ export default function App() {
 		switch (msg.type) {
 			case "pi_ready":
 				setPiReady(true);
+				if (typeof msg.backend === "string") setBackendKind(msg.backend);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_last_assistant_text" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
@@ -685,7 +687,7 @@ export default function App() {
 	return (
 		<div className="turk-app">
 			<header className="turk-header">
-				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} /> AI-Turk</h1>
+				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
 				<button className="turk-model-btn" onClick={() => {
 					if (modelMode.current) {
