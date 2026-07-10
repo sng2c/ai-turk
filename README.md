@@ -60,11 +60,10 @@ turkctl start
 
 `TURK_BACKEND=claude`는 `ANTHROPIC_BASE_URL`이 가리키는 엔드포인트로 Anthropic Messages API 요청을 보냅니다. 두 구성을 지원합니다:
 
-**① 순수 Anthropic Claude (권장)** — Anthropic API 키로 직접 사용
+**① 순수 Anthropic Claude (권장)**
 ```bash
 TURK_BACKEND=claude
 TURK_CLAUDE_MODEL=claude-haiku-4-5    # claude-* 전체 이름
-ANTHROPIC_API_KEY=sk-ant-...        # 또는 ANTHROPIC_AUTH_TOKEN
 # ANTHROPIC_BASE_URL 비우면 기본 api.anthropic.com 사용
 ```
 
