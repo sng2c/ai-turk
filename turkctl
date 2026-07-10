@@ -47,7 +47,7 @@ cmd_start() {
   pkill -f "pi --mode rpc" 2>/dev/null || true
   fuser -k "$PORT/tcp" 2>/dev/null || true
   sleep 1
-  nohup npm run dev > "$LOG_FILE" 2>&1 &
+  nohup npx vite --mode "$PORT" > "$LOG_FILE" 2>&1 &
   sleep 5
   if is_running; then
     echo "✅ 서버 실행됨: http://127.0.0.1:$PORT"
