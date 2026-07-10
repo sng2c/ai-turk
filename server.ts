@@ -108,7 +108,7 @@ const customCommands = ["restart_pi"];
 wss.on("connection", (ws) => {
 	console.log("[Turk] 클라이언트 연결");
 	clients.add(ws);
-	ws.send(JSON.stringify({ type: backendReady ? "pi_ready" : "pi_starting" }));
+	ws.send(JSON.stringify({ type: backendReady ? "pi_ready" : "pi_starting", ...(backendReady ? { backend: backend?.kind() } : {}) }));
 
 	ws.on("message", (raw) => {
 		try {
