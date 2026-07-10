@@ -4,8 +4,8 @@ set -euo pipefail
 
 TURK_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 cd "$TURK_DIR"
-LOG_FILE="/tmp/ai-turk.log"
 PORT="${PORT:-3000}"
+LOG_FILE="/tmp/ai-turk-${PORT}.log"
 
 usage() {
   cat <<EOF
