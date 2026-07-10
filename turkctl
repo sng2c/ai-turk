@@ -118,17 +118,21 @@ cmd_start() {
 
 cmd_stop() {
   echo "▶ 중지 중... (포트 $PORT)"
-  # 해당 포트에 묶인 pi 자식 프로세스도 함께 종료
+  
+  # 1. 해당 포트를 사용하는 모든 프로세스 종료 (강력하게)
   local pids
   pids=$(lsof -t -i :"$PORT" 2>/dev/null || true)
   if [ -n "$pids" ]; then
-    # 부모 vite 프로세스 종료 → pi도 함께 종료됨 (configureServer close 핸들러)
-    kill $pids 2>/dev/null || true
-    sleep 1
     kill -9 $pids 2>/dev/null || true
   fi
-  kill_port
-  echo "✅ 서버 중지됨 (포트 $PORT)"
+  fuser -k -9 "$PORT/tcp" 2>/dev/null || true
+
+  # 2. 프로세스 이름 기반 추가 정리 (Vite 및 pi RPC)
+  # 특정 포트와 연관된 vite/pi 프로세스만 죽이기 위해 pgrep/pkill 조합 사용
+  pkill -f "vite" 2>/dev/null || true
+  pkill -f "pi --mode rpc" 2>/dev/null || true
+
+  echo "✅ 서버 및 관련 프로세스 중지됨 (포트 $PORT)"
 }
 
 cmd_restart() {
