@@ -47,30 +47,37 @@ turkctl start
 
 ### 백엔드 전환 (pi ↔ Claude Code)
 
-`.env`의 `TURK_BACKEND`로 백엔드를 선택. 기본은 `pi`.
+`.env`의 `TURK_BACKEND`로 백엔드를 선택합니다. 기본은 `pi`.
 
-**Claude Code 백엔드**는 `ANTHROPIC_BASE_URL`가 가리키는 엔드포인트로 Anthropic Messages API 요청을 보낸다. 두 구성을 지원:
+| 값 | 백엔드 | 설명 |
+|---|---|---|
+| `pi` | `pi --mode rpc` | 로컬 pi CLI (기본) |
+| `claude` | `claude -p stream-json` | Anthropic Messages API 호환 엔드포인트 |
 
-**① 순수 Anthropic Claude (권장)** — Anthropic API 키로 직접 사용:
+#### Claude Code 백엔드
+
+`TURK_BACKEND=claude`는 `ANTHROPIC_BASE_URL`이 가리키는 엔드포인트로 Anthropic Messages API 요청을 보냅니다. 두 구성을 지원합니다:
+
+**① 순수 Anthropic Claude (권장)** — Anthropic API 키로 직접 사용
 ```bash
-turkctl stop
-# .env 편집:
-#   TURK_BACKEND=claude
-turkctl start
+TURK_BACKEND=claude
+TURK_CLAUDE_MODEL=sonnet          # opus/sonnet/haiku 또는 claude-* 전체 이름
+ANTHROPIC_API_KEY=sk-ant-...        # 또는 ANTHROPIC_AUTH_TOKEN
+# ANTHROPIC_BASE_URL 비우면 기본 api.anthropic.com 사용
 ```
 
-**② Ollama Claude** — Ollama 0.14+ 의 Anthropic 호환 엔드포인트 경유 (`ollama launch claude` 와 동등):
+**② Ollama Claude** — Ollama 0.14+ 의 Anthropic 호환 엔드포인트 (`ollama launch claude --model <m>` 동등)
 ```bash
-turkctl stop
-# .env 편집:
-#   TURK_BACKEND=claude
-#   ANTHROPIC_BASE_URL=http://localhost:11434
-#   ANTHROPIC_AUTH_TOKEN=ollama
-turkctl start
+TURK_BACKEND=claude
+TURK_CLAUDE_MODEL=glm-5.1:cloud    # Ollama에 pull 된 모델
+ANTHROPIC_BASE_URL=http://localhost:11434
+ANTHROPIC_AUTH_TOKEN=ollama         # 임의값 (비어두면 subscription 폴백)
 ```
 필요 시 Ollama 준비: `ollama serve` + `ollama pull glm-5.1:cloud`.
 
-타이틀 옆에 백엔드 종류(`pi`/`claude`)가 작게 표시됩니다. 자세한 설정은 `.env.example` 참고.
+> 전환 후 `turkctl restart` (또는 `.env` 변경 시 자동 재시작).
+> 타이틀 옆에 백엔드 종류(`pi`/`claude`)가 작게 표시됩니다.
+> 전체 변수는 [`.env.example`](.env.example) 참고.
 
 ## 스스로 수정 가능
 
