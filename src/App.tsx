@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useEffect, Component, type ReactNode } from "react";
 import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench } from "lucide-react";
-import { jsonrepair } from "jsonrepair";
 
 // ── 에러 바운더리 (하얀 화면 방지) ──────────────────────────────────────
 export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -100,33 +99,12 @@ function extractAssistantText(messages: any[]): string {
 	return "";
 }
 
-// 모델이 자주 생성하는 문법 오류를 정제 (jsonrepair가 처리 못 하는 특수 케이스 보완).
-// 주요 패턴: `" "1":""` (따옴표+공백+따옴표로 시작하는 깨진 키)
-function sanitizeJSON(s: string): string {
-	let out = s;
-	// 0) 스마트 따옴표 → 일반 따옴표 (먼저 통일)
-	out = out.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
-	// 1) 깨진 키: `" "1":` / `""1":` / `" "KEY":` → `"KEY":`
-	//    따옴표(들) + 공백이 섞인 뒤 따옴표로 시작하는 키를 정리.
-	//    안전장치: 키 다음에 콜론이 오는 경우만(일반 문자열 값 내부 보호).
-	out = out.replace(/"\s+"(\d+)"\s*:/g, '"$1":');
-	out = out.replace(/"\s+"([A-Za-z_가-힣+\-][\w가-힣+\-]*)\s*:/g, '"$1":');
-	out = out.replace(/""(\d+)"\s*:/g, '"$1":');
-	return out;
-}
-
 // 텍스트에서 JSON 버튼 그리드 파싱.
-// 하이브리드 전략:
-//   1) JSON 후보 추출 — 코드펜스 / 전체 블록 / 첫 '{' 부터 끝까지(잘린 응답 대응)
-//   2) 각 후보를 원본·정제본으로 만들고, 직접 JSON.parse → jsonrepair 순으로 시도
-// jsonrepair(주간 230만 다운로드, 의존성 0)가 trailing comma / 단일따옴표 /
-// 키 따옴표 누락 / 잘린 끝 복구 등을 담당하고, sanitizeJSON은 따옴표+공백
-// 깨진 키 같은 특수 케이스를 보완한다.
-// jsonrepair(주간 230만 다운로드, 의존성 0)가 trailing comma / 단일따옴표 /
-// 키 따옴표 누락 / 잘린 끝 복구 등을 담당하고, sanitizeJSON은 따옴표+공백
-// 깨진 키 같은 특수 케이스를 보완한다.
+// 후보(코드펜스 / 전체 블록 / 첫 '{' 부터)를 뽑아 JSON.parse 시도.
+// 파싱 실패 시 모델에게 원문을 돌려주며 재시도하는 전략(self-correction)이
+// 구문 보정 라이브러리보다 근본적이므로, 여기서는 가볍게만 시도한다.
 function parseTurkJSON(text: string): TurkState | null {
-	// 1) JSON 후보 추출
+	// JSON 후보 추출: 코드펜스 → 전체 블록 → 첫 '{' 부터 끝까지(잘린 응답)
 	const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
 	const candidates: string[] = [];
 	if (fence) candidates.push(fence[1]);
@@ -135,24 +113,15 @@ function parseTurkJSON(text: string): TurkState | null {
 	const firstBrace = text.indexOf("{");
 	if (firstBrace !== -1) candidates.push(text.slice(firstBrace));
 
-	const isValid = (obj: unknown): obj is TurkState =>
-		!!obj && typeof obj === "object" &&
-		(obj as any).message !== undefined && (obj as any).buttons !== undefined;
-
 	for (const raw of candidates) {
 		const s = raw.trim();
 		if (!s) continue;
-		// 원본·정제본 각각에 대해 직접 파싱 → jsonrepair 시도
-		for (const v of [s, sanitizeJSON(s)]) {
-			try {
-				const obj = JSON.parse(v);
-				if (isValid(obj)) return obj;
-			} catch { /* 다음 시도 */ }
-			try {
-				const obj = JSON.parse(jsonrepair(v));
-				if (isValid(obj)) return obj;
-			} catch { /* 다음 시도 */ }
-		}
+		try {
+			const obj = JSON.parse(s);
+			if (obj && typeof obj === "object" && obj.message !== undefined && obj.buttons !== undefined) {
+				return obj as TurkState;
+			}
+		} catch { /* 다음 후보 시도 */ }
 	}
 	return null;
 }
@@ -210,6 +179,9 @@ export default function App() {
 	const sessionInitRef = useRef(false);
 	// 스트리밍 텍스트 누적 (agent_end의 messages가 비었거나 잘렸을 때 fallback용)
 	const streamingTextRef = useRef("");
+	// 파싱 실패 시 자가 수정 재시도 카운터 (무한 루프 방지)
+	const retryCountRef = useRef(0);
+	const MAX_PARSE_RETRIES = 2;
 
 	// 메시지 박스 스크롤 — 출력 업데이트 시 맨 위로, 스크롤 포지션에 따라 화살표 표시
 	const messageRef = useRef<HTMLDivElement | null>(null);
@@ -332,6 +304,7 @@ export default function App() {
 				if (text) {
 					const parsed = parseTurkJSON(text);
 					if (parsed) {
+						retryCountRef.current = 0; // 성공 시 카운터 리셋
 						setState(parsed);
 					} else {
 						// 스트리밍본으로 한 번 더 시도 (messages가 잘렸을 수 있음)
@@ -339,8 +312,16 @@ export default function App() {
 							? parseTurkJSON(streamingTextRef.current)
 							: null;
 						if (fallback) {
+							retryCountRef.current = 0;
 							setState(fallback);
+						} else if (retryCountRef.current < MAX_PARSE_RETRIES) {
+							// 자가 수정 재시도: 원문을 모델에게 돌려주며 JSON 형식 재요청
+							retryCountRef.current++;
+							setLoading(true);
+							const retry = `지난 응답이 올바른 JSON 형식이 아니에습니다. 다음 원문을 참고하여, 동일한 내용으로 올바른 JSON 버튼 그리드 하나만 다시 출력하세요. 원문 외 설명/코드펜스 금지.\n\n[잘못된 응답]\n${text.slice(0, 800)}`;
+							wsRef.current?.send(JSON.stringify({ type: "prompt", message: retry }));
 						} else {
+							retryCountRef.current = 0;
 							setState(errState(`[파싱실패] ${text.slice(0, 200)}`, gridRef.current.rows, gridRef.current.cols));
 						}
 					}
