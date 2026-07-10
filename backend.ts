@@ -229,10 +229,12 @@ export class ClaudeBackend extends JsonlBackend {
 					messageCount: 0,
 				}});
 				break;
-			case "get_available_models":
-				// Claude 백엔드는 단일 모델만 — 런타임 전환 불가.
-				this.emit({ ...base, data: { models: [] }});
+			case "get_available_models": {
+				// Claude 백엔드는 단일 모델만 사용 — 설정된 TURK_RPC_MODEL 를 그대로 표시.
+				const m = process.env.TURK_RPC_MODEL || process.env.TURK_CLAUDE_MODEL || "claude";
+				this.emit({ ...base, data: { models: [{ provider: "claude", id: m, name: m }] }});
 				break;
+			}
 			case "get_session_stats":
 				this.emit({ ...base, data: { contextUsage: { percent: 0 } }});
 				break;
