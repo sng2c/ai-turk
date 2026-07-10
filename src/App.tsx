@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, Component, type ReactNode } from "react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench } from "lucide-react";
 
 // ── 에러 바운더리 (하얀 화면 방지) ──────────────────────────────────────
 export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -43,11 +44,13 @@ function systemPrompt(rows: number, cols: number): string {
 [Grid]
 - ${rows} rows × ${cols} columns, ${nb} buttons. Keys "0"~"${nb - 1}".
 - Empty button: "". Group related functions in the same row.
-- Label: max 4 Korean chars or 8 English chars. Emoji allowed.
+- Label: keep within 8 display-width units (Korean/fullwidth=2, ASCII=1). Emoji allowed.
+  Longer labels are accepted but auto-shrink (min 0.8em), so prefer concise ones.
 - Place primary buttons in the center.
 
 [Message]
-- Max 5 lines. Max 42 chars per line (Korean=2, English/digit=1).
+- Up to 10 lines fit on screen; prefer fewer for clarity.
+- Max 42 chars per line (Korean=2, English/digit=1).
 - Markdown supported.
 
 [Colors]
@@ -141,6 +144,7 @@ export default function App() {
 
 	// 씽킹 레벨 (기본 off) — 모델이 지원하는 레벨만 순환 (cycle_thinking_level)
 	const [thinkingLevel, setThinkingLevel] = useState<string>("off");
+	const [contextPct, setContextPct] = useState<number | null>(null);
 	const thinkingLevelRef = useRef("off");
 	thinkingLevelRef.current = thinkingLevel;
 	// OFF 순환 감지용: 첫 켜진 레벨(firstLevel)에 다시 도달하면 OFF로
@@ -235,6 +239,7 @@ export default function App() {
 				setPiReady(true);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_last_assistant_text" }));
+				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				break;
 			case "pi_starting":
 				setPiReady(false);
@@ -262,6 +267,7 @@ export default function App() {
 			case "agent_end":
 				setLoading(false);
 				setInput("");
+				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				setToolStatus(null);
 				setShowThinking(false);
 				setThinkingText("");
@@ -306,6 +312,7 @@ export default function App() {
 			case "response":
 				if (msg.command === "new_session" && msg.success) {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
+					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				}
 				if (msg.command === "get_last_assistant_text" && msg.success && msg.data?.text) {
 					const parsed = parseTurkJSON(msg.data.text);
@@ -358,6 +365,9 @@ export default function App() {
 						}
 						setThinkingLevel(level);
 					}
+				}
+				if (msg.command === "get_session_stats" && msg.success && msg.data?.contextUsage?.percent != null) {
+					setContextPct(msg.data.contextUsage.percent);
 				}
 				if (msg.command === "get_available_models" && msg.success && msg.data?.models) {
 						availableModels.current = msg.data.models;
@@ -479,7 +489,7 @@ export default function App() {
 		const pageModels = models.slice(start, start + MODELS_PER_PAGE);
 		const buttons: Record<string, string> = {};
 		pageModels.forEach((m: any, i: number) => {
-			buttons[String(i)] = `${m.provider}/${m.name || m.id}`;
+			buttons[String(i)] = `${m.provider}\n${m.name || m.id}`;
 		});
 		for (let i = pageModels.length; i < MODELS_PER_PAGE; i++) {
 			buttons[String(i)] = "";
@@ -551,7 +561,7 @@ export default function App() {
 			// 모델 선택
 			const ws = wsRef.current;
 			const model = availableModels.current.find((m: any) =>
-				`${m.provider}/${m.name || m.id}` === text);
+				`${m.provider}/${m.name || m.id}` === text.replace(/\n/g, "/"));
 			if (model && ws?.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({
 					type: "set_model",
@@ -579,7 +589,6 @@ export default function App() {
 		gridRows.push(row);
 	}
 
-	const statusIcon = !connected ? "🔴" : !piReady ? "🟡" : showThinking ? "💭" : loading ? "⏳" : "🟢";
 	const statusText = !connected ? "연결 끊김" : !piReady ? "pi 시작중" : showThinking ? "사고중" : loading ? "생성중" : "준비";
 
 	const cycleThinking = () => {
@@ -600,12 +609,8 @@ export default function App() {
 	return (
 		<div className="turk-app">
 			<header className="turk-header">
-				<h1>🤖 AI Turk</h1>
+				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} /> AI-Turk</h1>
 				<span className="turk-mode">
-				<span className="turk-status">{loading ? <span className="turk-hourglass">⏳</span> : statusIcon} {statusText}</span>
-				<button className="turk-thinking-btn" onClick={cycleThinking} title={`씽킹 레벨 순환: ${thinkingLevel}`}>
-					✦{THINKING_LABEL[thinkingLevel]}
-				</button>
 				<button className="turk-model-btn" onClick={() => {
 					if (modelMode.current) {
 						modelMode.current = false;
@@ -618,7 +623,7 @@ export default function App() {
 						prevStateRef.current = state;
 						ws.send(JSON.stringify({ type: "get_available_models" }));
 					}
-				}} title="모델 선택">{currentModel || "모델 선택"}</button> <button className="turk-new-btn" onClick={() => {
+				}} title="모델 선택">{currentModel || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{THINKING_LABEL[thinkingLevel]}</button> <button className="turk-new-btn" onClick={() => {
 				if (!confirm("새 세션을 시작할까요?")) return;
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {
@@ -626,15 +631,19 @@ export default function App() {
 					sessionInitRef.current = false;
 					setState(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 				}
-			}} title="새 세션">↻</button></span>
+			}} title={`컨텍스트 ${contextPct ?? "—"}% — 새 세션 시작`}>
+					{contextPct != null ? (
+						<span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, contextPct))}%` }} /><span className="turk-ctx-pct">{Math.round(contextPct)}%</span></span></span>
+						) : <span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: "0%" }} /><span className="turk-ctx-pct">—</span></span></span>}
+				</button></span>
 			</header>
 
-			<div className="turk-message-wrap">
+			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
 				{canScrollUp && (
-					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로">↑</button>
+					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로"><ChevronUp className="turk-ico" /></button>
 				)}
 				{canScrollDown && (
-					<button className="turk-scroll-arrow turk-scroll-down" onClick={() => messageRef.current?.scrollTo({ top: messageRef.current.scrollHeight, behavior: "smooth" })} title="맨 아래로">↓</button>
+					<button className="turk-scroll-arrow turk-scroll-down" onClick={() => messageRef.current?.scrollTo({ top: messageRef.current.scrollHeight, behavior: "smooth" })} title="맨 아래로"><ChevronDown className="turk-ico" /></button>
 				)}
 				<div
 					ref={messageRef}
@@ -642,14 +651,14 @@ export default function App() {
 					onScroll={updateScrollArrows}
 				>
 					{loading && toolStatus ? (
-						<span className="turk-tool">🔧 {toolStatus.name}: {toolStatus.args}</span>
+						<span className="turk-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</span>
 					) : (
 						<Md text={state.message} />
 					)}
 				</div>
 			</div>
 
-			<div className="turk-grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+			<div className={`turk-grid${loading ? " turk-grid-loading" : ""}`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
 				{gridRows.flat().map(([idx, label]) =>
 					label ? (
 						<button
@@ -657,11 +666,17 @@ export default function App() {
 							className={`turk-grid-btn${state.colors?.[idx] ? ` turk-bg-${state.colors[idx]}` : ""}${state.textColors?.[idx] ? ` turk-fg-${state.textColors[idx]}` : ""}`}
 							disabled={loading || !piReady}
 							onClick={() => handleSend(label)}
+							style={modelMode.current ? (() => {
+								// 모델 선택 화면: 모델명이 길면 폰트 자동 축소 (기준 8칸, 최소 0.8em)
+								const w = [...label].reduce((a, c) => a + (/[^\x00-\x7F]/.test(c) ? 2 : 1), 0);
+								if (w <= 8) return undefined;
+								return { fontSize: `max(0.7em, ${(8 / w).toFixed(3)}em)` };
+							})() : undefined}
 						>
 							{label}
 						</button>
 					) : (
-						<button key={idx} className="turk-grid-btn turk-grid-btn-empty" disabled />
+						<button key={idx} className="turk-grid-btn turk-grid-btn-empty" tabIndex={-1} aria-hidden="true" />
 					)
 				)}
 			</div>
