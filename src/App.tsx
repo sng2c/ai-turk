@@ -159,6 +159,9 @@ export default function App() {
 	const [showThinking, setShowThinking] = useState(false);
 	const [, setThinkingExpanded] = useState(false);
 	const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null);
+	const [keyboardUp, setKeyboardUp] = useState(false);
+	const [kbHeight, setKbHeight] = useState(0);
+
 
 	// 세션 초기화 추적
 	const sessionInitRef = useRef(false);
@@ -401,6 +404,17 @@ export default function App() {
 			requestAnimationFrame(updateScrollArrows);
 		}
 	}, [state.message, loading, updateScrollArrows]);
+
+	// 가상 키보드 감지 → 버튼 영역 숨김
+	useEffect(() => {
+		const vv = window.visualViewport;
+		if (!vv) return;
+		const onResize = () => { const kb = Math.max(0, window.innerHeight - vv.height); setKbHeight(kb); setKeyboardUp(kb > 100); };
+		onResize();
+		vv.addEventListener("resize", onResize);
+		vv.addEventListener("scroll", onResize);
+		return () => { vv.removeEventListener("resize", onResize); vv.removeEventListener("scroll", onResize); };
+	}, []);
 
 	// 화면 아무데나 위/아래 드래그 → 출력창 스크롤 + 플릭 시 관성 (입력창/메시지박스 내부는 제외)
 	useEffect(() => {
@@ -674,7 +688,7 @@ export default function App() {
 				</div>
 			</div>
 
-			<div className={`turk-grid${loading ? " turk-grid-loading" : ""}`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+			<div className={`turk-grid${loading ? " turk-grid-loading" : ""}${keyboardUp ? " turk-grid-hidden" : ""}`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
 				{gridRows.flat().map(([idx, label]) =>
 					label ? (
 						<button
@@ -698,7 +712,7 @@ export default function App() {
 			</div>
 
 			<form
-				className="turk-input-form"
+				className="turk-input-form" style={{ bottom: kbHeight }}
 				onSubmit={(e) => {
 					e.preventDefault();
 					if (input.trim() && !loading && piReady) handleSend(input.trim());
@@ -711,6 +725,9 @@ export default function App() {
 			>
 				<input
 					className="turk-input-field"
+					title="메시지 입력"
+					enterKeyHint="send"
+					inputMode="text"
 					value={input}
 					onChange={(e) => setInput(e.target.value)}
 					placeholder={piReady ? "명령어 입력..." : "pi 대기중..."}
