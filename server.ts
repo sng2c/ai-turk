@@ -19,7 +19,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── .env 로더 (의존성 없음) ────────────────────────────────────────────
 try {
-	const content = readFileSync(join(__dirname, ".env"), "utf8");
+	const envFile = process.env.TURK_ENV_FILE || ".env";
+	const content = readFileSync(join(__dirname, envFile), "utf8");
 	for (const line of content.split("\n")) {
 		const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
 		if (m && !(m[1] in process.env)) {
