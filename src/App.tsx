@@ -602,7 +602,7 @@ export default function App() {
 			<header className="turk-header">
 				<h1>🤖 AI Turk</h1>
 				<span className="turk-mode">
-				<span className="turk-status">{statusIcon} {statusText}</span>
+				<span className="turk-status">{loading ? <span className="turk-hourglass">⏳</span> : statusIcon} {statusText}</span>
 				<button className="turk-thinking-btn" onClick={cycleThinking} title={`씽킹 레벨 순환: ${thinkingLevel}`}>
 					✦{THINKING_LABEL[thinkingLevel]}
 				</button>
