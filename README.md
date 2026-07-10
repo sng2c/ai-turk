@@ -56,8 +56,6 @@ turkctl start
 turkctl stop
 # .env 편집:
 #   TURK_BACKEND=claude
-#   TURK_CLAUDE_MODEL=sonnet
-#   ANTHROPIC_API_KEY=sk-ant-...
 turkctl start
 ```
 
@@ -66,7 +64,6 @@ turkctl start
 turkctl stop
 # .env 편집:
 #   TURK_BACKEND=claude
-#   TURK_CLAUDE_MODEL=glm-5.1:cloud
 #   ANTHROPIC_BASE_URL=http://localhost:11434
 #   ANTHROPIC_AUTH_TOKEN=ollama
 turkctl start
