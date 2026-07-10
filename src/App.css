@@ -6,11 +6,14 @@
 	box-sizing: border-box;
 }
 
+html {
+	font-size: 14px; /* rem 기준 */
+}
+
 html, body {
 	overscroll-behavior-y: contain;
 	overscroll-behavior: none;
-	height: 100%;
-	overflow: hidden;
+	margin: 0;
 }
 
 body {
@@ -18,19 +21,20 @@ body {
 	background: var(--background);
 	color: var(--foreground);
 	min-height: 100dvh;
-	font-size: 14px;
+	font-size: 1rem;
 }
 
 /* ── 레이아웃 ──────────────────────────────────────────────────────────── */
 
 .turk-app {
-	max-width: 480px;
+	max-width: 34.286rem;
 	margin: 0 auto;
-	padding: 8px 12px 12px;
+	padding: 0.571rem 0.857rem 0.857rem;
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
-	min-height: 100dvh;
+	gap: 0.857rem;
+	height: 100dvh;
+	overflow: hidden;
 }
 
 /* 헤더 */
@@ -52,17 +56,17 @@ body {
 	font-family: "NeoDunggeunmo", monospace;
 	display: flex;
 	align-items: center;
-	gap: 4px;
+	gap: 0.286rem;
 }
 
 .turk-hourglass {
 	display: inline-block;
-	width: 1em;
-	height: 1em;
+	width: 1rem;
+	height: 1rem;
 	line-height: 1;
 	text-align: center;
 	vertical-align: middle;
-	transform-origin: calc(50% + 2px) calc(50% - 2px);
+	transform-origin: calc(50% + 0.143rem) calc(50% - 0.143rem);
 	animation: turk-flip 4.6s ease-in-out infinite;
 }
 
@@ -86,7 +90,7 @@ body {
 	border: none;
 	cursor: pointer;
 	font-size: var(--turk-font-size);
-	padding: 2px 4px;
+	padding: 0.143rem 0.286rem;
 	color: var(--muted-foreground);
 	line-height: 1;
 	transition: color 0.1s;
@@ -101,7 +105,7 @@ body {
 	border: none;
 	cursor: pointer;
 	font-size: var(--turk-font-size);
-	padding: 2px 4px;
+	padding: 0.143rem 0.286rem;
 	color: var(--muted-foreground);
 	line-height: 1;
 	transition: color 0.1s;
@@ -112,11 +116,11 @@ body {
 	border: none;
 	cursor: pointer;
 	font-size: var(--turk-font-size);
-	padding: 2px 4px;
+	padding: 0.143rem 0.286rem;
 	color: var(--accent-foreground);
 	line-height: 1;
 	transition: color 0.1s;
-	max-width: 120px;
+	max-width: 8.571rem;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -124,6 +128,30 @@ body {
 
 .turk-new-btn:hover {
 	color: var(--success);
+}
+
+/* 컨텍스트 사용량 막대 */
+.turk-ctx {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.214rem;
+	color: var(--muted-foreground);
+}
+
+.turk-ctx-bar {
+	display: inline-block;
+	width: 2.286rem;
+	height: 1rem;
+	border: 0.071rem solid var(--foreground);
+	background: var(--muted);
+	overflow: hidden;
+}
+
+.turk-ctx-fill {
+	display: block;
+	height: 100%;
+	background: var(--success);
+	transition: width 0.3s ease;
 }
 
 .turk-model-btn:hover {
@@ -138,28 +166,28 @@ body {
 
 .turk-message {
 	background: var(--card);
-	border: 2px solid var(--foreground);
+	border: 0.143rem solid var(--foreground);
 	box-shadow: var(--pixel-box-shadow);
-	padding: 8px 10px;
+	padding: 0.571rem 0.714rem;
 	font-size: var(--turk-font-size);
-	line-height: 1.8;
+	line-height: 1.3;
 	color: var(--success);
 	word-break: break-all;
 	font-family: "NeoDunggeunmo", monospace;
-	height: calc(var(--turk-font-size) * 1.8 * 5 + 22px);
+	height: calc(var(--turk-font-size) * 1.3 * 10 + 1.571rem);
 	overflow-y: auto;
 }
 
 .turk-scroll-arrow {
 	position: absolute;
-	right: 0px;
+	right: 0rem;
 	background: var(--card);
-	border: 2px solid var(--foreground);
+	border: 0.143rem solid var(--foreground);
 	box-shadow: var(--pixel-box-shadow);
 	color: var(--foreground);
 	font-size: var(--turk-font-size);
-	width: 28px;
-	height: 28px;
+	width: 2rem;
+	height: 2rem;
 	padding: 0;
 	box-sizing: border-box;
 	display: flex;
@@ -178,11 +206,16 @@ body {
 }
 
 .turk-scroll-up {
-	top: 0px;
+	top: 0rem;
 }
 
 .turk-scroll-down {
-	bottom: 0px;
+	bottom: 0rem;
+}
+
+.turk-grid-loading {
+	opacity: 0.4;
+	transition: opacity 0.2s;
 }
 
 .turk-message-loading {
@@ -192,9 +225,9 @@ body {
 
 .turk-message code {
 	background: var(--muted);
-	padding: 1px 5px;
+	padding: 0.071rem 0.357rem;
 	border-radius: 0;
-	font-size: 0.85em;
+	font-size: 0.85rem;
 }
 
 .turk-message strong {
@@ -204,10 +237,10 @@ body {
 /* 사고 영역 */
 .turk-thinking-area {
 	background: var(--muted);
-	border: 2px solid var(--muted-foreground);
+	border: 0.143rem solid var(--muted-foreground);
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
-	padding: 6px 12px;
+	padding: 0.429rem 0.857rem;
 	cursor: pointer;
 	overflow: hidden;
 }
@@ -216,7 +249,7 @@ body {
 	font-size: var(--turk-font-size);
 	color: var(--muted-foreground);
 	display: block;
-	margin-bottom: 4px;
+	margin-bottom: 0.286rem;
 	user-select: none;
 }
 
@@ -231,14 +264,14 @@ body {
 	-webkit-line-clamp: 2;
 	line-clamp: 2;
 	-webkit-box-orient: vertical;
-	max-height: 2em;
+	max-height: 2rem;
 	font-family: "NeoDunggeunmo", monospace;
 }
 
 .turk-thinking-area.expanded .turk-thinking-text {
 	-webkit-line-clamp: unset;
 	line-clamp: unset;
-	max-height: 200px;
+	max-height: 14.286rem;
 	overflow-y: auto;
 }
 
@@ -255,24 +288,27 @@ body {
 /* 버튼 그리드 */
 .turk-grid {
 	display: grid;
-	gap: 2px;
+	gap: 0.143rem;
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: hidden;
 }
 
 .turk-grid-btn {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	min-height: calc(var(--turk-font-size) * 1.8 * 2 + 12px);
-	padding: 6px 4px;
-	border: 2px solid var(--foreground);
+	min-height: calc(var(--turk-font-size) * 1.8 * 2 + 0.857rem);
+	padding: 0.429rem 0.286rem;
+	border: 0.143rem solid var(--foreground);
 	background: var(--secondary);
 	color: var(--foreground);
 	cursor: pointer;
 	font-family: "NeoDunggeunmo", monospace;
 	font-size: var(--turk-font-size);
 	line-height: 1.2;
-	white-space: normal;
-	word-break: break-all;
+	white-space: pre-wrap;
+	word-break: break-word;
 	transition: all 0.1s;
 	user-select: none;
 	-webkit-tap-highlight-color: transparent;
@@ -287,7 +323,7 @@ body {
 }
 
 .turk-grid-btn:active:not(:disabled) {
-	transform: translateY(3px);
+	transform: translateY(0.214rem);
 }
 
 .turk-grid-btn:disabled {
@@ -317,14 +353,14 @@ body {
 /* 입력 폼 */
 .turk-input-form {
 	display: flex;
-	gap: 4px;
-	margin-top: auto;
+	gap: 0.286rem;
+	flex: none;
 }
 
 .turk-input-field {
 	flex: 1;
-	padding: 8px 12px;
-	border: 2px solid var(--foreground);
+	padding: 0.571rem 0.857rem;
+	border: 0.143rem solid var(--foreground);
 	background: var(--background);
 	color: var(--foreground);
 	font-family: "NeoDunggeunmo", monospace;
@@ -351,8 +387,8 @@ body {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: 8px 16px;
-	border: 2px solid var(--foreground);
+	padding: 0.571rem 1.143rem;
+	border: 0.143rem solid var(--foreground);
 	background: var(--success);
 	color: var(--success-foreground);
 	cursor: pointer;
@@ -364,7 +400,7 @@ body {
 }
 
 .turk-submit-btn:active:not(:disabled) {
-	transform: translateY(3px);
+	transform: translateY(0.214rem);
 }
 
 .turk-submit-btn:disabled {
