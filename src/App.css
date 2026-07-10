@@ -6,6 +6,13 @@
 	box-sizing: border-box;
 }
 
+html, body {
+	overscroll-behavior-y: contain;
+	overscroll-behavior: none;
+	height: 100%;
+	overflow: hidden;
+}
+
 body {
 	font-family: "NeoDunggeunmo", monospace;
 	background: var(--background);
