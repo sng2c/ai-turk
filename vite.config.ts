@@ -1,21 +1,21 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { ChildProcess, spawn } from "node:child_process";
-import { StringDecoder } from "node:string_decoder";
 import { WebSocketServer, WebSocket } from "ws";
+import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { mkdirSync } from "node:fs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
- * AI Turk Vite 플러그인 — pi --mode rpc를 개발 서버에 통합
- * npm run dev 하나로 Vite + pi RPC + WebSocket 모두 실행
+ * AI Turk Vite 플러그인 — 백엔드(pi | claude)를 개발 서버에 통합
+ * npm run dev 하나로 Vite + 백엔드 + WebSocket 모두 실행
  */
 function turkPlugin(env: Record<string, string>): Plugin {
-	const model = env.TURK_RPC_MODEL || "";
-	const bin = env.TURK_RPC_BIN || "pi";
-	const extraArgs = (env.TURK_RPC_ARGS || "").split(/\s+/).filter(Boolean);
-
-	let piProcess: ChildProcess | null = null;
-	let piReady = false;
+	let backend: Backend | null = null;
+	let backendReady = false;
 	const clients = new Set<WebSocket>();
 
 	function broadcast(data: Record<string, unknown>): void {
@@ -25,65 +25,28 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		}
 	}
 
-	function startPi(): void {
-		const args = ["--mode", "rpc", "--no-session", ...(model ? ["--model", model] : []), ...extraArgs];
-		console.log(`[Turk] ${bin} ${args.join(" ")} 시작`);
-		piProcess = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"] });
-		piReady = true;
-
-		const decoder = new StringDecoder("utf8");
-		let buffer = "";
-
-		piProcess.stdout!.on("data", (chunk: Buffer) => {
-			buffer += decoder.write(chunk);
-			while (true) {
-				const idx = buffer.indexOf("\n");
-				if (idx === -1) break;
-				let line = buffer.slice(0, idx);
-				buffer = buffer.slice(idx + 1);
-				if (line.endsWith("\r")) line = line.slice(0, -1);
-				if (!line.trim()) continue;
-				try {
-					broadcast(JSON.parse(line));
-				} catch {
-					console.error("[Turk] JSONL 파싱 오류:", line.slice(0, 120));
-				}
-			}
+	function startBackend(): void {
+		const cwd = env.TURK_AGENT_CWD || join(__dirname, "workspace");
+		try { mkdirSync(cwd, { recursive: true }); } catch { /* 무시 */ }
+		backend = createBackend({
+			cwd,
+			onLog: (m: string) => console.log(m),
 		});
-
-		piProcess.stderr!.on("data", (chunk: Buffer) => {
-			const msg = chunk.toString().trim();
-			if (msg) console.error("[pi]", msg.slice(0, 500));
+		backend.onEvent((ev: TurkEvent) => {
+			if (ev.type === "pi_ready") backendReady = true;
+			if (ev.type === "pi_exit" || ev.type === "pi_error") backendReady = false;
+			broadcast(ev);
 		});
-
-		piProcess.on("exit", (code) => {
-			console.log(`[Turk] pi 종료 (코드: ${code})`);
-			piProcess = null;
-			piReady = false;
-			broadcast({ type: "pi_exit", code });
-		});
-
-		piProcess.on("error", (err) => {
-			console.error("[Turk] pi 시작 실패:", err.message);
-			piProcess = null;
-			broadcast({ type: "pi_error", message: err.message });
-		});
-
-		broadcast({ type: "pi_ready" });
+		backend.start();
 	}
 
-	function sendPi(cmd: Record<string, unknown>): void {
-		if (!piProcess?.stdin?.writable) return;
-		piProcess.stdin.write(JSON.stringify(cmd) + "\n");
-	}
-
-	// restart_pi만 제외하고 모든 명령을 pi에 전달
+	// restart_pi만 제외하고 모든 명령을 백엔드에 전달
 	const customCommands = ["restart_pi"];
 
 	return {
 		name: "turk-rpc",
 		configureServer(server) {
-			startPi();
+			startBackend();
 
 			// noServer 모드: Vite HMR 업그레이드 핸들러와 충돌 방지
 			const wss = new WebSocketServer({ noServer: true });
@@ -98,18 +61,18 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			wss.on("connection", (ws) => {
 				console.log("[Turk] 클라이언트 연결");
 				clients.add(ws);
-				ws.send(JSON.stringify({ type: piReady ? "pi_ready" : "pi_starting" }));
+				ws.send(JSON.stringify({ type: backendReady ? "pi_ready" : "pi_starting", ...(backendReady ? { backend: backend?.kind() } : {}) }));
 
 				ws.on("message", (raw) => {
 					try {
 						const msg = JSON.parse(raw.toString());
 						if (customCommands.includes(msg.type)) {
 							if (msg.type === "restart_pi") {
-								if (piProcess) { piProcess.kill("SIGTERM"); piProcess = null; }
-								setTimeout(() => startPi(), 500);
+								if (backend) { backend.stop(); backend = null; }
+								setTimeout(() => startBackend(), 500);
 							}
 						} else {
-							sendPi(msg);
+							backend?.send(msg);
 						}
 					} catch (e) {
 						console.error("[Turk] 메시지 파싱 오류:", e);
@@ -120,7 +83,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			});
 
 			server.httpServer!.on("close", () => {
-				if (piProcess) piProcess.kill("SIGTERM");
+				if (backend) backend.stop();
 			});
 		},
 	};
