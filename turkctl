@@ -1,21 +1,66 @@
 #!/usr/bin/env bash
 # turkctl — AI Turk 제어 스크립트
+# 다중 인스턴스 지원: --env <파일> 옵션으로 .env 파일 지정 가능
 set -euo pipefail
 
 TURK_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 cd "$TURK_DIR"
+
+# ── 인자 파싱 ────────────────────────────────────────────────────────────
+# 사용법: turkctl [--env <파일> | -e <파일>] <명령>
+ENV_FILE="$TURK_DIR/.env"
+CMD=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --env|-e)
+      shift
+      ENV_FILE="$1"
+      shift
+      ;;
+    *)
+      CMD="$1"
+      shift
+      ;;
+  esac
+done
+
+# ENV_FILE 절대경로 변환
+case "$ENV_FILE" in
+  /*) ;;
+  *)  ENV_FILE="$TURK_DIR/$ENV_FILE" ;;
+esac
+
+# .env 파일에서 PORT 및 기타 설정 읽기
+# 우선순위: 환경변수 PORT > --env 파일 > 기본 .env > 기본값 3000
+if [ -z "${PORT:-}" ] && [ -f "$ENV_FILE" ]; then
+  PORT="$(grep -E '^PORT=' "$ENV_FILE" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')"
+fi
 PORT="${PORT:-3000}"
 LOG_FILE="/tmp/ai-turk-${PORT}.log"
+
+# .env 파일 내용을 환경변수로 로드 (Vite에 전달되도록)
+load_env() {
+  if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+  fi
+}
 
 usage() {
   cat <<EOF
 AI Turk 제어 도구
 
-사용법: turkctl <명령>
+사용법: turkctl [--env <파일>] <명령>
+
+옵션:
+  --env <파일>  설정 파일 지정 (기본: .env)
+                예: turkctl --env .env.8003 start
 
 명령:
   start     개발 서버 시작 (npm run dev, 백그라운드)
-  stop      서버 및 pi 프로세스 종료
+  stop      서버 및 pi 프로세스 종료 (해당 포트만)
   restart   서버 재시작
   status    실행 상태 확인
   logs      최근 로그 출력 (tail -f)
@@ -26,7 +71,9 @@ AI Turk 제어 도구
   help      이 도움말
 
 예시:
-  turkctl start
+  turkctl start                         # .env 사용 (기본)
+  turkctl --env .env.8003 start          # .env.8003 사용
+  turkctl --env .env.8004 restart        # 8004 인스턴스 재시작
   turkctl status
   turkctl logs
 EOF
@@ -36,22 +83,32 @@ is_running() {
   curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/" 2>/dev/null | grep -q 200
 }
 
+# 특정 포트에 묶인 프로세스 종료 (다른 인스턴스 영향 안 줌)
+kill_port() {
+  local pids
+  pids=$(lsof -t -i :"$PORT" 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    kill -9 $pids 2>/dev/null || true
+  fi
+  fuser -k "$PORT/tcp" 2>/dev/null || true
+}
+
 cmd_start() {
   if is_running; then
-    echo "✅ 이미 실행 중: http://127.0.0.1:$PORT"
+    echo "✅ 이미 실행 중: http://127.0.0.1:$PORT (env: $ENV_FILE)"
     return 0
   fi
-  echo "▶ 서버 시작 중..."
+  echo "▶ 서버 시작 중... (포트 $PORT, env: $ENV_FILE)"
   cd "$TURK_DIR"
-  pkill -f "vite" 2>/dev/null || true
-  pkill -f "pi --mode rpc" 2>/dev/null || true
-  fuser -k "$PORT/tcp" 2>/dev/null || true
+  kill_port
   sleep 1
-  nohup npx vite --mode "$PORT" > "$LOG_FILE" 2>&1 &
+  load_env
+  PORT="$PORT" nohup npx vite > "$LOG_FILE" 2>&1 &
   sleep 5
   if is_running; then
     echo "✅ 서버 실행됨: http://127.0.0.1:$PORT"
     echo "   WebSocket: ws://127.0.0.1:$PORT/ws"
+    echo "   로그: $LOG_FILE"
   else
     echo "❌ 시작 실패 — 로그 확인: turkctl logs"
     tail -5 "$LOG_FILE" 2>/dev/null
@@ -60,11 +117,18 @@ cmd_start() {
 }
 
 cmd_stop() {
-  pkill -f "vite" 2>/dev/null || true
-  pkill -f "tsx server" 2>/dev/null || true
-  pkill -f "pi --mode rpc" 2>/dev/null || true
-  fuser -k "$PORT/tcp" 2>/dev/null || true
-  echo "✅ 서버 중지됨"
+  echo "▶ 중지 중... (포트 $PORT)"
+  # 해당 포트에 묶인 pi 자식 프로세스도 함께 종료
+  local pids
+  pids=$(lsof -t -i :"$PORT" 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    # 부모 vite 프로세스 종료 → pi도 함께 종료됨 (configureServer close 핸들러)
+    kill $pids 2>/dev/null || true
+    sleep 1
+    kill -9 $pids 2>/dev/null || true
+  fi
+  kill_port
+  echo "✅ 서버 중지됨 (포트 $PORT)"
 }
 
 cmd_restart() {
@@ -75,21 +139,18 @@ cmd_restart() {
 
 cmd_status() {
   if is_running; then
-    echo "✅ 서버 실행 중 (포트 $PORT)"
-    # pi 상태
+    echo "✅ 서버 실행 중 (포트 $PORT, env: $ENV_FILE)"
     local health
     health=$(curl -s "http://127.0.0.1:$PORT/api/health" 2>/dev/null || echo "{}")
     echo "   $health"
-    # WebSocket 클라이언트 수 (로그에서 추정)
     local ws_count
     ws_count=$(grep -c "클라이언트 연결" "$LOG_FILE" 2>/dev/null || echo "0")
     echo "   로그: $LOG_FILE"
   else
-    echo "⚪ 서버 미실행 — turkctl start"
+    echo "⚪ 서버 미실행 (포트 $PORT) — turkctl --env $(basename "$ENV_FILE") start"
   fi
-  # 프로세스
   local procs
-  procs=$(ps aux | grep -E "vite|pi --mode rpc" | grep -v grep | wc -l)
+  procs=$(lsof -t -i :"$PORT" 2>/dev/null | wc -l)
   echo "   관련 프로세스: ${procs}개"
 }
 
@@ -116,16 +177,16 @@ cmd_pi() {
     curl -s "http://127.0.0.1:$PORT/api/health" 2>/dev/null || echo "  응답 없음"
     echo
   else
-    echo "⚪ 서버 미실행"
+    echo "⚪ 서버 미실행 (포트 $PORT)"
   fi
 }
 
 cmd_ws() {
   if ! is_running; then
-    echo "⚪ 서버 미실행"
+    echo "⚪ 서버 미실행 (포트 $PORT)"
     return 1
   fi
-  echo "=== WebSocket 테스트 ==="
+  echo "=== WebSocket 테스트 (포트 $PORT) ==="
   cd "$TURK_DIR"
   npx tsx -e '
 import WebSocket from "ws";
@@ -147,7 +208,7 @@ setTimeout(() => { console.log("타임아웃"); process.exit(1); }, 10000);
 
 cmd_session() {
   if ! is_running; then
-    echo "⚪ 서버 미실행"
+    echo "⚪ 서버 미실행 (포트 $PORT)"
     return 1
   fi
   cd "$TURK_DIR"
@@ -173,7 +234,7 @@ setTimeout(() => { console.log("타임아웃"); process.exit(1); }, 10000);
 }
 
 # ── 메인 ────────────────────────────────────────────────────────────────
-case "${1:-help}" in
+case "${CMD:-help}" in
   start)   cmd_start ;;
   stop)    cmd_stop ;;
   restart) cmd_restart ;;
@@ -184,5 +245,6 @@ case "${1:-help}" in
   ws)      cmd_ws ;;
   session) cmd_session ;;
   help|--help|-h) usage ;;
-  *) echo "알 수 없는 명령: $1"; usage; exit 1 ;;
+  "") usage ;;
+  *) echo "알 수 없는 명령: $CMD"; usage; exit 1 ;;
 esac
