@@ -41,7 +41,7 @@ body {
 .turk-app {
 	max-width: 34.286rem;
 	margin: 0 auto;
-	padding: 0.571rem 0.857rem 0.857rem;
+	padding: 0.571rem 0.857rem 4rem;
 	display: flex;
 	flex-direction: column;
 	gap: 0.857rem;
@@ -261,6 +261,10 @@ body {
 	transition: opacity 0.2s;
 }
 
+.turk-grid-hidden {
+	display: none;
+}
+
 .turk-message-wrap.turk-loading .turk-scroll-arrow {
 	opacity: 0.4;
 }
@@ -402,9 +406,16 @@ body {
 
 /* 입력 폼 */
 .turk-input-form {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
 	display: flex;
 	gap: 0.286rem;
-	flex: none;
+	background: var(--background);
+	padding: 0.286rem;
+	box-sizing: border-box;
+	z-index: 10;
 }
 
 .turk-input-field {
