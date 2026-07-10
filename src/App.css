@@ -116,9 +116,6 @@ body {
 	gap: 0.2em;
 }
 
-.turk-thinking-btn:hover {
-	color: var(--success);
-}
 
 .turk-new-btn {
 	background: none;
@@ -149,8 +146,10 @@ body {
 	gap: 0.2em;
 }
 
+@media (hover: hover) {
 .turk-new-btn:hover {
 	color: var(--success);
+}
 }
 
 /* 컨텍스트 사용량 막대 */
@@ -196,8 +195,10 @@ body {
 	z-index: 1;
 }
 
+@media (hover: hover) {
 .turk-model-btn:hover {
 	color: var(--success);
+}
 }
 
 /* 메시지 영역 */
@@ -354,7 +355,7 @@ body {
 	font-size: var(--turk-font-size);
 	line-height: 1.2;
 	white-space: pre-wrap;
-	word-break: break-word;
+	word-break: break-all;
 	transition: all 0.1s;
 	user-select: none;
 	-webkit-tap-highlight-color: transparent;
@@ -389,6 +390,8 @@ body {
 .turk-bg-destructive { background: var(--destructive) !important; }
 .turk-bg-primary { background: var(--primary) !important; }
 .turk-bg-secondary { background: var(--secondary) !important; }
+.turk-bg-accent { background: var(--accent) !important; }
+.turk-bg-muted { background: var(--muted) !important; }
 
 /* 버튼 글자색 */
 .turk-fg-white { color: #fff !important; }

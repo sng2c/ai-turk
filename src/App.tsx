@@ -54,17 +54,17 @@ function systemPrompt(rows: number, cols: number): string {
 - Markdown supported.
 
 [Colors]
-- colors: background (success/warning/destructive/primary/secondary)
-- textColors: text (white/black)
-- Contrast: success·destructive→white, warning·primary→black, secondary→white
-- Hidden text: set textColors same as colors (label still sent on click)
+- colors: button background — success(녹)/warning(주)/destructive(빨)/primary(진한 강조)/accent(강조)/secondary(기본)/muted(회)
+- textColors: text color — white/black. OMIT to auto-contrast by background.
+- Auto contrast: dark bg (secondary/muted/accent/destructive)→white; light bg (primary/success/warning)→black.
+- Hidden text: set textColors same as colors (label invisible, still clickable).
 
 [Examples]
 Basic menu:
 {"message":"What do you need?","buttons":{"0":"Weather","1":"Time","2":"News","3":"Help","4":""}}
 
 Colored actions:
-{"message":"Settings saved.","buttons":{"0":"OK","1":"Cancel","2":""},"colors":{"0":"success","1":"destructive"},"textColors":{"0":"white","1":"white"}}
+{"message":"Settings saved.","buttons":{"0":"OK","1":"Cancel","2":""},"colors":{"0":"success","1":"destructive"}}
 
 Hidden text color block (clickable, label invisible):
 {"message":"Select a zone.","buttons":{"0":"A","1":"B","2":"C","3":"D"},"colors":{"0":"destructive","1":"warning","2":"success","3":"primary"},"textColors":{"0":"destructive","1":"warning","2":"success","3":"primary"}}
@@ -151,6 +151,7 @@ export default function App() {
 	const firstThinkingLevelRef = useRef<string | null>(null);
 	const thinkingCycleHitsRef = useRef(0);
 	const THINKING_LABEL: Record<string, string> = { off: "OFF", low: "LOW", medium: "MEDIUM", high: "HIGH", xhigh: "XHIGH" };
+	const THINKING_COLOR: Record<string, string> = { off: "var(--muted-foreground)", low: "var(--success)", medium: "#06b6d4", high: "var(--warning)", xhigh: "var(--destructive)" };
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
@@ -184,7 +185,7 @@ export default function App() {
 	const prevStateRef = useRef<TurkState | null>(null);
 	const availableModels = useRef<any[]>([]);
 	const modelPage = useRef(0);
-	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 2; // 23 (나머지 2칸은 이전/다음)
+	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 3; // 22 (나머지 3칸은 이전/다음/취소)
 	const reconnectDelay = useRef(1000);
 	const gridRef = useRef({ rows: DEFAULT_ROWS, cols: DEFAULT_COLS });
 	gridRef.current = { rows, cols };
@@ -321,7 +322,7 @@ export default function App() {
 				}
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
-					if (msg.data.model) setCurrentModel(msg.data.model.name || msg.data.model.id || "");
+					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); }
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);
 					if (msg.data.thinkingLevel === "off") {
@@ -488,17 +489,26 @@ export default function App() {
 		const start = page * MODELS_PER_PAGE;
 		const pageModels = models.slice(start, start + MODELS_PER_PAGE);
 		const buttons: Record<string, string> = {};
+		const colors: Record<string, string> = {};
+		const textColors: Record<string, string> = {};
 		pageModels.forEach((m: any, i: number) => {
-			buttons[String(i)] = `${m.provider}\n${m.name || m.id}`;
+			buttons[String(i)] = `${m.provider}/${m.name || m.id}`;
+			// 현재 모델은 배경 강조
+			if (`${m.provider}/${m.name || m.id}` === currentModelRef.current) {
+				colors[String(i)] = "primary";
+			}
 		});
 		for (let i = pageModels.length; i < MODELS_PER_PAGE; i++) {
 			buttons[String(i)] = "";
 		}
-		// 이전/다음 버튼
+		// 이전/다음/취소 버튼
 		buttons[String(MODELS_PER_PAGE)] = page > 0 ? "←이전" : "";
 		buttons[String(MODELS_PER_PAGE + 1)] = page < totalPages - 1 ? "다음→" : "";
+		buttons[String(MODELS_PER_PAGE + 2)] = "취소";
+		colors[String(MODELS_PER_PAGE + 2)] = "destructive";
+		textColors[String(MODELS_PER_PAGE + 2)] = "white";
 		modelMode.current = true;
-		setState({ message: `현재 모델: ${currentModelRef.current || "—"}\n페이지 ${page + 1}/${totalPages} — 모델을 선택하세요.`, buttons });
+		setState({ message: `현재 모델: ${currentModelRef.current || "—"}\n페이지 ${page + 1}/${totalPages} — 모델을 선택하세요.`, buttons, colors, textColors });
 	};
 
 	// ── 프롬프트 전송 ───────────────────────────────────────────────────
@@ -547,6 +557,12 @@ export default function App() {
 			return;
 		}
 		if (modelMode.current) {
+			if (text === "취소") {
+				modelMode.current = false;
+				setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
+				prevStateRef.current = null;
+				return;
+			}
 			// 페이지 이동
 			if (text === "←이전") {
 				modelPage.current = Math.max(0, modelPage.current - 1);
@@ -561,7 +577,7 @@ export default function App() {
 			// 모델 선택
 			const ws = wsRef.current;
 			const model = availableModels.current.find((m: any) =>
-				`${m.provider}/${m.name || m.id}` === text.replace(/\n/g, "/"));
+				`${m.provider}/${m.name || m.id}` === text);
 			if (model && ws?.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({
 					type: "set_model",
@@ -623,7 +639,7 @@ export default function App() {
 						prevStateRef.current = state;
 						ws.send(JSON.stringify({ type: "get_available_models" }));
 					}
-				}} title="모델 선택">{currentModel || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{THINKING_LABEL[thinkingLevel]}</button> <button className="turk-new-btn" onClick={() => {
+				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: THINKING_COLOR[thinkingLevel] }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{THINKING_LABEL[thinkingLevel]}</button> <button className="turk-new-btn" onClick={() => {
 				if (!confirm("새 세션을 시작할까요?")) return;
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {
@@ -633,7 +649,7 @@ export default function App() {
 				}
 			}} title={`컨텍스트 ${contextPct ?? "—"}% — 새 세션 시작`}>
 					{contextPct != null ? (
-						<span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, contextPct))}%` }} /><span className="turk-ctx-pct">{Math.round(contextPct)}%</span></span></span>
+						<span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, contextPct))}%`, background: contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)" }} /><span className="turk-ctx-pct">{Math.round(contextPct)}%</span></span></span>
 						) : <span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: "0%" }} /><span className="turk-ctx-pct">—</span></span></span>}
 				</button></span>
 			</header>
@@ -663,7 +679,7 @@ export default function App() {
 					label ? (
 						<button
 							key={idx}
-							className={`turk-grid-btn${state.colors?.[idx] ? ` turk-bg-${state.colors[idx]}` : ""}${state.textColors?.[idx] ? ` turk-fg-${state.textColors[idx]}` : ""}`}
+							className={`turk-grid-btn${state.colors?.[idx] ? ` turk-bg-${state.colors[idx]}` : ""}${state.textColors?.[idx] ? ` turk-fg-${state.textColors[idx]}` : state.colors?.[idx] ? ` turk-fg-${["secondary", "muted", "accent", "destructive"].includes(state.colors[idx]) ? "white" : "black"}` : ""}`}
 							disabled={loading || !piReady}
 							onClick={() => handleSend(label)}
 							style={modelMode.current ? (() => {
