@@ -115,9 +115,9 @@ export class PiBackend extends JsonlBackend {
 
 	override start(): void {
 		try { mkdirSync(this.opts.cwd, { recursive: true }); } catch { /* 무시 */ }
-		const bin = process.env.TURK_PI_BIN || process.env.TURK_RPC_BIN || "pi";
-		const model = process.env.TURK_PI_MODEL || process.env.TURK_RPC_MODEL || "";
-		const extra = (process.env.TURK_PI_ARGS || process.env.TURK_RPC_ARGS || "").split(/\s+/).filter(Boolean);
+		const bin = process.env.TURK_PI_BIN || "pi";
+		const model = process.env.TURK_PI_MODEL || "";
+		const extra = (process.env.TURK_PI_ARGS || "").split(/\s+/).filter(Boolean);
 		const args = ["--mode", "rpc", "--no-session", ...(model ? ["--model", model] : []), ...extra];
 		this.log(`[Turk] ${bin} ${args.join(" ")} 시작`);
 		this.attach(spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], cwd: this.opts.cwd }), "pi");
@@ -149,7 +149,7 @@ export class ClaudeBackend extends JsonlBackend {
 	override start(): void {
 		try { mkdirSync(this.opts.cwd, { recursive: true }); } catch { /* 무시 */ }
 		const bin = process.env.TURK_CLAUDE_BIN || "claude";
-		const model = process.env.TURK_CLAUDE_MODEL || process.env.TURK_RPC_MODEL || "";
+		const model = process.env.TURK_CLAUDE_MODEL || "";
 		// Ollama Anthropic 호환 엔드포인트 — `ollama launch claude --model` 과 동일 환경.
 		const baseUrl = process.env.ANTHROPIC_BASE_URL || "http://localhost:11434";
 		const env: Record<string, string> = {
@@ -223,7 +223,7 @@ export class ClaudeBackend extends JsonlBackend {
 			case "get_state":
 				this.emit({ ...base, data: {
 					sessionId: this.sessionId ?? "",
-					model: { id: process.env.TURK_CLAUDE_MODEL || process.env.TURK_RPC_MODEL || "claude", name: process.env.TURK_CLAUDE_MODEL || process.env.TURK_RPC_MODEL || "Claude", provider: "claude" },
+					model: { id: process.env.TURK_CLAUDE_MODEL || "claude", name: process.env.TURK_CLAUDE_MODEL || "Claude", provider: "claude" },
 					thinkingLevel: "off",
 					isStreaming: false,
 					messageCount: 0,
@@ -231,7 +231,7 @@ export class ClaudeBackend extends JsonlBackend {
 				break;
 			case "get_available_models": {
 				// Claude 백엔드는 단일 모델만 사용 — 설정된 TURK_CLAUDE_MODEL 를 그대로 표시.
-				const m = process.env.TURK_CLAUDE_MODEL || process.env.TURK_RPC_MODEL || "claude";
+				const m = process.env.TURK_CLAUDE_MODEL || "claude";
 				this.emit({ ...base, data: { models: [{ provider: "claude", id: m, name: m }] }});
 				break;
 			}

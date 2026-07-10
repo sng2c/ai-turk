@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # turkctl — AI Turk 제어 스크립트
-# 다중 인스턴스 지원: --env <파일> 옵션으로 .env 파일 지정 가능
+# 다중 인스턴스: TURK_ENV_FILE 환경변수 또는 --env <파일> 로 .env 파일 지정
 set -euo pipefail
 
 TURK_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -8,13 +8,14 @@ cd "$TURK_DIR"
 
 # ── 인자 파싱 ────────────────────────────────────────────────────────────
 # 사용법: turkctl [--env <파일> | -e <파일>] <명령>
-ENV_FILE="$TURK_DIR/.env"
+ENV_FILE=""
+ENV_FLAG=""
 CMD=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --env|-e)
       shift
-      ENV_FILE="$1"
+      ENV_FLAG="$1"
       shift
       ;;
     *)
@@ -24,19 +25,41 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# ENV_FILE 절대경로 변환
+# ENV_FILE 결정: --env 플래그 > TURK_ENV_FILE 환경변수 > 기본 .env
+if [ -n "$ENV_FLAG" ]; then
+  ENV_FILE="$ENV_FLAG"
+elif [ -n "${TURK_ENV_FILE:-}" ]; then
+  ENV_FILE="$TURK_ENV_FILE"
+else
+  ENV_FILE="$TURK_DIR/.env"
+fi
+
+# 절대경로 변환
 case "$ENV_FILE" in
   /*) ;;
   *)  ENV_FILE="$TURK_DIR/$ENV_FILE" ;;
 esac
 
-# .env 파일에서 PORT 및 기타 설정 읽기
-# 우선순위: 환경변수 PORT > --env 파일 > 기본 .env > 기본값 3000
-if [ -z "${PORT:-}" ] && [ -f "$ENV_FILE" ]; then
-  PORT="$(grep -E '^PORT=' "$ENV_FILE" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')"
+# 자식 프로세스(vite/server.ts)도 동일 .env 를 읽도록 전파
+export TURK_ENV_FILE="$ENV_FILE"
+
+# .env 파일에서 TURK_PORT / TURK_HOST 읽기
+# 우선순위: 환경변수 TURK_PORT > TURK_ENV_FILE 파일 > 기본값 3000
+if [ -z "${TURK_PORT:-}" ] && [ -f "$ENV_FILE" ]; then
+  TURK_PORT="$(grep -E '^TURK_PORT=' "$ENV_FILE" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')"
 fi
-PORT="${PORT:-3000}"
-LOG_FILE="/tmp/ai-turk-${PORT}.log"
+TURK_PORT="${TURK_PORT:-3000}"
+
+if [ -z "${TURK_HOST:-}" ] && [ -f "$ENV_FILE" ]; then
+  TURK_HOST="$(grep -E '^TURK_HOST=' "$ENV_FILE" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')"
+fi
+TURK_HOST="${TURK_HOST:-127.0.0.1}"
+
+LOG_FILE="/tmp/ai-turk-${TURK_PORT}.log"
+
+# 자식 프로세스(vite/server.ts) 에 전달 — 환경변수로 명시
+export TURK_PORT="$TURK_PORT"
+export TURK_HOST="$TURK_HOST"
 
 # .env 파일 내용을 환경변수로 로드 (Vite에 전달되도록)
 load_env() {
@@ -56,7 +79,9 @@ AI Turk 제어 도구
 
 옵션:
   --env <파일>  설정 파일 지정 (기본: .env)
-                예: turkctl --env .env.8003 start
+                환경변수 TURK_ENV_FILE 로도 지정 가능 (--env 가 우선)
+                예: TURK_ENV_FILE=.env.8003 turkctl start
+                    turkctl --env .env.8003 start
 
 명령:
   start     개발 서버 시작 (npm run dev, 백그라운드)
@@ -72,7 +97,8 @@ AI Turk 제어 도구
 
 예시:
   turkctl start                         # .env 사용 (기본)
-  turkctl --env .env.8003 start          # .env.8003 사용
+  TURK_ENV_FILE=.env.8003 turkctl start  # 환경변수로 .env.8003 지정
+  turkctl --env .env.8003 start          # 플래그로 .env.8003 지정
   turkctl --env .env.8004 restart        # 8004 인스턴스 재시작
   turkctl status
   turkctl logs
@@ -80,34 +106,34 @@ EOF
 }
 
 is_running() {
-  curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/" 2>/dev/null | grep -q 200
+  curl -s -o /dev/null -w "%{http_code}" "http://$TURK_HOST:$TURK_PORT/" 2>/dev/null | grep -q 200
 }
 
 # 특정 포트에 묶인 프로세스 종료 (다른 인스턴스 영향 안 줌)
 kill_port() {
   local pids
-  pids=$(lsof -t -i :"$PORT" 2>/dev/null || true)
+  pids=$(lsof -t -i :"$TURK_PORT" 2>/dev/null || true)
   if [ -n "$pids" ]; then
     kill -9 $pids 2>/dev/null || true
   fi
-  fuser -k "$PORT/tcp" 2>/dev/null || true
+  fuser -k "$TURK_PORT/tcp" 2>/dev/null || true
 }
 
 cmd_start() {
   if is_running; then
-    echo "✅ 이미 실행 중: http://127.0.0.1:$PORT (env: $ENV_FILE)"
+    echo "✅ 이미 실행 중: http://$TURK_HOST:$TURK_PORT (env: $ENV_FILE)"
     return 0
   fi
-  echo "▶ 서버 시작 중... (포트 $PORT, env: $ENV_FILE)"
+  echo "▶ 서버 시작 중... (포트 $TURK_PORT, env: $ENV_FILE)"
   cd "$TURK_DIR"
   kill_port
   sleep 1
   load_env
-  PORT="$PORT" nohup npx vite > "$LOG_FILE" 2>&1 &
+  nohup npx vite > "$LOG_FILE" 2>&1 &
   sleep 5
   if is_running; then
-    echo "✅ 서버 실행됨: http://127.0.0.1:$PORT"
-    echo "   WebSocket: ws://127.0.0.1:$PORT/ws"
+    echo "✅ 서버 실행됨: http://$TURK_HOST:$TURK_PORT"
+    echo "   WebSocket: ws://$TURK_HOST:$TURK_PORT/ws"
     echo "   로그: $LOG_FILE"
   else
     echo "❌ 시작 실패 — 로그 확인: turkctl logs"
@@ -117,22 +143,22 @@ cmd_start() {
 }
 
 cmd_stop() {
-  echo "▶ 중지 중... (포트 $PORT)"
+  echo "▶ 중지 중... (포트 $TURK_PORT)"
   
   # 1. 해당 포트를 사용하는 모든 프로세스 종료 (강력하게)
   local pids
-  pids=$(lsof -t -i :"$PORT" 2>/dev/null || true)
+  pids=$(lsof -t -i :"$TURK_PORT" 2>/dev/null || true)
   if [ -n "$pids" ]; then
     kill -9 $pids 2>/dev/null || true
   fi
-  fuser -k -9 "$PORT/tcp" 2>/dev/null || true
+  fuser -k -9 "$TURK_PORT/tcp" 2>/dev/null || true
 
   # 2. 프로세스 이름 기반 추가 정리 (Vite 및 pi RPC)
   # 특정 포트와 연관된 vite/pi 프로세스만 죽이기 위해 pgrep/pkill 조합 사용
   pkill -f "vite" 2>/dev/null || true
   pkill -f "pi --mode rpc" 2>/dev/null || true
 
-  echo "✅ 서버 및 관련 프로세스 중지됨 (포트 $PORT)"
+  echo "✅ 서버 및 관련 프로세스 중지됨 (포트 $TURK_PORT)"
 }
 
 cmd_restart() {
@@ -143,18 +169,18 @@ cmd_restart() {
 
 cmd_status() {
   if is_running; then
-    echo "✅ 서버 실행 중 (포트 $PORT, env: $ENV_FILE)"
+    echo "✅ 서버 실행 중 (포트 $TURK_PORT, env: $ENV_FILE)"
     local health
-    health=$(curl -s "http://127.0.0.1:$PORT/api/health" 2>/dev/null || echo "{}")
+    health=$(curl -s "http://$TURK_HOST:$TURK_PORT/api/health" 2>/dev/null || echo "{}")
     echo "   $health"
     local ws_count
     ws_count=$(grep -c "클라이언트 연결" "$LOG_FILE" 2>/dev/null || echo "0")
     echo "   로그: $LOG_FILE"
   else
-    echo "⚪ 서버 미실행 (포트 $PORT) — turkctl --env $(basename "$ENV_FILE") start"
+    echo "⚪ 서버 미실행 (포트 $TURK_PORT) — turkctl --env $(basename "$ENV_FILE") start"
   fi
   local procs
-  procs=$(lsof -t -i :"$PORT" 2>/dev/null | wc -l)
+  procs=$(lsof -t -i :"$TURK_PORT" 2>/dev/null | wc -l)
   echo "   관련 프로세스: ${procs}개"
 }
 
@@ -178,23 +204,23 @@ cmd_pi() {
     echo "=== pi 프로세스 ==="
     ps aux | grep "pi --mode rpc" | grep -v grep || echo "  pi 프로세스 없음"
     echo "=== 헬스체크 ==="
-    curl -s "http://127.0.0.1:$PORT/api/health" 2>/dev/null || echo "  응답 없음"
+    curl -s "http://$TURK_HOST:$TURK_PORT/api/health" 2>/dev/null || echo "  응답 없음"
     echo
   else
-    echo "⚪ 서버 미실행 (포트 $PORT)"
+    echo "⚪ 서버 미실행 (포트 $TURK_PORT)"
   fi
 }
 
 cmd_ws() {
   if ! is_running; then
-    echo "⚪ 서버 미실행 (포트 $PORT)"
+    echo "⚪ 서버 미실행 (포트 $TURK_PORT)"
     return 1
   fi
-  echo "=== WebSocket 테스트 (포트 $PORT) ==="
+  echo "=== WebSocket 테스트 (포트 $TURK_PORT) ==="
   cd "$TURK_DIR"
   npx tsx -e '
 import WebSocket from "ws";
-const ws = new WebSocket("ws://127.0.0.1:'"$PORT"'/ws");
+const ws = new WebSocket("ws://$TURK_HOST:'"$TURK_PORT"'/ws");
 ws.on("open", () => { console.log("✅ WS 연결됨"); ws.send(JSON.stringify({ type: "get_state" })); });
 ws.on("message", (raw) => {
   const msg = JSON.parse(raw.toString());
@@ -212,13 +238,13 @@ setTimeout(() => { console.log("타임아웃"); process.exit(1); }, 10000);
 
 cmd_session() {
   if ! is_running; then
-    echo "⚪ 서버 미실행 (포트 $PORT)"
+    echo "⚪ 서버 미실행 (포트 $TURK_PORT)"
     return 1
   fi
   cd "$TURK_DIR"
   npx tsx -e '
 import WebSocket from "ws";
-const ws = new WebSocket("ws://127.0.0.1:'"$PORT"'/ws");
+const ws = new WebSocket("ws://$TURK_HOST:'"$TURK_PORT"'/ws");
 ws.on("open", () => ws.send(JSON.stringify({ type: "get_state" })));
 ws.on("message", (raw) => {
   const msg = JSON.parse(raw.toString());
