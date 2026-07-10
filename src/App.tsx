@@ -103,7 +103,8 @@ function extractAssistantText(messages: any[]): string {
 // 후보(코드펜스 / 전체 블록 / 첫 '{' 부터)를 뽑아 JSON.parse 시도.
 // 파싱 실패 시 모델에게 원문을 돌려주며 재시도하는 전략(self-correction)이
 // 구문 보정 라이브러리보다 근본적이므로, 여기서는 가볍게만 시도한다.
-function parseTurkJSON(text: string): TurkState | null {
+// 결과: { parsed } 성공 시 | { error } 실패 시(JSON.parse 에러 메시지 보존)
+function parseTurkJSON(text: string): { parsed: TurkState } | { error: string } | null {
 	// JSON 후보 추출: 코드펜스 → 전체 블록 → 첫 '{' 부터 끝까지(잘린 응답)
 	const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
 	const candidates: string[] = [];
@@ -113,17 +114,20 @@ function parseTurkJSON(text: string): TurkState | null {
 	const firstBrace = text.indexOf("{");
 	if (firstBrace !== -1) candidates.push(text.slice(firstBrace));
 
+	let lastError = "";
 	for (const raw of candidates) {
 		const s = raw.trim();
 		if (!s) continue;
 		try {
 			const obj = JSON.parse(s);
 			if (obj && typeof obj === "object" && obj.message !== undefined && obj.buttons !== undefined) {
-				return obj as TurkState;
+				return { parsed: obj as TurkState };
 			}
-		} catch { /* 다음 후보 시도 */ }
+		} catch (e) {
+			lastError = e instanceof Error ? e.message : String(e);
+		}
 	}
-	return null;
+	return candidates.length ? { error: lastError } : null;
 }
 
 // ── 마크다운 간이 렌더 ────────────────────────────────────────────────
@@ -304,27 +308,31 @@ export default function App() {
 				// 2차(fallback): messages가 비었거나 파싱 실패 시 스트리밍 누적본 사용
 				if (!text) text = streamingTextRef.current;
 				if (text) {
-					const parsed = parseTurkJSON(text);
-					if (parsed) {
+					const result = parseTurkJSON(text);
+					if (result && "parsed" in result) {
 						retryCountRef.current = 0; // 성공 시 카운터 리셋
-						setState(parsed);
+						setState(result.parsed);
 					} else {
 						// 스트리밍본으로 한 번 더 시도 (messages가 잘렸을 수 있음)
 						const fallback = streamingTextRef.current && streamingTextRef.current !== text
 							? parseTurkJSON(streamingTextRef.current)
 							: null;
-						if (fallback) {
+						if (fallback && "parsed" in fallback) {
 							retryCountRef.current = 0;
-							setState(fallback);
+							setState(fallback.parsed);
 						} else if (retryCountRef.current < MAX_PARSE_RETRIES) {
-							// 자가 수정 재시도: 원문을 모델에게 돌려주며 JSON 형식 재요청
+							// 자가 수정 재시도: 원문 + JSON.parse 에러를 모델에게 돌려주며 형식 재요청
 							retryCountRef.current++;
 							setLoading(true);
-							const retry = `지난 응답이 올바른 JSON 형식이 아니에습니다. 다음 원문을 참고하여, 동일한 내용으로 올바른 JSON 버튼 그리드 하나만 다시 출력하세요. 원문 외 설명/코드펜스 금지.\n\n[잘못된 응답]\n${text.slice(0, 800)}`;
+							const errInfo = (result && "error" in result) ? result.error
+								: (fallback && "error" in fallback) ? fallback.error : "";
+							const retry = `지난 응답이 올바른 JSON 형식이 아닙니다. JSON.parse 에러: ${errInfo}\n다음 원문을 참고하여, 동일한 내용으로 올바른 JSON 버튼 그리드 하나만 다시 출력하세요. 원문 외 설명/코드펜스 금지.\n\n[잘못된 응답]\n${text.slice(0, 800)}`;
 							wsRef.current?.send(JSON.stringify({ type: "prompt", message: retry }));
 						} else {
 							retryCountRef.current = 0;
-							setState(errState(`[파싱실패] ${text.slice(0, 200)}`, gridRef.current.rows, gridRef.current.cols));
+							const errInfo = (result && "error" in result) ? result.error
+								: (fallback && "error" in fallback) ? fallback.error : "알 수 없는 오류";
+							setState(errState(`[파싱실패] ${errInfo}\n${text.slice(0, 150)}`, gridRef.current.rows, gridRef.current.cols));
 						}
 					}
 				} else if (!loading) {
@@ -365,8 +373,8 @@ export default function App() {
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				}
 				if (msg.command === "get_last_assistant_text" && msg.success && msg.data?.text) {
-					const parsed = parseTurkJSON(msg.data.text);
-					if (parsed) setState(parsed);
+					const result = parseTurkJSON(msg.data.text);
+					if (result && "parsed" in result) setState(result.parsed);
 					// 주의: 여기서 sessionInitRef를 true로 하지 않음.
 					// 기존 대화 복원 시에도 다음 사용자 프롬프트에 시스템 지시가
 					// 다시 붙도록 두어야 JSON 형식이 유지됨.
