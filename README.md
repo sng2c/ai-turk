@@ -15,8 +15,11 @@
 18세기 체스 기계 "터키인"에는 안에 사람이 숨어 있었습니다.
 AI Turk도 같은 원리 — 기계 안에 **LLM이 숨어** 버튼 그리드를 생성합니다.
 
-**AI Turk**는 `pi` 코딩 에이전트 전용 인터페이스입니다.
-`pi --mode rpc`를 영구 백엔드로 사용하여, 세션 컨텍스트 자동 관리, 도구 사용(bash, read, edit), 실시간 스트리밍을 지원합니다.
+**AI Turk**는 코딩 에이전트 전용 인터페이스입니다.
+백엔드를 추상화하여 **pi**(`pi --mode rpc`) 와 **Claude Code**(`claude -p stream-json`) 양쪽을 지원합니다.
+세션 컨텍스트 자동 관리, 도구 사용(bash, read, edit), 실시간 스트리밍을 지원합니다.
+
+Claude Code 백엔드는 [Ollama](https://ollama.com)의 Anthropic 호환 엔드포인트를 경유해 구동 — `ollama launch claude --model <m>` 와 동등한 환경을 `.env` 설정으로 재현합니다.
 
 ## 구동 방법
 
@@ -40,6 +43,24 @@ turkctl start
 ```
 
 접속: `http://127.0.0.1:3000`
+
+### 백엔드 전환 (pi ↔ Claude Code)
+
+`.env`의 `TURK_BACKEND`로 백엔드를 선택. 기본은 `pi`.
+
+**Claude Code 백엔드** — Ollama Claude 조합 (`ollama launch claude` 와 동등):
+```bash
+# .env에 추가/주석해제
+turkctl stop
+# .env 편집:
+#   TURK_BACKEND=claude
+#   TURK_RPC_MODEL=glm-5.1:cloud
+#   ANTHROPIC_BASE_URL=http://localhost:11434
+#   ANTHROPIC_AUTH_TOKEN=ollama
+turkctl start
+```
+필요 시 Ollama 준비: `ollama serve` + `ollama pull glm-5.1:cloud`.
+타이틀 옆에 백엔드 종류(`pi`/`claude`)가 작게 표시됩니다. 자세한 설정은 `.env.example` 참고.
 
 ## 스스로 수정 가능
 
