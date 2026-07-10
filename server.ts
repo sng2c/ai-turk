@@ -29,7 +29,8 @@ try {
 } catch { /* .env 없음 — 무시 */ }
 
 // ── 설정 ────────────────────────────────────────────────────────────────
-const PORT = parseInt(process.env.PORT || "3000");
+const PORT = parseInt(process.env.TURK_PORT || "3000");
+const HOST = process.env.TURK_HOST || "127.0.0.1";
 // 에이전트 실행 위치 — 기본 ./workspace
 const AGENT_CWD = process.env.TURK_AGENT_CWD || join(__dirname, "workspace");
 const DIST_DIR = join(__dirname, "dist");
@@ -139,8 +140,11 @@ process.on("SIGINT", () => {
 
 // ── 시작 ──────────────────────────────────────────────────────────────────
 startBackend();
-server.listen(PORT, () => {
-	console.log(`[Turk] AI Turk 서버 http://localhost:${PORT}`);
-	console.log(`[Turk] WebSocket ws://localhost:${PORT}/ws`);
-	console.log(`[Turk] 백엔드: ${backend?.kind()} · 모델: ${process.env.TURK_RPC_MODEL || "기본"}`);
+server.listen(PORT, HOST, () => {
+	console.log(`[Turk] AI Turk 서버 http://${HOST}:${PORT}`);
+	console.log(`[Turk] WebSocket ws://${HOST}:${PORT}/ws`);
+	const model = process.env.TURK_BACKEND === "claude"
+		? (process.env.TURK_CLAUDE_MODEL || "기본")
+		: (process.env.TURK_PI_MODEL || "기본");
+	console.log(`[Turk] 백엔드: ${backend?.kind()} · 모델: ${model}`);
 });

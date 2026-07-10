@@ -98,8 +98,8 @@ export default defineConfig(() => {
 			},
 		},
 		server: {
-			host: "127.0.0.1",
-			port: Number(process.env.PORT) || 3000,
+			host: process.env.TURK_HOST || "127.0.0.1",
+			port: Number(process.env.TURK_PORT) || 3000,
 			allowedHosts: true as const,
 		},
 	};
