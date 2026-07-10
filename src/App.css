@@ -7,7 +7,7 @@
 }
 
 html {
-	font-size: 14px; /* rem 기준 */
+	font-size: 16px; /* rem 기준 */
 }
 
 html, body {
@@ -23,6 +23,18 @@ body {
 	min-height: 100dvh;
 	font-size: 1rem;
 }
+
+/* lucide 아이콘 공통 */
+.turk-ico {
+	width: 1em;
+	height: 1em;
+	flex-shrink: 0;
+	margin-bottom: 0.1em;
+}
+
+.turk-ico-red { color: var(--destructive); }
+.turk-ico-amber { color: var(--warning); }
+.turk-ico-green { color: var(--success); }
 
 /* ── 레이아웃 ──────────────────────────────────────────────────────────── */
 
@@ -41,13 +53,33 @@ body {
 .turk-header {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	gap: 0.3em;
 }
 
 .turk-header h1 {
 	font-size: var(--turk-font-size);
 	font-weight: 400;
 	font-family: "NeoDunggeunmo", monospace;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35em;
+}
+
+.turk-header h1 .turk-ico {
+	width: 1.6em;
+	height: 1.6em;
+}
+
+.turk-bot-spin {
+	animation: turk-bot-flip 2.6s ease-in-out infinite;
+}
+
+@keyframes turk-bot-flip {
+	0% { transform: rotate(0deg); }
+	11.5% { transform: rotate(180deg); }
+	50% { transform: rotate(180deg); }
+	61.5% { transform: rotate(360deg); }
+	100% { transform: rotate(360deg); }
 }
 
 .turk-mode {
@@ -56,26 +88,8 @@ body {
 	font-family: "NeoDunggeunmo", monospace;
 	display: flex;
 	align-items: center;
-	gap: 0.286rem;
-}
-
-.turk-hourglass {
-	display: inline-block;
-	width: 1rem;
-	height: 1rem;
-	line-height: 1;
-	text-align: center;
-	vertical-align: middle;
-	transform-origin: calc(50% + 0.143rem) calc(50% - 0.143rem);
-	animation: turk-flip 4.6s ease-in-out infinite;
-}
-
-@keyframes turk-flip {
-	0% { transform: rotate(0deg); }
-	6.5% { transform: rotate(180deg); }
-	50% { transform: rotate(180deg); }
-	56.5% { transform: rotate(360deg); }
-	100% { transform: rotate(360deg); }
+	gap: 0.143rem;
+	margin-left: auto;
 }
 
 .turk-status {
@@ -83,6 +97,9 @@ body {
 	color: var(--muted-foreground);
 	font-family: "NeoDunggeunmo", monospace;
 	line-height: 1;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2em;
 }
 
 .turk-thinking-btn {
@@ -94,6 +111,9 @@ body {
 	color: var(--muted-foreground);
 	line-height: 1;
 	transition: color 0.1s;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2em;
 }
 
 .turk-thinking-btn:hover {
@@ -120,10 +140,13 @@ body {
 	color: var(--accent-foreground);
 	line-height: 1;
 	transition: color 0.1s;
-	max-width: 8.571rem;
+	max-width: 11rem;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2em;
 }
 
 .turk-new-btn:hover {
@@ -136,11 +159,13 @@ body {
 	align-items: center;
 	gap: 0.214rem;
 	color: var(--muted-foreground);
+	margin-top: 0.15em;
 }
 
 .turk-ctx-bar {
+	position: relative;
 	display: inline-block;
-	width: 2.286rem;
+	width: 2.5rem;
 	height: 1rem;
 	border: 0.071rem solid var(--foreground);
 	background: var(--muted);
@@ -152,6 +177,23 @@ body {
 	height: 100%;
 	background: var(--success);
 	transition: width 0.3s ease;
+}
+
+.turk-ctx-pct {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.7rem;
+	line-height: 1;
+	color: #fff;
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+	pointer-events: none;
+	z-index: 1;
 }
 
 .turk-model-btn:hover {
@@ -216,6 +258,10 @@ body {
 .turk-grid-loading {
 	opacity: 0.4;
 	transition: opacity 0.2s;
+}
+
+.turk-message-wrap.turk-loading .turk-scroll-arrow {
+	opacity: 0.4;
 }
 
 .turk-message-loading {
@@ -334,6 +380,7 @@ body {
 	opacity: 0.15;
 	cursor: default;
 	background: var(--muted);
+	pointer-events: none;
 }
 
 /* 버튼 배경색 */
