@@ -121,7 +121,7 @@ export class PiBackend extends JsonlBackend {
 		const args = ["--mode", "rpc", "--no-session", ...(model ? ["--model", model] : []), ...extra];
 		this.log(`[Turk] ${bin} ${args.join(" ")} 시작`);
 		this.attach(spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], cwd: this.opts.cwd }), "pi");
-		this.emit({ type: "pi_ready" });
+		this.emit({ type: "pi_ready", backend: this.kind() });
 	}
 
 	override send(cmd: Record<string, unknown>): void {
@@ -177,7 +177,7 @@ export class ClaudeBackend extends JsonlBackend {
 		);
 		// Claude -p stream-json 은 첫 user 입력이 도착해야 system/init 을 내보낸다.
 		// App.tsx 는 pi_ready 가 와야 프롬프트를 보내므로 교착 방지를 위해 즉시 ready emit.
-		this.emit({ type: "pi_ready" });
+		this.emit({ type: "pi_ready", backend: this.kind() });
 	}
 
 	override send(cmd: Record<string, unknown>): void {
