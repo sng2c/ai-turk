@@ -136,7 +136,7 @@ export default defineConfig(() => {
 		},
 		server: {
 			host: "127.0.0.1",
-			port: 3000,
+			port: Number(process.env.PORT) || 3000,
 			allowedHosts: true as const,
 		},
 	};
