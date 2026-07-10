@@ -71,7 +71,6 @@ turkctl --env .env.8003 start      # 또는 TURK_ENV_FILE=.env.8003 turkctl star
 # .env 에 추가/주석해제
 TURK_BACKEND=claude
 TURK_CLAUDE_MODEL=claude-haiku-4-5      # claude-* 전체이름
-ANTHROPIC_API_KEY=sk-ant-...         # 또는 ANTHROPIC_AUTH_TOKEN
 # ANTHROPIC_BASE_URL 비우면 기본 api.anthropic.com
 ```
 
