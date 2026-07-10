@@ -57,13 +57,23 @@ turkctl start
 
 ### 백엔드 전환 (pi ↔ claude)
 
-`.env` 의 `TURK_BACKEND` 와 관련 변수로 백엔드를 선택. 기본은 `pi`.
+`.env` 의 `TURK_BACKEND` 로 백엔드 선택. 기본은 `pi`. 백엔드 변수는 분리:
+- pi: `TURK_PI_BIN` / `TURK_PI_MODEL` / `TURK_PI_ARGS` (구명 `TURK_RPC_*` 도 하위호환 인식)
+- claude: `TURK_CLAUDE_BIN` / `TURK_CLAUDE_MODEL` / `ANTHROPIC_*`
 
-**Claude 백엔드 (Ollama Claude 조합)** — `ollama launch claude --model <m>` 와 동등:
+**① Claude 백엔드 — 순수 Anthropic Claude (권장)**:
 ```bash
 # .env 에 추가/주석해제
 TURK_BACKEND=claude
-TURK_RPC_MODEL=glm-5.1:cloud        # Ollama 에 pull 된 모델
+TURK_CLAUDE_MODEL=sonnet            # opus/sonnet/haiku 또는 claude-* 전체이름
+ANTHROPIC_API_KEY=sk-ant-...         # 또는 ANTHROPIC_AUTH_TOKEN
+# ANTHROPIC_BASE_URL 비우면 기본 api.anthropic.com
+```
+
+**② Claude 백엔드 — Ollama Claude 조합** (`ollama launch claude --model <m>` 동등):
+```bash
+TURK_BACKEND=claude
+TURK_CLAUDE_MODEL=glm-5.1:cloud        # Ollama 에 pull 된 모델
 ANTHROPIC_BASE_URL=http://localhost:11434   # Ollama Anthropic 호환 엔드포인트
 ANTHROPIC_AUTH_TOKEN=ollama          # 임의값 (비어두면 subscription 폴백)
 ```

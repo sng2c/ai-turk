@@ -19,7 +19,8 @@ AI Turk도 같은 원리 — 기계 안에 **LLM이 숨어** 버튼 그리드를
 백엔드를 추상화하여 **pi**(`pi --mode rpc`) 와 **Claude Code**(`claude -p stream-json`) 양쪽을 지원합니다.
 세션 컨텍스트 자동 관리, 도구 사용(bash, read, edit), 실시간 스트리밍을 지원합니다.
 
-Claude Code 백엔드는 [Ollama](https://ollama.com)의 Anthropic 호환 엔드포인트를 경유해 구동 — `ollama launch claude --model <m>` 와 동등한 환경을 `.env` 설정으로 재현합니다.
+Claude Code 백엔드는 Anthropic API(순수 Claude) 또는 [Ollama](https://ollama.com)의
+Anthropic 호환 엔드포인트(`ollama launch claude --model <m>` 동등) 양쪽으로 구동 가능 — `.env` 설정으로 선택.
 
 ## 구동 방법
 
@@ -48,18 +49,30 @@ turkctl start
 
 `.env`의 `TURK_BACKEND`로 백엔드를 선택. 기본은 `pi`.
 
-**Claude Code 백엔드** — Ollama Claude 조합 (`ollama launch claude` 와 동등):
+**Claude Code 백엔드**는 `ANTHROPIC_BASE_URL`가 가리키는 엔드포인트로 Anthropic Messages API 요청을 보낸다. 두 구성을 지원:
+
+**① 순수 Anthropic Claude (권장)** — Anthropic API 키로 직접 사용:
 ```bash
-# .env에 추가/주석해제
 turkctl stop
 # .env 편집:
 #   TURK_BACKEND=claude
-#   TURK_RPC_MODEL=glm-5.1:cloud
+#   TURK_CLAUDE_MODEL=sonnet
+#   ANTHROPIC_API_KEY=sk-ant-...
+turkctl start
+```
+
+**② Ollama Claude** — Ollama 0.14+ 의 Anthropic 호환 엔드포인트 경유 (`ollama launch claude` 와 동등):
+```bash
+turkctl stop
+# .env 편집:
+#   TURK_BACKEND=claude
+#   TURK_CLAUDE_MODEL=glm-5.1:cloud
 #   ANTHROPIC_BASE_URL=http://localhost:11434
 #   ANTHROPIC_AUTH_TOKEN=ollama
 turkctl start
 ```
 필요 시 Ollama 준비: `ollama serve` + `ollama pull glm-5.1:cloud`.
+
 타이틀 옆에 백엔드 종류(`pi`/`claude`)가 작게 표시됩니다. 자세한 설정은 `.env.example` 참고.
 
 ## 스스로 수정 가능
