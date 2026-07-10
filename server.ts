@@ -1,19 +1,18 @@
 /**
  * AI Turk 프로덕션 서버
- * pi --mode rpc + WebSocket + 정적 파일 서빙 (dist/)
+ * 백엔드(pi | claude) + WebSocket + 정적 파일 서빙 (dist/)
  *
- * 개발: npm run dev (Vite 플러그인이 pi RPC 통합)
- * 프로덕션: npm start (이 파일이 dist/ + WebSocket + pi RPC)
+ * 개발: npm run dev (Vite 플러그인이 백엔드 통합)
+ * 프로덕션: npm start (이 파일이 dist/ + WebSocket + 백엔드)
  */
 
-import { ChildProcess, spawn } from "node:child_process";
-import { StringDecoder } from "node:string_decoder";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
+import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -31,10 +30,7 @@ try {
 
 // ── 설정 ────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || "3000");
-const PI_BIN = process.env.TURK_RPC_BIN || "pi";
-const PI_MODEL = process.env.TURK_RPC_MODEL || "";
-const PI_EXTRA_ARGS = (process.env.TURK_RPC_ARGS || "").split(/\s+/).filter(Boolean);
-// 에이전트(pi) 실행 위치 — 기본 ./workspace
+// 에이전트 실행 위치 — 기본 ./workspace
 const AGENT_CWD = process.env.TURK_AGENT_CWD || join(__dirname, "workspace");
 const DIST_DIR = join(__dirname, "dist");
 
@@ -50,63 +46,23 @@ const MIME: Record<string, string> = {
 	".woff2": "font/woff2",
 };
 
-// ── pi RPC 프로세스 ────────────────────────────────────────────────────
-let piProcess: ChildProcess | null = null;
-let piReady = false;
+// ── 백엔드(pi | claude) ────────────────────────────────────────────────
+let backend: Backend | null = null;
+let backendReady = false;
 const clients = new Set<WebSocket>();
 
-function startPi(): void {
-	// 에이전트 실행 디렉토리 보장
+function startBackend(): void {
 	try { mkdirSync(AGENT_CWD, { recursive: true }); } catch { /* 무시 */ }
-	const args = ["--mode", "rpc", "--no-session", ...(PI_MODEL ? ["--model", PI_MODEL] : []), ...PI_EXTRA_ARGS];
-	console.log(`[Turk] ${PI_BIN} ${args.join(" ")} 시작`);
-	piProcess = spawn(PI_BIN, args, { stdio: ["pipe", "pipe", "pipe"], cwd: AGENT_CWD });
-	piReady = true;
-
-	const decoder = new StringDecoder("utf8");
-	let buffer = "";
-
-	piProcess.stdout!.on("data", (chunk: Buffer) => {
-		buffer += decoder.write(chunk);
-		while (true) {
-			const idx = buffer.indexOf("\n");
-			if (idx === -1) break;
-			let line = buffer.slice(0, idx);
-			buffer = buffer.slice(idx + 1);
-			if (line.endsWith("\r")) line = line.slice(0, -1);
-			if (!line.trim()) continue;
-			try {
-				broadcast(JSON.parse(line));
-			} catch {
-				console.error("[Turk] JSONL 파싱 오류:", line.slice(0, 120));
-			}
-		}
+	backend = createBackend({
+		cwd: AGENT_CWD,
+		onLog: (m: string) => console.log(m),
 	});
-
-	piProcess.stderr!.on("data", (chunk: Buffer) => {
-		const msg = chunk.toString().trim();
-		if (msg) console.error("[pi]", msg.slice(0, 500));
+	backend.onEvent((ev: TurkEvent) => {
+		if (ev.type === "pi_ready") backendReady = true;
+		if (ev.type === "pi_exit" || ev.type === "pi_error") backendReady = false;
+		broadcast(ev);
 	});
-
-	piProcess.on("exit", (code) => {
-		console.log(`[Turk] pi 종료 (코드: ${code})`);
-		piProcess = null;
-		piReady = false;
-		broadcast({ type: "pi_exit", code });
-	});
-
-	piProcess.on("error", (err) => {
-		console.error("[Turk] pi 시작 실패:", err.message);
-		piProcess = null;
-		broadcast({ type: "pi_error", message: err.message });
-	});
-
-	broadcast({ type: "pi_ready" });
-}
-
-function sendPi(cmd: Record<string, unknown>): void {
-	if (!piProcess?.stdin.writable) return;
-	piProcess.stdin.write(JSON.stringify(cmd) + "\n");
+	backend.start();
 }
 
 function broadcast(data: Record<string, unknown>): void {
@@ -122,7 +78,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 	if (url.pathname === "/api/health") {
 		res.writeHead(200, { "Content-Type": "application/json" });
-		res.end(JSON.stringify({ ok: true, pi: piProcess !== null, piReady }));
+		res.end(JSON.stringify({ ok: true, pi: backend?.alive() ?? false, piReady: backendReady }));
 		return;
 	}
 
@@ -152,18 +108,18 @@ const customCommands = ["restart_pi"];
 wss.on("connection", (ws) => {
 	console.log("[Turk] 클라이언트 연결");
 	clients.add(ws);
-	ws.send(JSON.stringify({ type: piReady ? "pi_ready" : "pi_starting" }));
+	ws.send(JSON.stringify({ type: backendReady ? "pi_ready" : "pi_starting", ...(backendReady ? { backend: backend?.kind() } : {}) }));
 
 	ws.on("message", (raw) => {
 		try {
 			const msg = JSON.parse(raw.toString());
 			if (customCommands.includes(msg.type)) {
 				if (msg.type === "restart_pi") {
-					if (piProcess) { piProcess.kill("SIGTERM"); piProcess = null; }
-					setTimeout(() => startPi(), 500);
+					if (backend) { backend.stop(); backend = null; }
+					setTimeout(() => startBackend(), 500);
 				}
 			} else {
-				sendPi(msg);
+				backend?.send(msg);
 			}
 		} catch (e) {
 			console.error("[Turk] 메시지 파싱 오류:", e);
@@ -175,16 +131,16 @@ wss.on("connection", (ws) => {
 
 // ── 종료 처리 ────────────────────────────────────────────────────────────
 process.on("SIGINT", () => {
-	if (piProcess) piProcess.kill("SIGTERM");
+	if (backend) backend.stop();
 	server.close();
 	wss.close();
 	process.exit(0);
 });
 
 // ── 시작 ──────────────────────────────────────────────────────────────────
-startPi();
+startBackend();
 server.listen(PORT, () => {
 	console.log(`[Turk] AI Turk 서버 http://localhost:${PORT}`);
 	console.log(`[Turk] WebSocket ws://localhost:${PORT}/ws`);
-	console.log(`[Turk] 모델: ${PI_MODEL}`);
+	console.log(`[Turk] 백엔드: ${backend?.kind()} · 모델: ${process.env.TURK_RPC_MODEL || "기본"}`);
 });

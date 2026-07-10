@@ -121,8 +121,18 @@ body {
 	font-weight: 400;
 	font-family: "NeoDunggeunmo", monospace;
 	display: inline-flex;
-	align-items: center;
+	align-items: baseline;
 	gap: 0.35em;
+}
+
+/* 타이틀 옆 백엔드 종류 표시 */
+.turk-backend {
+	font-size: 0.65em;
+	color: var(--muted-foreground);
+	font-weight: 400;
+	margin-left: 0.1em;
+	line-height: 0;
+	vertical-align: baseline;
 }
 
 .turk-header h1 .turk-ico {
