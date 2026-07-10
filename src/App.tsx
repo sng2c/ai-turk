@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, Component, type ReactNode } from "react";
 import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench } from "lucide-react";
+import { jsonrepair } from "jsonrepair";
 
 // ── 에러 바운더리 (하얀 화면 방지) ──────────────────────────────────────
 export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -39,7 +40,7 @@ const DEFAULT_COLS = 5;
 function systemPrompt(rows: number, cols: number): string {
 	const nb = rows * cols;
 	const ex = Array.from({ length: nb }, (_, i) => `"${i}": ""`).join(", ");
-	return `You are a UI controller. Respond with pure JSON only. No code blocks.
+	return `You are a UI controller. Your ENTIRE response must be a single JSON object — no prose, no markdown, no code fences, no explanation before or after.
 
 [Grid]
 - ${rows} rows × ${cols} columns, ${nb} buttons. Keys "0"~"${nb - 1}".
@@ -60,16 +61,12 @@ function systemPrompt(rows: number, cols: number): string {
 - Hidden text: set textColors same as colors (label invisible, still clickable).
 
 [Examples]
-Basic menu:
 {"message":"What do you need?","buttons":{"0":"Weather","1":"Time","2":"News","3":"Help","4":""}}
-
-Colored actions:
 {"message":"Settings saved.","buttons":{"0":"OK","1":"Cancel","2":""},"colors":{"0":"success","1":"destructive"}}
-
-Hidden text color block (clickable, label invisible):
 {"message":"Select a zone.","buttons":{"0":"A","1":"B","2":"C","3":"D"},"colors":{"0":"destructive","1":"warning","2":"success","3":"primary"},"textColors":{"0":"destructive","1":"warning","2":"success","3":"primary"}}
 
-[Format]
+[CRITICAL FORMAT]
+Respond with ONLY this JSON (fill values, do not include comments). First character must be "{" and last must be "}":
 {"message":"text","buttons":{${ex}},"colors":{},"textColors":{}}`;
 }
 
@@ -103,14 +100,60 @@ function extractAssistantText(messages: any[]): string {
 	return "";
 }
 
-// 텍스트에서 JSON 버튼 그리드 파싱
+// 모델이 자주 생성하는 문법 오류를 정제 (jsonrepair가 처리 못 하는 특수 케이스 보완).
+// 주요 패턴: `" "1":""` (따옴표+공백+따옴표로 시작하는 깨진 키)
+function sanitizeJSON(s: string): string {
+	let out = s;
+	// 0) 스마트 따옴표 → 일반 따옴표 (먼저 통일)
+	out = out.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+	// 1) 깨진 키: `" "1":` / `""1":` / `" "KEY":` → `"KEY":`
+	//    따옴표(들) + 공백이 섞인 뒤 따옴표로 시작하는 키를 정리.
+	//    안전장치: 키 다음에 콜론이 오는 경우만(일반 문자열 값 내부 보호).
+	out = out.replace(/"\s+"(\d+)"\s*:/g, '"$1":');
+	out = out.replace(/"\s+"([A-Za-z_가-힣+\-][\w가-힣+\-]*)\s*:/g, '"$1":');
+	out = out.replace(/""(\d+)"\s*:/g, '"$1":');
+	return out;
+}
+
+// 텍스트에서 JSON 버튼 그리드 파싱.
+// 하이브리드 전략:
+//   1) JSON 후보 추출 — 코드펜스 / 전체 블록 / 첫 '{' 부터 끝까지(잘린 응답 대응)
+//   2) 각 후보를 원본·정제본으로 만들고, 직접 JSON.parse → jsonrepair 순으로 시도
+// jsonrepair(주간 230만 다운로드, 의존성 0)가 trailing comma / 단일따옴표 /
+// 키 따옴표 누락 / 잘린 끝 복구 등을 담당하고, sanitizeJSON은 따옴표+공백
+// 깨진 키 같은 특수 케이스를 보완한다.
+// jsonrepair(주간 230만 다운로드, 의존성 0)가 trailing comma / 단일따옴표 /
+// 키 따옴표 누락 / 잘린 끝 복구 등을 담당하고, sanitizeJSON은 따옴표+공백
+// 깨진 키 같은 특수 케이스를 보완한다.
 function parseTurkJSON(text: string): TurkState | null {
-	const m = text.match(/\{[\s\S]*\}/);
-	if (!m) return null;
-	try {
-		const obj = JSON.parse(m[0]);
-		if (obj.message !== undefined && obj.buttons !== undefined) return obj;
-	} catch { /* 파싱 실패 */ }
+	// 1) JSON 후보 추출
+	const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+	const candidates: string[] = [];
+	if (fence) candidates.push(fence[1]);
+	const greedy = text.match(/\{[\s\S]*\}/);
+	if (greedy) candidates.push(greedy[0]);
+	const firstBrace = text.indexOf("{");
+	if (firstBrace !== -1) candidates.push(text.slice(firstBrace));
+
+	const isValid = (obj: unknown): obj is TurkState =>
+		!!obj && typeof obj === "object" &&
+		(obj as any).message !== undefined && (obj as any).buttons !== undefined;
+
+	for (const raw of candidates) {
+		const s = raw.trim();
+		if (!s) continue;
+		// 원본·정제본 각각에 대해 직접 파싱 → jsonrepair 시도
+		for (const v of [s, sanitizeJSON(s)]) {
+			try {
+				const obj = JSON.parse(v);
+				if (isValid(obj)) return obj;
+			} catch { /* 다음 시도 */ }
+			try {
+				const obj = JSON.parse(jsonrepair(v));
+				if (isValid(obj)) return obj;
+			} catch { /* 다음 시도 */ }
+		}
+	}
 	return null;
 }
 
@@ -165,6 +208,8 @@ export default function App() {
 
 	// 세션 초기화 추적
 	const sessionInitRef = useRef(false);
+	// 스트리밍 텍스트 누적 (agent_end의 messages가 비었거나 잘렸을 때 fallback용)
+	const streamingTextRef = useRef("");
 
 	// 메시지 박스 스크롤 — 출력 업데이트 시 맨 위로, 스크롤 포지션에 따라 화살표 표시
 	const messageRef = useRef<HTMLDivElement | null>(null);
@@ -262,32 +307,49 @@ export default function App() {
 			case "agent_start":
 				setLoading(true);
 				setStreamingText("");
+				streamingTextRef.current = "";
 				setThinkingText("");
 				setShowThinking(false);
 				setThinkingExpanded(false);
 				setToolStatus(null);
 				break;
 
-			case "agent_end":
+			case "agent_end": {
+				// willRetry가 true면 곧 재시도할 예정 — 아직 최종 응답이 아님. 로딩 유지.
+				if (msg.willRetry) {
+					break;
+				}
 				setLoading(false);
 				setInput("");
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				setToolStatus(null);
 				setShowThinking(false);
 				setThinkingText("");
-				// 마지막 assistant 메시지에서 JSON 파싱
-				if (msg.messages?.length) {
-					const text = extractAssistantText(msg.messages);
-					if (text) {
-						const parsed = parseTurkJSON(text);
-						if (parsed) {
-							setState(parsed);
+				// 1차: agent_end의 messages에서 텍스트 추출
+				let text = msg.messages?.length ? extractAssistantText(msg.messages) : "";
+				// 2차(fallback): messages가 비었거나 파싱 실패 시 스트리밍 누적본 사용
+				if (!text) text = streamingTextRef.current;
+				if (text) {
+					const parsed = parseTurkJSON(text);
+					if (parsed) {
+						setState(parsed);
+					} else {
+						// 스트리밍본으로 한 번 더 시도 (messages가 잘렸을 수 있음)
+						const fallback = streamingTextRef.current && streamingTextRef.current !== text
+							? parseTurkJSON(streamingTextRef.current)
+							: null;
+						if (fallback) {
+							setState(fallback);
 						} else {
 							setState(errState(`[파싱실패] ${text.slice(0, 200)}`, gridRef.current.rows, gridRef.current.cols));
 						}
 					}
+				} else if (!loading) {
+					// 응답 텍스트 자체가 없는 경우 (도구만 사용 등)
+					setState(errState("응답이 비어 있습니다. 다시 시도해주세요.", gridRef.current.rows, gridRef.current.cols));
 				}
 				break;
+			}
 
 			case "message_update": {
 				const delta = msg.assistantMessageEvent;
@@ -297,6 +359,7 @@ export default function App() {
 				} else if (delta.type === "thinking_delta") {
 					setThinkingText((prev) => prev + (delta.delta || ""));
 				} else if (delta.type === "text_delta") {
+					streamingTextRef.current += (delta.delta || "");
 					setStreamingText((prev) => prev + (delta.delta || ""));
 				}
 				break;
@@ -321,7 +384,9 @@ export default function App() {
 				if (msg.command === "get_last_assistant_text" && msg.success && msg.data?.text) {
 					const parsed = parseTurkJSON(msg.data.text);
 					if (parsed) setState(parsed);
-					sessionInitRef.current = true;
+					// 주의: 여기서 sessionInitRef를 true로 하지 않음.
+					// 기존 대화 복원 시에도 다음 사용자 프롬프트에 시스템 지시가
+					// 다시 붙도록 두어야 JSON 형식이 유지됨.
 				}
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
@@ -533,10 +598,10 @@ export default function App() {
 		const { rows: r, cols: c } = gridRef.current;
 		let message = userText;
 
-		// 세션 첫 메시지에 시스템 지시 포함
-		if (!sessionInitRef.current) {
+		// 항상 시스템 지시를 사용자 메시지에 포함하여 JSON 형식 강제.
+		// 대화가 길어져도 매 턴마다 형식을 상기시켜 파싱 실패 방지.
+		if (!modelMode.current) {
 			message = `${systemPrompt(r, c)}\n\n${userText}`;
-			sessionInitRef.current = true;
 		}
 
 		ws.send(JSON.stringify({ type: "prompt", message }));
