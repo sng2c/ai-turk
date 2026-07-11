@@ -187,6 +187,26 @@ body {
 	gap: 0.2em;
 }
 
+.turk-schedule-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	font-size: var(--turk-font-size);
+	padding: 0.143rem 0.286rem;
+	color: var(--muted-foreground);
+	line-height: 1;
+	transition: opacity 0.1s;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2em;
+}
+
+@media (hover: hover) {
+.turk-schedule-btn:hover {
+	opacity: 0.7;
+}
+}
+
 
 .turk-new-btn {
 	background: none;

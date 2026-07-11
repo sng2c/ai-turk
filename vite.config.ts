@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { WebSocketServer, WebSocket } from "ws";
 import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
+import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
@@ -35,13 +36,46 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		backend.onEvent((ev: TurkEvent) => {
 			if (ev.type === "pi_ready") backendReady = true;
 			if (ev.type === "pi_exit" || ev.type === "pi_error") backendReady = false;
+			// agent_start: 스트리밍 시작
+			if (ev.type === "agent_start") isStreaming = true;
+			// agent_end: 스트리밍 종료 + 큐 드레인 + lastPrompt 초기화
+			if (ev.type === "agent_end") {
+				isStreaming = false;
+				lastPrompt = null;
+				scheduler.drainQueue();
+			}
+			// get_state 응답 보강: lastPrompt + isStreaming 주입
+			if (ev.type === "response" && ev.command === "get_state") {
+				(ev as any).data = { ...(ev as any).data, lastPrompt, isStreaming };
+			}
 			broadcast(ev);
 		});
 		backend.start();
 	}
 
-	// restart_pi만 제외하고 모든 명령을 백엔드에 전달
-	const customCommands = ["restart_pi"];
+	// restart_pi, schedule 제외하고 모든 명령을 백엔드에 전달
+	const customCommands = ["restart_pi", "schedule"];
+	let lastPrompt: string | null = null; // 마지막 백엔드 전송 프롬프트 (새로고침 복원용)
+	let isStreaming = false; // 백엔드 응답 생성 중 여부
+
+	// backend.send를 가로채서 lastPrompt 저장. Backend 인터페이스 불변.
+	// opts.fromScheduler=true 시 lastPrompt 저장 생략 — 서버 자체 프롬프트는 채팅창에 복원되지 않음.
+	function sendToBackend(cmd: Record<string, unknown>, opts?: { fromScheduler?: boolean }): void {
+		if (cmd.type === "prompt" && typeof cmd.message === "string" && !opts?.fromScheduler) {
+			lastPrompt = cmd.message;
+		}
+		backend?.send(cmd);
+	}
+
+	// ── 스케줄러 인스턴스 ──────────────────────────────────────────────────
+	const scheduler = new Scheduler({
+		onTrigger: (entry) => {
+			const msg = formatTriggerMessage(entry, new Date());
+			sendToBackend({ type: "prompt", message: msg }, { fromScheduler: true });
+			broadcast({ type: "scheduler_trigger", id: entry.id, mode: entry.mode, at: entry.at });
+		},
+		isBusy: () => isStreaming,
+	});
 
 	return {
 		name: "turk-rpc",
@@ -70,9 +104,18 @@ function turkPlugin(env: Record<string, string>): Plugin {
 							if (msg.type === "restart_pi") {
 								if (backend) { backend.stop(); backend = null; }
 								setTimeout(() => startBackend(), 500);
+							} else if (msg.type === "schedule") {
+								// schedule 명령: scheduler.handle() → 결과를 response 이벤트로 반환
+								const result = scheduler.handle(msg);
+								broadcast({
+									type: "response",
+									command: "schedule",
+									success: result.success,
+									...(result.success ? { data: result.data } : { error: result.error }),
+								});
 							}
 						} else {
-							backend?.send(msg);
+							sendToBackend(msg);
 						}
 					} catch (e) {
 						console.error("[Turk] 메시지 파싱 오류:", e);
@@ -83,6 +126,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			});
 
 			server.httpServer!.on("close", () => {
+				scheduler.destroy();
 				if (backend) backend.stop();
 			});
 		},
