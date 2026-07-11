@@ -169,11 +169,15 @@ function stripMarkdown(text: string): string {
 }
 
 function notifyResponse(message: string): void {
+	// 포그라운드(페이지 활성) 시 알림 안 뜸 — 백그라운드 전환 시에만
 	if (typeof document === "undefined" || !document.hidden) return;
 	if (!("Notification" in window) || Notification.permission !== "granted") return;
 	const body = stripMarkdown(message).slice(0, 50);
 	if (!body) return;
-	try { new Notification("AI-Turk", { body: body.length === 50 ? body + "..." : body }); } catch { /* 무시 */ }
+	// 모바일 Chrome은 new Notification() 사용 불가 — SW showNotification() 사용
+	navigator.serviceWorker.ready
+		.then((reg) => reg.showNotification("AI-Turk", { body: body.length === 50 ? body + "..." : body, tag: "ai-turk", renotify: true } as NotificationOptions))
+		.catch(() => { /* 무시 */ });
 }
 
 // ── VAPID 공개키 변환 (Base64URL → Uint8Array) ────────────────────────────
@@ -189,6 +193,9 @@ async function subscribePush(publicKey: string, ws: WebSocket | null): Promise<v
 	if (!("serviceWorker" in navigator) || !ws || ws.readyState !== WebSocket.OPEN) return;
 	try {
 		const reg = await navigator.serviceWorker.register("/sw.js");
+		// 기존 구독이 있으면 해제 (서버 재시작으로 VAPID 키 변경 대응)
+		const existing = await reg.pushManager.getSubscription();
+		if (existing) await existing.unsubscribe();
 		const subscription = await reg.pushManager.subscribe({
 			userVisibleOnly: true,
 			applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
