@@ -63,10 +63,15 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		if (!Array.isArray(messages)) return;
 		const text = extractTextFromMessages(messages);
 		if (!text) return;
-		const body = stripMarkdownServer(text).slice(0, 50);
+		// JSON 그리드 응답이면 message 필드만 추출 (전체 JSON 노출 방지)
+		const msgMatch = text.match(/"message"\s*:\s*"([^"]*)"/);
+		const bodyText = msgMatch ? msgMatch[1] : text;
+		const body = stripMarkdownServer(bodyText).slice(0, 50);
 		if (!body) return;
 		const payload = JSON.stringify({ body: body.length === 50 ? body + "..." : body });
-		webpush.sendNotification(lastPushSubscription, payload).catch(() => { /* 실패해도 구독 유지 */ });
+		webpush.sendNotification(lastPushSubscription, payload)
+			.then(() => console.log("[Push] 전송 성공"))
+			.catch((err) => console.log("[Push] 전송 실패:", err.message));
 	}
 
 	function startBackend(): void {
@@ -162,6 +167,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 							} else if (msg.type === "push_subscribe") {
 								// push 구독 저장 (1인 인스턴스 — 마지막 1개만 유지)
 								lastPushSubscription = msg.subscription;
+								console.log("[Push] 구독 수신:", msg.subscription?.endpoint?.slice(0, 60));
 							}
 						} else {
 							sendToBackend(msg);
@@ -171,7 +177,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 					}
 				});
 
-				ws.on("close", () => { clients.delete(ws); wsConnected = false; });
+				ws.on("close", () => { console.log("[Push] WS close — wsConnected: false"); clients.delete(ws); wsConnected = false; });
 			});
 
 			server.httpServer!.on("close", () => {
