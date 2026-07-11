@@ -144,19 +144,17 @@ cmd_start() {
 
 cmd_stop() {
   echo "▶ 중지 중... (포트 $TURK_PORT)"
-  
-  # 1. 해당 포트를 사용하는 모든 프로세스 종료 (강력하게)
+
+  # 포트 기반 종료만 — 다중 인스턴스 안전 (pkill -f "vite" 금지: 타 인스턴스 죽임)
   local pids
   pids=$(lsof -t -i :"$TURK_PORT" 2>/dev/null || true)
   if [ -n "$pids" ]; then
-    kill -9 $pids 2>/dev/null || true
+    for pid in $pids; do
+      pkill -9 -P "$pid" 2>/dev/null || true   # 자식(pi) 정리
+      kill -9 "$pid" 2>/dev/null || true        # 해당 포트 vite
+    done
   fi
   fuser -k -9 "$TURK_PORT/tcp" 2>/dev/null || true
-
-  # 2. 프로세스 이름 기반 추가 정리 (Vite 및 pi RPC)
-  # 특정 포트와 연관된 vite/pi 프로세스만 죽이기 위해 pgrep/pkill 조합 사용
-  pkill -f "vite" 2>/dev/null || true
-  pkill -f "pi --mode rpc" 2>/dev/null || true
 
   echo "✅ 서버 및 관련 프로세스 중지됨 (포트 $TURK_PORT)"
 }
