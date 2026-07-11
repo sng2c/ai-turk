@@ -1,11 +1,12 @@
 // AI Turk 서비스 워커 — Web Push 알림 수신
-// 서버가 WS 끊김 시 web-push로 전송 → 여기서 showNotification
+// 서버가 응답 완료 시 web-push로 전송 → 여기서 showNotification
 
 // ── 설치/활성화: 즉시 활성화 보장 (갱신 즉시 적용) ──────────────────────
 self.addEventListener("install", (event) => { self.skipWaiting(); event.waitUntil(Promise.resolve()); });
 self.addEventListener("activate", (event) => { event.waitUntil(self.clients.claim()); });
 
 // ── Push 이벤트: 서버가 전송한 페이로드로 알림 표시 ────────────────────────
+// 포그라운드(visible 클라이언트)면 알림 안 뜸 — 보고 있으니까
 self.addEventListener("push", (event) => {
 	let body = "응답 완료";
 	try {
@@ -14,8 +15,12 @@ self.addEventListener("push", (event) => {
 	} catch { /* 페이로드 파싱 실패 시 기본값 */ }
 
 	event.waitUntil(
-		self.registration
-			.showNotification("AI-Turk", { body, icon: "/favicon.svg", tag: "ai-turk", renotify: true })
+		self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+			// 보이는(visible) 클라이언트가 있으면 포그라운드 — 알림 안 뜸
+			const visible = clientList.some((c) => c.visibilityState === "visible");
+			if (visible) return;
+			return self.registration.showNotification("AI-Turk", { body, icon: "/favicon.svg", tag: "ai-turk", renotify: true });
+		})
 	);
 });
 

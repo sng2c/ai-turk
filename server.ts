@@ -15,6 +15,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
 import webpush from "web-push";
+import removeMarkdown from "remove-markdown";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -43,7 +44,6 @@ const VAPID_PUBLIC_KEY: string = vapidKeys.publicKey;
 const VAPID_PRIVATE_KEY: string = vapidKeys.privateKey;
 webpush.setVapidDetails("mailto:ai-turk@local", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 let lastPushSubscription: any = null; // 마지막 구독 (1인 인스턴스 — 1개만 유지)
-let wsConnected = false; // WS 연결 여부 (끊김 시 서버 푸시)
 
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -69,7 +69,7 @@ function startBackend(): void {
 		onLog: (m: string) => console.log(m),
 	});
 	backend.onEvent((ev: TurkEvent) => {
-		if (ev.type === "pi_ready") backendReady = true;
+		if (ev.type === "pi_ready") { backendReady = true; (ev as any).vapidPublicKey = VAPID_PUBLIC_KEY; }
 		if (ev.type === "pi_exit" || ev.type === "pi_error") backendReady = false;
 		// agent_start: 스트리밍 시작
 		if (ev.type === "agent_start") isStreaming = true;
@@ -79,7 +79,7 @@ function startBackend(): void {
 			lastPrompt = null;
 			scheduler.drainQueue();
 			// WS 끊김 시 웹 푸시 전송 (백그라운드 알림)
-			if (!wsConnected && lastPushSubscription) sendPushNotification(ev);
+			if (lastPushSubscription) sendPushNotification(ev);
 		}
 		// get_state 응답 보강: lastPrompt + isStreaming 주입
 		if (ev.type === "response" && ev.command === "get_state") {
@@ -114,11 +114,9 @@ function extractTextFromMessages(messages: any[]): string {
 
 // 서버측 마크다운 제거 (App.tsx stripMarkdown 와 동일)
 function stripMarkdownServer(text: string): string {
-	return text
-		.replace(/\*\*(.+?)\*\*/g, "$1")
-		.replace(/`(.+?)`/g, "$1")
-		.replace(/[*_`~>#]/g, "")
+	return removeMarkdown(text)
 		.replace(/\n/g, " ")
+		.replace(/\s+/g, " ")
 		.trim();
 }
 
@@ -128,9 +126,12 @@ function sendPushNotification(ev: TurkEvent): void {
 	if (!Array.isArray(messages)) return;
 	const text = extractTextFromMessages(messages);
 	if (!text) return;
-	// JSON 그리드 응답이면 message 필드만 추출 (전체 JSON 노출 방지)
-	const msgMatch = text.match(/"message"\s*:\s*"([^"]*)"/);
-	const bodyText = msgMatch ? msgMatch[1] : text;
+	// JSON 응답이면 파싱해서 message 추출 (이스케이프/따옴표 안전)
+	let bodyText = text;
+	try {
+		const parsed = JSON.parse(text);
+		if (parsed && typeof parsed.message === "string") bodyText = parsed.message;
+	} catch { /* JSON 아니면 text 그대로 */ }
 	const body = stripMarkdownServer(bodyText).slice(0, 50);
 	if (!body) return;
 	const payload = JSON.stringify({ body: body.length === 50 ? body + "..." : body });
@@ -196,7 +197,6 @@ const scheduler = new Scheduler({
 wss.on("connection", (ws) => {
 	console.log("[Turk] 클라이언트 연결");
 	clients.add(ws);
-	wsConnected = true;
 	ws.send(JSON.stringify({ type: backendReady ? "pi_ready" : "pi_starting", ...(backendReady ? { backend: backend?.kind(), vapidPublicKey: VAPID_PUBLIC_KEY } : {}) }));
 
 	ws.on("message", (raw) => {
@@ -228,7 +228,7 @@ wss.on("connection", (ws) => {
 		}
 	});
 
-	ws.on("close", () => { console.log("[Push] WS close — wsConnected: false"); clients.delete(ws); wsConnected = false; });
+	ws.on("close", () => { console.log("[Push] WS close"); clients.delete(ws); });
 });
 
 // ── 종료 처리 ────────────────────────────────────────────────────────────

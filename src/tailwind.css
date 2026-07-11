@@ -379,6 +379,23 @@ body {
 	color: var(--success);
 }
 
+/* 마크다운 요소 (react-markdown 렌더링) */
+.turk-message h1 { font-size: 1.4em; font-weight: bold; margin: 0.3em 0; }
+.turk-message h2 { font-size: 1.25em; font-weight: bold; margin: 0.3em 0; }
+.turk-message h3 { font-size: 1.1em; font-weight: bold; margin: 0.2em 0; }
+.turk-message h4, .turk-message h5, .turk-message h6 { font-weight: bold; margin: 0.2em 0; }
+.turk-message ul, .turk-message ol { padding-left: 1.5em; margin: 0.2em 0; }
+.turk-message ul { list-style: disc; }
+.turk-message ol { list-style: decimal; }
+.turk-message li { margin: 0.1em 0; }
+.turk-message a { color: inherit; text-decoration: underline; }
+.turk-message p { margin: 0.2em 0; }
+.turk-message blockquote { padding-left: 0.5em; border-left: 0.143rem solid currentColor; opacity: 0.7; margin: 0.2em 0; }
+.turk-message hr { border: none; border-top: 0.071rem solid currentColor; opacity: 0.3; margin: 0.3em 0; }
+.turk-message pre { background: var(--muted); padding: 0.4em; overflow: auto; margin: 0.2em 0; }
+.turk-message table { border-collapse: collapse; margin: 0.2em 0; }
+.turk-message th, .turk-message td { border: 0.071rem solid var(--muted-foreground); padding: 0.2em 0.4em; }
+
 /* 사고 영역 */
 .turk-thinking-area {
 	background: var(--muted);
