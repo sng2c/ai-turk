@@ -90,7 +90,15 @@ Respond with ONLY this JSON (fill values, do not include comments). First charac
 
 function emptyState(rows: number, cols: number): TurkState {
 	return {
-		message: `기계 튀르크에 오신 것을 환영합니다.\n저는 LLM으로 버튼 그리드를 생성합니다.\n명령을 입력하거나 버튼을 눌러주세요.\n대화하며 원하는 기능을 찾아드립니다.\n지금 바로 시작해보세요!`,
+		message: `# 🤖 AI Turk
+
+**LLM 기반 동적 버튼 그리드 컨트롤러**
+
+- ⌨️ **명령/클릭** — 원하는 기능 요청 또는 옵션 선택
+- ⏰ **스케줄/알림** — 매일 정해진 시각·반복 주기로 작업 예약
+- 🎨 **맞춤 UI** — 대화하며 최적의 인터페이스 생성
+
+> 지금 바로 시작해보세요!`,
 		buttons: Object.fromEntries(
 			Array.from({ length: rows * cols }, (_, i) => [String(i), ""])
 		),
