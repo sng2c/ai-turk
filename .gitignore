@@ -30,3 +30,6 @@ __pycache__
 *.pyc
 streamlit
 python-archive
+
+# pi-subagents artifacts
+.pi-subagents/
