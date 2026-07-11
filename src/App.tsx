@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useEffect, Component, type ReactNode } from "react";
 import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // ── 에러 바운더리 (하얀 화면 방지) ──────────────────────────────────────
 export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -50,9 +52,10 @@ function systemPrompt(rows: number, cols: number): string {
 - Place primary buttons in the center.
 
 [Message]
-- Up to 10 lines fit on screen; prefer fewer for clarity.
+- Markdown supported: headings, lists, tables, code, links, bold/italic. Use it to structure content.
+- Display area fits ~10 plain lines; longer content scrolls — use scroll when detail helps, but prefer concise.
+- Tables and lists need a blank line before them (GFM rule).
 - Max 42 chars per line (Korean=2, English/digit=1).
-- Markdown supported.
 
 [Colors]
 - colors: button background — success(녹)/warning(주)/destructive(빨)/primary(진한 강조)/accent(강조)/secondary(기본)/muted(회)
@@ -148,38 +151,10 @@ function parseTurkJSON(text: string): { parsed: TurkState } | { error: string } 
 
 // ── 마크다운 간이 렌더 ────────────────────────────────────────────────
 function Md({ text }: { text: string }) {
-	const html = text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-		.replace(/`(.+?)`/g, "<code>$1</code>")
-		.replace(/\n/g, "<br/>");
-	return <span dangerouslySetInnerHTML={{ __html: html }} />;
+	return <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>;
 }
 
 // ── 알림용 텍스트 정제 (마크다운 제거 + 50자) ───────────────────────────
-function stripMarkdown(text: string): string {
-	return text
-		.replace(/\*\*(.+?)\*\*/g, "$1")
-		.replace(/`(.+?)`/g, "$1")
-		.replace(/[#*_`~>]/g, "")
-		.replace(/\n/g, " ")
-		.trim();
-}
-
-function notifyResponse(message: string): void {
-	// 포그라운드(페이지 활성) 시 알림 안 뜸 — 백그라운드 전환 시에만
-	if (typeof document === "undefined" || !document.hidden) return;
-	if (!("Notification" in window) || Notification.permission !== "granted") return;
-	const body = stripMarkdown(message).slice(0, 50);
-	if (!body) return;
-	// 모바일 Chrome은 new Notification() 사용 불가 — SW showNotification() 사용
-	navigator.serviceWorker.ready
-		.then((reg) => reg.showNotification("AI-Turk", { body: body.length === 50 ? body + "..." : body, tag: "ai-turk", renotify: true } as NotificationOptions))
-		.catch(() => { /* 무시 */ });
-}
-
 // ── VAPID 공개키 변환 (Base64URL → Uint8Array) ────────────────────────────
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
 	const padding = "=".repeat((4 - base64String.length % 4) % 4);
@@ -407,14 +382,12 @@ export default function App() {
 								schedulerPrefixRef.current = null;
 							}
 							setState(stateWithoutSchedules);
-							notifyResponse(stateWithoutSchedules.message);
 						} else {
 							if (schedulerPrefixRef.current) {
 								parsed.message = schedulerPrefixRef.current + (parsed.message || "");
 								schedulerPrefixRef.current = null;
 							}
 							setState(parsed);
-							notifyResponse(parsed.message);
 						}
 					} else {
 						// 스트리밍본으로 한 번 더 시도 (messages가 잘렸을 수 있음)
@@ -434,14 +407,12 @@ export default function App() {
 									schedulerPrefixRef.current = null;
 								}
 								setState(stateWithoutSchedules);
-								notifyResponse(stateWithoutSchedules.message);
 							} else {
 								if (schedulerPrefixRef.current) {
 									parsed.message = schedulerPrefixRef.current + (parsed.message || "");
 									schedulerPrefixRef.current = null;
 								}
 								setState(parsed);
-								notifyResponse(parsed.message);
 							}
 						} else if (retryCountRef.current < MAX_PARSE_RETRIES) {
 							// 자가 수정 재시도: 원문 + JSON.parse 에러를 모델에게 돌려주며 형식 재요청
