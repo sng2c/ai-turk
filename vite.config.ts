@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { WebSocketServer, WebSocket } from "ws";
 import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
+import webpush from "web-push";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync } from "node:fs";
@@ -19,11 +20,53 @@ function turkPlugin(env: Record<string, string>): Plugin {
 	let backendReady = false;
 	const clients = new Set<WebSocket>();
 
+	// ── Web Push (VAPID 키 자동 발급, 메모리만) ────────────────────────────
+	const vapidKeys = webpush.generateVAPIDKeys();
+	const VAPID_PUBLIC_KEY: string = vapidKeys.publicKey;
+	const VAPID_PRIVATE_KEY: string = vapidKeys.privateKey;
+	webpush.setVapidDetails("mailto:ai-turk@local", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+	let lastPushSubscription: any = null; // 마지막 구독 (1인 인스턴스 — 1개만 유지)
+	let wsConnected = false; // WS 연결 여부 (끊김 시 서버 푸시)
+
 	function broadcast(data: Record<string, unknown>): void {
 		const msg = JSON.stringify(data);
 		for (const ws of clients) {
 			if (ws.readyState === WebSocket.OPEN) ws.send(msg);
 		}
+	}
+
+	// ── 웹 푸시 헬퍼 ────────────────────────────────────────────────────────
+	function extractTextFromMessages(messages: any[]): string {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i];
+			if (m.role === "assistant" && Array.isArray(m.content)) {
+				const texts = m.content
+					.filter((b: any) => b.type === "text" && b.text)
+					.map((b: any) => b.text);
+				if (texts.length) return texts.join("\n");
+			}
+		}
+		return "";
+	}
+
+	function stripMarkdownServer(text: string): string {
+		return text
+			.replace(/\*\*(.+?)\*\*/g, "$1")
+			.replace(/`(.+?)`/g, "$1")
+			.replace(/[*_`~>#]/g, "")
+			.replace(/\n/g, " ")
+			.trim();
+	}
+
+	function sendPushNotification(ev: TurkEvent): void {
+		const messages = (ev as any).messages;
+		if (!Array.isArray(messages)) return;
+		const text = extractTextFromMessages(messages);
+		if (!text) return;
+		const body = stripMarkdownServer(text).slice(0, 50);
+		if (!body) return;
+		const payload = JSON.stringify({ body: body.length === 50 ? body + "..." : body });
+		webpush.sendNotification(lastPushSubscription, payload).catch(() => { /* 실패해도 구독 유지 */ });
 	}
 
 	function startBackend(): void {
@@ -38,11 +81,13 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			if (ev.type === "pi_exit" || ev.type === "pi_error") backendReady = false;
 			// agent_start: 스트리밍 시작
 			if (ev.type === "agent_start") isStreaming = true;
-			// agent_end: 스트리밍 종료 + 큐 드레인 + lastPrompt 초기화
+			// agent_end: 스트리밍 종료 + 큐 드레인 + lastPrompt 초기화 + 웹 푸시
 			if (ev.type === "agent_end") {
 				isStreaming = false;
 				lastPrompt = null;
 				scheduler.drainQueue();
+				// WS 끊김 시 웹 푸시 전송 (백그라운드 알림)
+				if (!wsConnected && lastPushSubscription) sendPushNotification(ev);
 			}
 			// get_state 응답 보강: lastPrompt + isStreaming 주입
 			if (ev.type === "response" && ev.command === "get_state") {
@@ -54,7 +99,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 	}
 
 	// restart_pi, schedule 제외하고 모든 명령을 백엔드에 전달
-	const customCommands = ["restart_pi", "schedule"];
+	const customCommands = ["restart_pi", "schedule", "push_subscribe"];
 	let lastPrompt: string | null = null; // 마지막 백엔드 전송 프롬프트 (새로고침 복원용)
 	let isStreaming = false; // 백엔드 응답 생성 중 여부
 
@@ -95,7 +140,8 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			wss.on("connection", (ws) => {
 				console.log("[Turk] 클라이언트 연결");
 				clients.add(ws);
-				ws.send(JSON.stringify({ type: backendReady ? "pi_ready" : "pi_starting", ...(backendReady ? { backend: backend?.kind() } : {}) }));
+				wsConnected = true;
+				ws.send(JSON.stringify({ type: backendReady ? "pi_ready" : "pi_starting", ...(backendReady ? { backend: backend?.kind(), vapidPublicKey: VAPID_PUBLIC_KEY } : {}) }));
 
 				ws.on("message", (raw) => {
 					try {
@@ -113,6 +159,9 @@ function turkPlugin(env: Record<string, string>): Plugin {
 									success: result.success,
 									...(result.success ? { data: result.data } : { error: result.error }),
 								});
+							} else if (msg.type === "push_subscribe") {
+								// push 구독 저장 (1인 인스턴스 — 마지막 1개만 유지)
+								lastPushSubscription = msg.subscription;
 							}
 						} else {
 							sendToBackend(msg);
@@ -122,7 +171,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 					}
 				});
 
-				ws.on("close", () => clients.delete(ws));
+				ws.on("close", () => { clients.delete(ws); wsConnected = false; });
 			});
 
 			server.httpServer!.on("close", () => {

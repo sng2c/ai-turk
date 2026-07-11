@@ -158,6 +158,45 @@ function Md({ text }: { text: string }) {
 	return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
+// ── 알림용 텍스트 정제 (마크다운 제거 + 50자) ───────────────────────────
+function stripMarkdown(text: string): string {
+	return text
+		.replace(/\*\*(.+?)\*\*/g, "$1")
+		.replace(/`(.+?)`/g, "$1")
+		.replace(/[#*_`~>]/g, "")
+		.replace(/\n/g, " ")
+		.trim();
+}
+
+function notifyResponse(message: string): void {
+	if (typeof document === "undefined" || !document.hidden) return;
+	if (!("Notification" in window) || Notification.permission !== "granted") return;
+	const body = stripMarkdown(message).slice(0, 50);
+	if (!body) return;
+	try { new Notification("AI-Turk", { body: body.length === 50 ? body + "..." : body }); } catch { /* 무시 */ }
+}
+
+// ── VAPID 공개키 변환 (Base64URL → Uint8Array) ────────────────────────────
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+	const padding = "=".repeat((4 - base64String.length % 4) % 4);
+	const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+	const raw = atob(base64);
+	return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+// ── 서비스 워커 등록 + Push 구독 → 서버에 전송 ──────────────────────────────
+async function subscribePush(publicKey: string, ws: WebSocket | null): Promise<void> {
+	if (!("serviceWorker" in navigator) || !ws || ws.readyState !== WebSocket.OPEN) return;
+	try {
+		const reg = await navigator.serviceWorker.register("/sw.js");
+		const subscription = await reg.pushManager.subscribe({
+			userVisibleOnly: true,
+			applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
+		});
+		ws.send(JSON.stringify({ type: "push_subscribe", subscription: subscription.toJSON() }));
+	} catch (e) { console.debug("[Push] 구독 실패:", e); }
+}
+
 // ── 앱 ─────────────────────────────────────────────────────────────────
 export default function App() {
 	const rows = DEFAULT_ROWS;
@@ -281,12 +320,20 @@ export default function App() {
 		};
 	}, [connect]);
 
+	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
+	useEffect(() => {
+		if (!("Notification" in window) || Notification.permission !== "default") return;
+		Notification.requestPermission().catch(() => { /* 무시 */ });
+	}, []);
+
 	// ── pi 이벤트 처리 ──────────────────────────────────────────────────
 	const handleEvent = useCallback((msg: any) => {
 		switch (msg.type) {
 			case "pi_ready":
 				setPiReady(true);
 				if (typeof msg.backend === "string") setBackendKind(msg.backend);
+				// 웹 푸시 구독: VAPID 공개키로 서비스 워커 등록 + 구독 → 서버 전송
+				if (typeof msg.vapidPublicKey === "string") subscribePush(msg.vapidPublicKey, wsRef.current);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_last_assistant_text" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
@@ -353,12 +400,14 @@ export default function App() {
 								schedulerPrefixRef.current = null;
 							}
 							setState(stateWithoutSchedules);
+							notifyResponse(stateWithoutSchedules.message);
 						} else {
 							if (schedulerPrefixRef.current) {
 								parsed.message = schedulerPrefixRef.current + (parsed.message || "");
 								schedulerPrefixRef.current = null;
 							}
 							setState(parsed);
+							notifyResponse(parsed.message);
 						}
 					} else {
 						// 스트리밍본으로 한 번 더 시도 (messages가 잘렸을 수 있음)
@@ -378,12 +427,14 @@ export default function App() {
 									schedulerPrefixRef.current = null;
 								}
 								setState(stateWithoutSchedules);
+								notifyResponse(stateWithoutSchedules.message);
 							} else {
 								if (schedulerPrefixRef.current) {
 									parsed.message = schedulerPrefixRef.current + (parsed.message || "");
 									schedulerPrefixRef.current = null;
 								}
 								setState(parsed);
+								notifyResponse(parsed.message);
 							}
 						} else if (retryCountRef.current < MAX_PARSE_RETRIES) {
 							// 자가 수정 재시도: 원문 + JSON.parse 에러를 모델에게 돌려주며 형식 재요청
