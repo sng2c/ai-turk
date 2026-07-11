@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, Component, type ReactNode } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock } from "lucide-react";
 
 // ── 에러 바운더리 (하얀 화면 방지) ──────────────────────────────────────
 export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -24,6 +24,7 @@ interface TurkState {
 	buttons: Record<string, string>;
 	colors?: Record<string, string>;
 	textColors?: Record<string, string>;
+	schedules?: any[]; // LLM 응답의 schedules 배열 (일회성 명령 — state에 저장하지 않고 즉시 서버로 전송)
 }
 
 interface ToolStatus {
@@ -63,6 +64,21 @@ function systemPrompt(rows: number, cols: number): string {
 {"message":"What do you need?","buttons":{"0":"Weather","1":"Time","2":"News","3":"Help","4":""}}
 {"message":"Settings saved.","buttons":{"0":"OK","1":"Cancel","2":""},"colors":{"0":"success","1":"destructive"}}
 {"message":"Select a zone.","buttons":{"0":"A","1":"B","2":"C","3":"D"},"colors":{"0":"destructive","1":"warning","2":"success","3":"primary"},"textColors":{"0":"destructive","1":"warning","2":"success","3":"primary"}}
+
+[Schedules]
+- 응답에 "schedules" 배열을 포함하여 스케줄을 설정/해제할 수 있습니다.
+- 각 원소는 다음 형태입니다:
+  {"action":"add","id":"morning","mode":"daily","at":"09:00","prompt":"설명과 지시를 통합한 프롬프트"}
+  {"action":"remove","id":"morning"}
+  {"action":"clear"}
+  {"action":"list"}
+- mode: "once" (N분 후 한 번) | "repeat" (N분마다 반복) | "daily" (매일 지정 시각)
+- at: 간격("5m","1h","30s") 또는 시각("09:00","14:30") — mode에 따라:
+  - once/repeat: 간격 형식 ("5m", "1h", "30s")
+  - daily: 시각 형식 ("09:00")
+- 같은 id add → 덮어쓰기(자동 업데이트)
+- 최대 5개, 최소 간격 1분
+- 예시: {"message":"스케줄을 설정했습니다.","buttons":{"0":"확인","1":"해제","2":""},"schedules":[{"action":"add","id":"morning","mode":"daily","at":"09:00","prompt":"오늘 할 일을 정리해서 그리드로 보여줘."}]}
 
 [CRITICAL FORMAT]
 Respond with ONLY this JSON (fill values, do not include comments). First character must be "{" and last must be "}":
@@ -187,6 +203,13 @@ export default function App() {
 	// 파싱 실패 시 자가 수정 재시도 카운터 (무한 루프 방지)
 	const retryCountRef = useRef(0);
 	const MAX_PARSE_RETRIES = 2;
+	// ── 스케줄러 관련 ref ──
+	// schedulerTriggerRef: scheduler_trigger 이벤트 수신 시 설정 → 다음 agent_end 응답 message 앞에 prefix 부착
+	const schedulerTriggerRef = useRef<{ id: string; mode: string; at: string } | null>(null);
+	// schedulerFeedbackRef: schedule response 결과 → 다음 프롬프트에 주입 (가드 에러 등 안내)
+	const schedulerFeedbackRef = useRef<string | null>(null);
+	// schedulerPrefixRef: scheduler_trigger로부터 생성된 prefix → setState 시 message 앞에 부착
+	const schedulerPrefixRef = useRef<string | null>(null);
 
 	// 메시지 박스 스크롤 — 출력 업데이트 시 맨 위로, 스크롤 포지션에 따라 화살표 표시
 	const messageRef = useRef<HTMLDivElement | null>(null);
@@ -299,6 +322,12 @@ export default function App() {
 				}
 				setLoading(false);
 				setInput("");
+				// scheduler_trigger가 대기 중이면 응답 message 앞에 prefix 부착
+				if (schedulerTriggerRef.current) {
+					const trig = schedulerTriggerRef.current;
+					schedulerTriggerRef.current = null; // 1회용
+					schedulerPrefixRef.current = `⏰ [예약 실행: ${trig.id} · ${trig.at} ${trig.mode}]\n`;
+				}
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				setToolStatus(null);
 				setShowThinking(false);
@@ -311,7 +340,26 @@ export default function App() {
 					const result = parseTurkJSON(text);
 					if (result && "parsed" in result) {
 						retryCountRef.current = 0; // 성공 시 카운터 리셋
-						setState(result.parsed);
+						const parsed = result.parsed;
+						// schedules 배열 추출 → 서버로 전송 (일회성 명령, state에 넣지 않음)
+						if (Array.isArray(parsed.schedules)) {
+							for (const sch of parsed.schedules) {
+								wsRef.current?.send(JSON.stringify({ type: "schedule", ...sch }));
+							}
+							// state에는 schedules 키 제외
+							const { schedules, ...stateWithoutSchedules } = parsed;
+							if (schedulerPrefixRef.current) {
+								stateWithoutSchedules.message = schedulerPrefixRef.current + (stateWithoutSchedules.message || "");
+								schedulerPrefixRef.current = null;
+							}
+							setState(stateWithoutSchedules);
+						} else {
+							if (schedulerPrefixRef.current) {
+								parsed.message = schedulerPrefixRef.current + (parsed.message || "");
+								schedulerPrefixRef.current = null;
+							}
+							setState(parsed);
+						}
 					} else {
 						// 스트리밍본으로 한 번 더 시도 (messages가 잘렸을 수 있음)
 						const fallback = streamingTextRef.current && streamingTextRef.current !== text
@@ -319,17 +367,37 @@ export default function App() {
 							: null;
 						if (fallback && "parsed" in fallback) {
 							retryCountRef.current = 0;
-							setState(fallback.parsed);
+							const parsed = fallback.parsed;
+							if (Array.isArray(parsed.schedules)) {
+								for (const sch of parsed.schedules) {
+									wsRef.current?.send(JSON.stringify({ type: "schedule", ...sch }));
+								}
+								const { schedules, ...stateWithoutSchedules } = parsed;
+								if (schedulerPrefixRef.current) {
+									stateWithoutSchedules.message = schedulerPrefixRef.current + (stateWithoutSchedules.message || "");
+									schedulerPrefixRef.current = null;
+								}
+								setState(stateWithoutSchedules);
+							} else {
+								if (schedulerPrefixRef.current) {
+									parsed.message = schedulerPrefixRef.current + (parsed.message || "");
+									schedulerPrefixRef.current = null;
+								}
+								setState(parsed);
+							}
 						} else if (retryCountRef.current < MAX_PARSE_RETRIES) {
 							// 자가 수정 재시도: 원문 + JSON.parse 에러를 모델에게 돌려주며 형식 재요청
 							retryCountRef.current++;
+							sessionInitRef.current = false; // 시스템 프롬프트 재부착 트리거
+							schedulerFeedbackRef.current = null; // 피드백 캐시 클리어
 							setLoading(true);
 							const errInfo = (result && "error" in result) ? result.error
 								: (fallback && "error" in fallback) ? fallback.error : "";
 							const retry = `지난 응답이 올바른 JSON 형식이 아닙니다. JSON.parse 에러: ${errInfo}\n다음 원문을 참고하여, 동일한 내용으로 올바른 JSON 버튼 그리드 하나만 다시 출력하세요. 원문 외 설명/코드펜스 금지.\n\n[잘못된 응답]\n${text.slice(0, 800)}`;
-							wsRef.current?.send(JSON.stringify({ type: "prompt", message: retry }));
+							sendPrompt(retry); // sendPrompt가 sessionInitRef=false 확인 → systemPrompt 재부착
 						} else {
 							retryCountRef.current = 0;
+							schedulerPrefixRef.current = null; // prefix 클리어
 							const errInfo = (result && "error" in result) ? result.error
 								: (fallback && "error" in fallback) ? fallback.error : "알 수 없는 오류";
 							setState(errState(`[파싱실패] ${errInfo}\n${text.slice(0, 150)}`, gridRef.current.rows, gridRef.current.cols));
@@ -337,6 +405,7 @@ export default function App() {
 					}
 				} else if (!loading) {
 					// 응답 텍스트 자체가 없는 경우 (도구만 사용 등)
+					schedulerPrefixRef.current = null; // prefix 클리어
 					setState(errState("응답이 비어 있습니다. 다시 시도해주세요.", gridRef.current.rows, gridRef.current.cols));
 				}
 				break;
@@ -402,7 +471,21 @@ export default function App() {
 						setState((s) => ({ message: info, buttons: s.buttons }));
 						showSessionDetail.current = false;
 					}
+					// 새로고침 복원: 스트리밍 중이면 lastPrompt로 입력창 복원
+					if (msg.data.isStreaming === true && msg.data.lastPrompt) {
+						setInput(msg.data.lastPrompt);
+					}
 				}
+				if (msg.command === "schedule") {
+						// schedule 명령 결과 → 다음 프롬프트에 주입
+						if (msg.success) {
+							// 성공: 결과 텍스트를 캐시 (list 결과 등)
+							schedulerFeedbackRef.current = msg.data?.text ?? null;
+						} else {
+							// 실패: 에러 메시지를 캐시
+							schedulerFeedbackRef.current = `[스케줄 오류] ${msg.error}`;
+						}
+					}
 				if (msg.command === "set_model" && msg.success) {
 					// 모델 변경 후 헤더 모델명 갱신
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
@@ -434,6 +517,11 @@ export default function App() {
 					modelPage.current = 0;
 					renderModelGrid();
 				}
+				break;
+
+			case "scheduler_trigger":
+				// 백엔드 주입 직전 서버가 전송 → 다음 agent_end 응답에 prefix 부착
+				schedulerTriggerRef.current = { id: msg.id, mode: msg.mode, at: msg.at };
 				break;
 
 			case "extension_ui_request":
@@ -589,10 +677,16 @@ export default function App() {
 		const { rows: r, cols: c } = gridRef.current;
 		let message = userText;
 
-		// 항상 시스템 지시를 사용자 메시지에 포함하여 JSON 형식 강제.
-		// 대화가 길어져도 매 턴마다 형식을 상기시켜 파싱 실패 방지.
-		if (!modelMode.current) {
-			message = `${systemPrompt(r, c)}\n\n${userText}`;
+		// 스케줄러 피드백(에러/목록)이 대기 중이면 프롬프트 앞에 주입
+		if (schedulerFeedbackRef.current) {
+			message = `${schedulerFeedbackRef.current}\n\n${message}`;
+			schedulerFeedbackRef.current = null;
+		}
+
+		// 시스템 지시: 세션 최초 1회만 부착 (RPC 세션은 컨텍스트 유지, 매 턴 부착은 중복)
+		if (!modelMode.current && !sessionInitRef.current) {
+			message = `${systemPrompt(r, c)}\n\n${message}`;
+			sessionInitRef.current = true;
 		}
 
 		ws.send(JSON.stringify({ type: "prompt", message }));
@@ -697,6 +791,7 @@ export default function App() {
 			<header className="turk-header">
 				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
+				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" /></button>
 				<button className="turk-model-btn" onClick={() => {
 					if (modelMode.current) {
 						modelMode.current = false;
