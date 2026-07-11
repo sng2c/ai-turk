@@ -97,7 +97,7 @@ export function parseAt(at: string, mode: ScheduleMode): { ms: number; error?: s
  * 마지막에 줄바꿈 1개 (systemPrompt 는 sendPrompt 가 별도 부착).
  */
 export function formatTriggerMessage(entry: ScheduleEntry, executedAt: Date): string {
-	return `[예약 스케줄 실행] id: ${entry.id} · ${entry.at} · ${entry.mode} · ${executedAt.toISOString()}\n이 메시지는 위 예약 스케줄이 실행된 것입니다. 아래 지시에 따라 응답하세요.\n\n${entry.prompt}\n`;
+	return `[예약 스케줄 실행] id: ${entry.id} · ${entry.at} · ${entry.mode} · ${executedAt.toLocaleString("ko-KR")}\n이 메시지는 위 예약 스케줄이 실행된 것입니다. 아래 지시에 따라 응답하세요.\n\n${entry.prompt}\n`;
 }
 
 // ── 목록 텍스트 포맷 ────────────────────────────────────────────────────
