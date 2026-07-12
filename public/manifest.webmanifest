@@ -1,0 +1,9 @@
+{
+  "name": "AI Turk",
+  "short_name": "AI Turk",
+  "display": "browser",
+  "start_url": "/",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
