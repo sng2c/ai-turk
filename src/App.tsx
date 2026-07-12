@@ -203,6 +203,13 @@ async function subscribePush(publicKey: string, ws: WebSocket | null): Promise<v
 	} catch (e) { console.debug("[Push] 구독 실패:", e); }
 }
 
+// ── 유저 구분키 — 브라우저(localStorage) 고유 ID. 사생활 탭 = 다른 키 = 다른 세션.
+const TURK_USER_KEY: string = (() => {
+	let k = localStorage.getItem("turk-user-key");
+	if (!k) { k = crypto.randomUUID(); localStorage.setItem("turk-user-key", k); }
+	return k;
+})();
+
 // ── 앱 ─────────────────────────────────────────────────────────────────
 export default function App() {
 	const rows = DEFAULT_ROWS;
@@ -288,7 +295,7 @@ export default function App() {
 
 	// ── WebSocket 연결 ──────────────────────────────────────────────────
 	const connect = useCallback(() => {
-		const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`;
+		const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws?u=${TURK_USER_KEY}`;
 		const ws = new WebSocket(wsUrl);
 		wsRef.current = ws;
 		shouldReconnect.current = true;
@@ -345,6 +352,17 @@ export default function App() {
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				break;
 			case "pi_starting":
+				setPiReady(false);
+				break;
+			case "session_error":
+				// 최대 세션 초과 등 — 재연결 중지 (무한 재시도 방지)
+				shouldReconnect.current = false;
+				setState({ message: `⚠️ ${msg.error || "세션 연결 거부됨"}`, buttons: {} });
+				setPiReady(false);
+				break;
+			case "session_terminated":
+				// LRU 정리로 강제 종료 — 재연결 시 새 세션 할당됨
+				shouldReconnect.current = true;
 				setPiReady(false);
 				break;
 			case "pi_exit":

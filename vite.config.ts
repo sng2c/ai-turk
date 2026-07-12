@@ -13,24 +13,40 @@ import { mkdirSync } from "node:fs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
- * AI Turk Vite 플러그인 — 백엔드(pi | claude)를 개발 서버에 통합
+ * AI Turk Vite 플러그인 — 멀티 세션 (유저 키 기반)
+ * 각 유저(브라우저 localStorage userKey)마다 독립 세션(백엔드 + 스케줄러) 할당.
+ * 같은 유저 다중 탭 = 동일 세션 broadcast. 사생활 탭 = 다른 userKey = 다른 세션.
  * npm run dev 하나로 Vite + 백엔드 + WebSocket 모두 실행
  */
 function turkPlugin(env: Record<string, string>): Plugin {
-	let backend: Backend | null = null;
-	let backendReady = false;
-	const clients = new Set<WebSocket>();
-
-	// ── Web Push (VAPID 키 자동 발급, 메모리만) ────────────────────────────
+	// ── Web Push (VAPID 키 자동 발급, 메모리만) — 서버 전역 1개 (모든 세션 공유) ──
 	const vapidKeys = webpush.generateVAPIDKeys();
 	const VAPID_PUBLIC_KEY: string = vapidKeys.publicKey;
 	const VAPID_PRIVATE_KEY: string = vapidKeys.privateKey;
 	webpush.setVapidDetails("mailto:ai-turk@local", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-	let lastPushSubscription: any = null; // 마지막 구독 (1인 인스턴스 — 1개만 유지)
-	
-	function broadcast(data: Record<string, unknown>): void {
+
+	const MAX_SESSIONS = parseInt(env.TURK_MAX_SESSIONS || "5");
+	const AGENT_CWD = env.TURK_AGENT_CWD || join(__dirname, "workspace");
+
+	// ── 세션 구조 — 유저(브라우저)별 독립 백엔드 + 스케줄러 ───────────────────
+	interface Session {
+		userKey: string;
+		backend: Backend | null;
+		backendReady: boolean;
+		scheduler: Scheduler;
+		pushSubscription: any;
+		ws: Set<WebSocket>;
+		lastPrompt: string | null;
+		isStreaming: boolean;
+		lastActivity: number;
+	}
+
+	const sessions = new Map<string, Session>();
+
+	// 같은 세션(유저) WS 전체에 broadcast — 다중 탭 동기화
+	function broadcast(session: Session, data: Record<string, unknown>): void {
 		const msg = JSON.stringify(data);
-		for (const ws of clients) {
+		for (const ws of session.ws) {
 			if (ws.readyState === WebSocket.OPEN) ws.send(msg);
 		}
 	}
@@ -56,12 +72,11 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			.trim();
 	}
 
-	function sendPushNotification(ev: TurkEvent): void {
+	function sendPushNotification(session: Session, ev: TurkEvent): void {
 		const messages = (ev as any).messages;
 		if (!Array.isArray(messages)) return;
 		const text = extractTextFromMessages(messages);
 		if (!text) return;
-		// JSON 응답이면 파싱해서 message 추출 (이스케이프/따옴표 안전)
 		let bodyText = text;
 		try {
 			const parsed = JSON.parse(text);
@@ -71,70 +86,110 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		const body = stripMarkdownServer(bodyText).slice(0, 50);
 		if (!body) return;
 		const payload = JSON.stringify({ body: body.length === 50 ? body + "..." : body });
-		webpush.sendNotification(lastPushSubscription, payload)
-			.then(() => console.log("[Push] 전송 성공"))
-			.catch((err) => console.log("[Push] 전송 실패:", err.message));
+		webpush.sendNotification(session.pushSubscription, payload)
+			.then(() => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 성공`))
+			.catch((err) => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 실패: ${err.message}`));
 	}
 
-	function startBackend(): void {
-		const cwd = env.TURK_AGENT_CWD || join(__dirname, "workspace");
-		try { mkdirSync(cwd, { recursive: true }); } catch { /* 무시 */ }
-		backend = createBackend({
-			cwd,
-			onLog: (m: string) => console.log(m),
-		});
-		backend.onEvent((ev: TurkEvent) => {
-			if (ev.type === "pi_ready") { backendReady = true; (ev as any).vapidPublicKey = VAPID_PUBLIC_KEY; }
-			if (ev.type === "pi_exit" || ev.type === "pi_error") backendReady = false;
-			// agent_start: 스트리밍 시작
-			if (ev.type === "agent_start") isStreaming = true;
-			// agent_end: 스트리밍 종료 + 큐 드레인 + lastPrompt 초기화 + 웹 푸시
-			if (ev.type === "agent_end") {
-				isStreaming = false;
-				lastPrompt = null;
-				scheduler.drainQueue();
-				// WS 끊김 시 웹 푸시 전송 (백그라운드 알림)
-				if (lastPushSubscription) sendPushNotification(ev);
-			}
-			// get_state 응답 보강: lastPrompt + isStreaming 주입
-			if (ev.type === "response" && ev.command === "get_state") {
-				(ev as any).data = { ...(ev as any).data, lastPrompt, isStreaming };
-			}
-			broadcast(ev);
-		});
-		backend.start();
-	}
-
-	// restart_pi, schedule 제외하고 모든 명령을 백엔드에 전달
-	const customCommands = ["restart_pi", "schedule", "push_subscribe"];
-	let lastPrompt: string | null = null; // 마지막 백엔드 전송 프롬프트 (새로고침 복원용)
-	let isStreaming = false; // 백엔드 응답 생성 중 여부
-
-	// backend.send를 가로채서 lastPrompt 저장. Backend 인터페이스 불변.
-	// opts.fromScheduler=true 시 lastPrompt 저장 생략 — 서버 자체 프롬프트는 채팅창에 복원되지 않음.
-	function sendToBackend(cmd: Record<string, unknown>, opts?: { fromScheduler?: boolean }): void {
+	// backend.send 가로채서 lastPrompt 저장. fromScheduler 시 생략
+	function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { fromScheduler?: boolean }): void {
 		if (cmd.type === "prompt" && typeof cmd.message === "string" && !opts?.fromScheduler) {
-			lastPrompt = cmd.message;
+			session.lastPrompt = cmd.message;
 		}
-		backend?.send(cmd);
+		session.backend?.send(cmd);
 	}
 
-	// ── 스케줄러 인스턴스 ──────────────────────────────────────────────────
-	const scheduler = new Scheduler({
-		onTrigger: (entry) => {
-			const msg = formatTriggerMessage(entry, new Date());
-			sendToBackend({ type: "prompt", message: msg }, { fromScheduler: true });
-			broadcast({ type: "scheduler_trigger", id: entry.id, cron: entry.cron });
-		},
-		isBusy: () => isStreaming,
-	});
+	// ── 백엔드 시작 (세션별) ────────────────────────────────────────────────
+	function startBackend(session: Session): void {
+		try { mkdirSync(AGENT_CWD, { recursive: true }); } catch { /* 무시 */ }
+		session.backend = createBackend({
+			cwd: AGENT_CWD,
+			onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
+		});
+		session.backend.onEvent((ev: TurkEvent) => {
+			if (ev.type === "pi_ready") {
+				session.backendReady = true;
+				(ev as any).vapidPublicKey = VAPID_PUBLIC_KEY;
+			}
+			if (ev.type === "pi_exit" || ev.type === "pi_error") session.backendReady = false;
+			if (ev.type === "agent_start") session.isStreaming = true;
+			if (ev.type === "agent_end") {
+				session.isStreaming = false;
+				session.lastPrompt = null;
+				session.scheduler.drainQueue();
+				if (session.pushSubscription) sendPushNotification(session, ev);
+			}
+			if (ev.type === "response" && ev.command === "get_state") {
+				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming };
+			}
+			broadcast(session, ev);
+		});
+		session.backend.start();
+	}
+
+	// ── 세션 관리 ────────────────────────────────────────────────────────────
+	function createSession(userKey: string): Session {
+		const session: Session = {
+			userKey,
+			backend: null,
+			backendReady: false,
+			scheduler: new Scheduler({
+				onTrigger: (entry) => {
+					const msg = formatTriggerMessage(entry, new Date());
+					sendToBackend(session, { type: "prompt", message: msg }, { fromScheduler: true });
+					broadcast(session, { type: "scheduler_trigger", id: entry.id, cron: entry.cron });
+				},
+				isBusy: () => session.isStreaming,
+			}),
+			pushSubscription: null,
+			ws: new Set(),
+			lastPrompt: null,
+			isStreaming: false,
+			lastActivity: Date.now(),
+		};
+		sessions.set(userKey, session);
+		startBackend(session);
+		return session;
+	}
+
+	function removeSession(userKey: string): void {
+		const session = sessions.get(userKey);
+		if (!session) return;
+		broadcast(session, { type: "session_terminated", reason: "유휴 세션 정리" });
+		for (const ws of session.ws) ws.close();
+		session.scheduler.destroy();
+		session.backend?.stop();
+		sessions.delete(userKey);
+	}
+
+	// 최대 도달 시 WS 없는 유휴 세션 LRU 강제 종료 → 수용
+	function getOrCreateSession(userKey: string): Session | { error: string } {
+		const existing = sessions.get(userKey);
+		if (existing) {
+			existing.lastActivity = Date.now();
+			return existing;
+		}
+		if (sessions.size >= MAX_SESSIONS) {
+			let oldest: Session | null = null;
+			for (const s of sessions.values()) {
+				if (s.ws.size === 0 && (!oldest || s.lastActivity < oldest.lastActivity)) oldest = s;
+			}
+			if (oldest) {
+				console.log(`[Turk] LRU 정리: ${oldest.userKey.slice(0, 8)}`);
+				removeSession(oldest.userKey);
+			} else {
+				return { error: `최대 세션 수(${MAX_SESSIONS}) 초과 — 모든 세션 활성 중` };
+			}
+		}
+		return createSession(userKey);
+	}
+
+	const customCommands = ["restart_pi", "schedule", "push_subscribe"];
 
 	return {
 		name: "turk-rpc",
 		configureServer(server) {
-			startBackend();
-
-			// noServer 모드: Vite HMR 업그레이드 핸들러와 충돌 방지
+			// noServer 모드: Vite HMR 역그레이드 핸들러와 충돌 방지
 			const wss = new WebSocketServer({ noServer: true });
 			server.httpServer!.on("upgrade", (req, socket, head) => {
 				const url = new URL(req.url || "", "http://localhost");
@@ -144,46 +199,68 @@ function turkPlugin(env: Record<string, string>): Plugin {
 					});
 				}
 			});
-			wss.on("connection", (ws) => {
-				console.log("[Turk] 클라이언트 연결");
-				clients.add(ws);
-						ws.send(JSON.stringify({ type: backendReady ? "pi_ready" : "pi_starting", ...(backendReady ? { backend: backend?.kind(), vapidPublicKey: VAPID_PUBLIC_KEY } : {}) }));
+
+			wss.on("connection", (ws, req) => {
+				const url = new URL(req.url || "", "http://localhost");
+				const userKey = url.searchParams.get("u");
+				if (!userKey) {
+					ws.send(JSON.stringify({ type: "session_error", error: "userKey 누락" }));
+					ws.close();
+					return;
+				}
+				const result = getOrCreateSession(userKey);
+				if ("error" in result) {
+					ws.send(JSON.stringify({ type: "session_error", error: result.error }));
+					ws.close();
+					return;
+				}
+				const session = result;
+				session.ws.add(ws);
+				session.lastActivity = Date.now();
+				console.log(`[Turk] 연결: ${userKey.slice(0, 8)} (세션 ${sessions.size}/${MAX_SESSIONS})`);
+
+				ws.send(JSON.stringify({
+					type: session.backendReady ? "pi_ready" : "pi_starting",
+					...(session.backendReady ? { backend: session.backend?.kind(), vapidPublicKey: VAPID_PUBLIC_KEY } : {}),
+				}));
 
 				ws.on("message", (raw) => {
 					try {
 						const msg = JSON.parse(raw.toString());
 						if (customCommands.includes(msg.type)) {
 							if (msg.type === "restart_pi") {
-								if (backend) { backend.stop(); backend = null; }
-								setTimeout(() => startBackend(), 500);
+								if (session.backend) { session.backend.stop(); session.backend = null; }
+								session.backendReady = false;
+								setTimeout(() => startBackend(session), 500);
 							} else if (msg.type === "schedule") {
-								// schedule 명령: scheduler.handle() → 결과를 response 이벤트로 반환
-								const result = scheduler.handle(msg);
-								broadcast({
+								const r = session.scheduler.handle(msg);
+								broadcast(session, {
 									type: "response",
 									command: "schedule",
-									success: result.success,
-									...(result.success ? { data: result.data } : { error: result.error }),
+									success: r.success,
+									...(r.success ? { data: r.data } : { error: r.error }),
 								});
 							} else if (msg.type === "push_subscribe") {
-								// push 구독 저장 (1인 인스턴스 — 마지막 1개만 유지)
-								lastPushSubscription = msg.subscription;
-								console.log("[Push] 구독 수신:", msg.subscription?.endpoint?.slice(0, 60));
+								session.pushSubscription = msg.subscription;
+								console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신: ${msg.subscription?.endpoint?.slice(0, 60)}`);
 							}
 						} else {
-							sendToBackend(msg);
+							sendToBackend(session, msg);
 						}
 					} catch (e) {
 						console.error("[Turk] 메시지 파싱 오류:", e);
 					}
 				});
 
-				ws.on("close", () => { console.log("[Push] WS close"); clients.delete(ws); });
+				ws.on("close", () => {
+					session.ws.delete(ws);
+					session.lastActivity = Date.now();
+					console.log(`[Turk] 종료: ${userKey.slice(0, 8)} (남은 WS ${session.ws.size})`);
+				});
 			});
 
 			server.httpServer!.on("close", () => {
-				scheduler.destroy();
-				if (backend) backend.stop();
+				for (const userKey of sessions.keys()) removeSession(userKey);
 			});
 		},
 	};
