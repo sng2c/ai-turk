@@ -27,6 +27,8 @@ interface TurkState {
 	colors?: Record<string, string>;
 	textColors?: Record<string, string>;
 	schedules?: any[]; // LLM 응답의 schedules 배열 (일회성 명령 — state에 저장하지 않고 즉시 서버로 전송)
+	noResponse?: boolean; // 조건부 스케줄 불충족 — 응답 폐기 (UI 갱신/알림 없음)
+	repeat?: boolean; // 스케줄 반복 여부 — false면 자동 제거, true/생략 시 유지
 }
 
 interface ToolStatus {
@@ -70,18 +72,32 @@ function systemPrompt(rows: number, cols: number): string {
 
 [Schedules]
 - 응답에 "schedules" 배열을 포함하여 스케줄을 설정/해제할 수 있습니다.
-- 각 원소는 다음 형태입니다:
-  {"action":"add","id":"morning","mode":"daily","at":"09:00","prompt":"설명과 지시를 통합한 프롬프트"}
+- 모든 스케줄은 반복(cron 표현식으로 주기 지정). 실행 응답의 "repeat":false로 자동 제거(1회성은 이것으로 표현).
+- 각 원소 형태:
+  {"action":"add","id":"morning","cron":"0 9 * * *","prompt":"..."}
   {"action":"remove","id":"morning"}
   {"action":"clear"}
   {"action":"list"}
-- mode: "once" (N분 후 한 번) | "repeat" (N분마다 반복) | "daily" (매일 지정 시각)
-- at: 간격("5m","1h","30s") 또는 시각("09:00","14:30") — mode에 따라:
-  - once/repeat: 간격 형식 ("5m", "1h", "30s")
-  - daily: 시각 형식 ("09:00")
+- cron 표현식 (분 시 일 월 요일):
+  - "0 9 * * *" → 매일 9시
+  - "*/5 * * * *" → 5분마다
+  - "0 0 11 1 *" → 매년 1월 11일 자정
+  - "0 9 * * 1-5" → 평일 9시
+  - "0 */2 * * *" → 2시간마다
 - 같은 id add → 덮어쓰기(자동 업데이트)
 - 최대 5개, 최소 간격 1분
-- 예시: {"message":"스케줄을 설정했습니다.","buttons":{"0":"확인","1":"해제","2":""},"schedules":[{"action":"add","id":"morning","mode":"daily","at":"09:00","prompt":"오늘 할 일을 정리해서 그리드로 보여줘."}]}
+- 실행 응답의 "repeat" 필드(필수)로 반복 여부 결정:
+  - repeat:true: 계속 반복(스케줄 유지) — 지속 반복형이거나 아직 목적 미달성.
+  - repeat:false: 완료(스케줄 자동 제거) — 목적 달성형에서 목표 이룬 경우.
+- 예시: {"message":"스케줄을 설정했습니다.","buttons":{"0":"확인","1":"해제","2":""},"schedules":[{"action":"add","id":"morning","cron":"0 9 * * *","prompt":"오늘 할 일을 정리해서 그리드로 보여줘."}]}
+- 조건부 스케줄: "condition" 선택 필드로 실행 여부 조건 지정. condition(언제 실행)과 prompt(무엇을 할지) 분리.
+  - condition: 평가 대상 (참/거짓). 예: "비가 오면", "오늘이 주말이면", "주가 상승하면"
+  - prompt: 조건 충족 시 수행 지시. 예: "우산 챙기세요 그리드"
+  - 예시: {"action":"add","id":"rain","cron":"0 9 * * *","condition":"비가 오면","prompt":"우산 챙기세요 그리드"}
+- 조건부 스케줄 실행 시: 조건을 먼저 평가 — 명백한 사실(객관 팩트)을 web_search 등으로 확인. 추측 금지.
+  - 확실히 참: prompt 지시로 정상 응답.
+  - 확실히 거짓: {"message":"","buttons":{},"noResponse":true} 반환 — 행동 없음, 응답 폐기(표시/알림 없음).
+  - 확인 불가: 사용자에게 상황 알리는 정상 응답(보완 유도).
 
 [CRITICAL FORMAT]
 Respond with ONLY this JSON (fill values, do not include comments). First character must be "{" and last must be "}":
@@ -234,7 +250,7 @@ export default function App() {
 	const MAX_PARSE_RETRIES = 2;
 	// ── 스케줄러 관련 ref ──
 	// schedulerTriggerRef: scheduler_trigger 이벤트 수신 시 설정 → 다음 agent_end 응답 message 앞에 prefix 부착
-	const schedulerTriggerRef = useRef<{ id: string; mode: string; at: string } | null>(null);
+	const schedulerTriggerRef = useRef<{ id: string; cron: string } | null>(null);
 	// schedulerFeedbackRef: schedule response 결과 → 다음 프롬프트에 주입 (가드 에러 등 안내)
 	const schedulerFeedbackRef = useRef<string | null>(null);
 	// schedulerPrefixRef: scheduler_trigger로부터 생성된 prefix → setState 시 message 앞에 부착
@@ -359,11 +375,13 @@ export default function App() {
 				}
 				setLoading(false);
 				setInput("");
-				// scheduler_trigger가 대기 중이면 응답 message 앞에 prefix 부착
+				// scheduler_trigger가 대기 중이면 응답 message 앞에 prefix 부착 + id 보존(repeat 처리용)
+				let triggerScheduleId: string | null = null;
 				if (schedulerTriggerRef.current) {
 					const trig = schedulerTriggerRef.current;
+					triggerScheduleId = trig.id;
 					schedulerTriggerRef.current = null; // 1회용
-					schedulerPrefixRef.current = `⏰ [예약 실행: ${trig.id} · ${trig.at} ${trig.mode}]\n`;
+					schedulerPrefixRef.current = `⏰ [예약 실행: ${trig.id} · ${trig.cron}]\n`;
 				}
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				setToolStatus(null);
@@ -378,6 +396,15 @@ export default function App() {
 					if (result && "parsed" in result) {
 						retryCountRef.current = 0; // 성공 시 카운터 리셋
 						const parsed = result.parsed;
+						// no-response 응답 폐기 — 조건부 스케줄 불충족 (UI 갱신/알림 없음)
+						if (parsed.noResponse === true) {
+							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
+							return;
+						}
+						// repeat:false 응답 — 스케줄 완료(제거) 요청
+						if (parsed.repeat === false && triggerScheduleId) {
+							wsRef.current?.send(JSON.stringify({ type: "schedule", action: "remove", id: triggerScheduleId }));
+						}
 						// schedules 배열 추출 → 서버로 전송 (일회성 명령, state에 넣지 않음)
 						if (Array.isArray(parsed.schedules)) {
 							for (const sch of parsed.schedules) {
@@ -405,6 +432,15 @@ export default function App() {
 						if (fallback && "parsed" in fallback) {
 							retryCountRef.current = 0;
 							const parsed = fallback.parsed;
+							// no-response 응답 폐기 (1차와 동일)
+							if (parsed.noResponse === true) {
+								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
+								return;
+							}
+							// repeat:false 응답 — 스케줄 완료(제거) 요청 (1차와 동일)
+							if (parsed.repeat === false && triggerScheduleId) {
+								wsRef.current?.send(JSON.stringify({ type: "schedule", action: "remove", id: triggerScheduleId }));
+							}
 							if (Array.isArray(parsed.schedules)) {
 								for (const sch of parsed.schedules) {
 									wsRef.current?.send(JSON.stringify({ type: "schedule", ...sch }));
@@ -558,7 +594,7 @@ export default function App() {
 
 			case "scheduler_trigger":
 				// 백엔드 주입 직전 서버가 전송 → 다음 agent_end 응답에 prefix 부착
-				schedulerTriggerRef.current = { id: msg.id, mode: msg.mode, at: msg.at };
+				schedulerTriggerRef.current = { id: msg.id, cron: msg.cron };
 				break;
 
 			case "extension_ui_request":
