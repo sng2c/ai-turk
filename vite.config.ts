@@ -65,6 +65,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		let bodyText = text;
 		try {
 			const parsed = JSON.parse(text);
+			if (parsed && parsed.noResponse) return; // no-response 응답 — push 폐기
 			if (parsed && typeof parsed.message === "string") bodyText = parsed.message;
 		} catch { /* JSON 아니면 text 그대로 */ }
 		const body = stripMarkdownServer(bodyText).slice(0, 50);
@@ -123,7 +124,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		onTrigger: (entry) => {
 			const msg = formatTriggerMessage(entry, new Date());
 			sendToBackend({ type: "prompt", message: msg }, { fromScheduler: true });
-			broadcast({ type: "scheduler_trigger", id: entry.id, mode: entry.mode, at: entry.at });
+			broadcast({ type: "scheduler_trigger", id: entry.id, cron: entry.cron });
 		},
 		isBusy: () => isStreaming,
 	});
