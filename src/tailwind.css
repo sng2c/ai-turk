@@ -101,7 +101,7 @@ body {
 .turk-app {
 	max-width: 34.286rem;
 	margin: 0 auto;
-	padding: 0.571rem 0.857rem 4rem;
+	padding: 0.571rem 0.857rem 4.5rem; /* 하단 4.5rem: 입력창 영역 */
 	display: flex;
 	flex-direction: column;
 	gap: 0.857rem;
@@ -296,7 +296,7 @@ body {
 .turk-message-wrap {
 	position: relative;
 	margin: var(--box-shadow-width);
-	flex: 1 1 auto;
+	flex: 0 0 40%; /* 출력창 40% — 그리드 영역 60% */
 	min-height: 0;
 }
 
@@ -310,7 +310,6 @@ body {
 	color: var(--success);
 	word-break: break-all;
 	font-family: "NeoDunggeunmo", monospace;
-	min-height: calc(var(--turk-font-size) * 1.3 * 10 + 1.571rem);
 	height: 100%;
 	overflow-y: auto;
 }
@@ -451,16 +450,21 @@ body {
 .turk-grid {
 	display: grid;
 	gap: 0.143rem;
-	flex: 0 0 auto; /* 버튼 정사각형 고정 — 남은 공간 차지 안 함 */
-	overflow: hidden;
+	flex: 1 1 auto; /* 그리드 영역 60% */
+	min-height: 0;
+	grid-auto-rows: auto; /* 정사각형 높이 — 행 딱 붙음 */
+	justify-items: stretch; /* 가로 채움 */
+	align-content: start; /* 위 정렬, 아래 여백 */
 }
 
 .turk-grid-btn {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	aspect-ratio: 1; /* 정사각형 — 너비에 맞춰 높이 자동 */
 	width: 100%;
+	height: auto;
+	max-height: 100%; /* 셀 한계 */
+	aspect-ratio: 1; /* 정사각형 — 높이 = 가로 */
 	padding: 0.429rem 0.286rem;
 	border: 0.143rem solid var(--foreground);
 	background: var(--secondary);
@@ -471,6 +475,7 @@ body {
 	line-height: 1.2;
 	white-space: pre-wrap;
 	word-break: break-all;
+	overflow: hidden; /* 글자 넘침 숨김 */
 	transition: all 0.1s;
 	user-select: none;
 	-webkit-tap-highlight-color: transparent;
@@ -518,8 +523,10 @@ body {
 /* 입력 폼 */
 .turk-input-form {
 	position: fixed;
-	left: 0;
-	right: 0;
+	left: 50%;
+	transform: translateX(-50%);
+	width: 100%;
+	max-width: 34.286rem; /* .turk-app 너비에 맞춤 */
 	bottom: 0;
 	display: flex;
 	gap: 0.286rem;
@@ -578,4 +585,25 @@ body {
 .turk-submit-btn:disabled {
 	opacity: 0.4;
 	cursor: default;
+}
+
+/* PC (넓은 화면): 입력창 플로팅 해제, 그리드 밑에 붙임 */
+@media (min-width: 768px) {
+	.turk-app {
+		padding-bottom: 0.571rem; /* 기본 하단 패딩 */
+	}
+	.turk-message-wrap {
+		flex: 1 1 auto; /* 남은 공간 채움 */
+		max-height: none;
+	}
+	.turk-grid {
+		flex: 0 0 auto; /* fit content — 그리드 바로 밑에 입력창 */
+	}
+	.turk-input-form {
+		position: static;
+		left: auto;
+		transform: none;
+		width: 100%;
+		max-width: none;
+	}
 }
