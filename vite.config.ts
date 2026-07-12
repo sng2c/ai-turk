@@ -104,6 +104,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		try { mkdirSync(AGENT_CWD, { recursive: true }); } catch { /* 무시 */ }
 		session.backend = createBackend({
 			cwd: AGENT_CWD,
+			userKey: session.userKey, // pi --session-id 영속 세션 (claude는 무시)
 			onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
 		});
 		session.backend.onEvent((ev: TurkEvent) => {
