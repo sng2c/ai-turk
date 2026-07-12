@@ -860,7 +860,7 @@ export default function App() {
 		gridRows.push(row);
 	}
 
-	const statusText = !connected ? "연결 끊김" : !piReady ? "pi 시작중" : showThinking ? "사고중" : loading ? "생성중" : "준비";
+	const statusText = !connected ? "연결 끊김" : !piReady ? "세션 초기화 중" : showThinking ? "사고중" : loading ? "생성중" : "준비";
 
 	const cycleThinking = () => {
 		const ws = wsRef.current;
@@ -973,7 +973,7 @@ export default function App() {
 					inputMode="text"
 					value={input}
 					onChange={(e) => setInput(e.target.value)}
-					placeholder={piReady ? "명령어 입력..." : "pi 대기중..."}
+					placeholder={piReady ? "명령어 입력..." : "세션 초기화 중..."}
 					disabled={loading || !piReady}
 					autoFocus
 				/>
@@ -988,7 +988,7 @@ export default function App() {
 					{loading ? "취소" : "전송"}
 				</button>
 			</form>
-			{loading && <div className="turk-dim-overlay" />}
+			{(loading || !piReady) && <div className="turk-dim-overlay" />}
 		</div>
 	);
 }
