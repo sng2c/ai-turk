@@ -99,6 +99,7 @@ body {
 /* ── 레이아웃 ──────────────────────────────────────────────────────────── */
 
 .turk-app {
+	position: relative; /* dim 오버레이 기준 */
 	max-width: 34.286rem;
 	margin: 0 auto;
 	padding: 0.571rem 0.857rem 4.5rem; /* 하단 4.5rem: 입력창 영역 */
@@ -111,6 +112,8 @@ body {
 
 /* 헤더 */
 .turk-header {
+	position: relative;
+	z-index: 30; /* dim 오버레이 위 — 툴바 제외 */
 	display: flex;
 	align-items: center;
 	gap: 0.3em;
@@ -346,24 +349,54 @@ body {
 }
 
 .turk-scroll-down {
+	bottom: 2.2rem;
+}
+.turk-copy-btn {
+	position: absolute;
+	right: 0rem;
 	bottom: 0rem;
+	background: var(--card);
+	border: 0.143rem solid var(--foreground);
+	box-shadow: var(--pixel-box-shadow);
+	color: var(--foreground);
+	font-size: var(--turk-font-size);
+	width: 2rem;
+	height: 2rem;
+	padding: 0;
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	line-height: 1;
+	cursor: pointer;
+	z-index: 5;
+	opacity: 0.85;
+	transition: opacity 0.15s, transform 0.15s, color 0.2s;
 }
 
-.turk-grid-loading {
-	opacity: 0.4;
-	transition: opacity 0.2s;
+.turk-copy-btn:hover {
+	opacity: 1;
+	transform: scale(1.1);
 }
+
+.turk-copy-done {
+	color: var(--success);
+	opacity: 1;
+}
+
 
 .turk-grid-hidden {
 	display: none;
 }
 
-.turk-message-wrap.turk-loading .turk-scroll-arrow {
-	opacity: 0.4;
-}
-
-.turk-message-loading {
-	opacity: 0.4;
+/* 응답 대기 중 전체 dim 오버레이 — 이벤트 패싱(pointer-events: none) */
+.turk-dim-overlay {
+	position: absolute;
+	inset: 0;
+	background: var(--background);
+	opacity: 0.55; /* 더 어둡게 */
+	pointer-events: none;
+	z-index: 20;
 	transition: opacity 0.2s;
 }
 
@@ -533,7 +566,7 @@ body {
 	background: var(--background);
 	padding: 0.286rem;
 	box-sizing: border-box;
-	z-index: 10;
+	z-index: 30; /* dim 오버레이 위 — 입력창 제외 */
 }
 
 .turk-input-field {
@@ -600,7 +633,7 @@ body {
 		flex: 0 0 auto; /* fit content — 그리드 바로 밑에 입력창 */
 	}
 	.turk-input-form {
-		position: static;
+		position: relative;
 		left: auto;
 		transform: none;
 		width: 100%;

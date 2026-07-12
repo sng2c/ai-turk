@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, Component, type ReactNode } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -857,6 +857,7 @@ export default function App() {
 			</header>
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
+				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
 				{canScrollUp && (
 					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로"><ChevronUp className="turk-ico" /></button>
 				)}
@@ -933,6 +934,7 @@ export default function App() {
 					{loading ? "취소" : "전송"}
 				</button>
 			</form>
+			{loading && <div className="turk-dim-overlay" />}
 		</div>
 	);
 }
