@@ -629,8 +629,7 @@ export default function App() {
 				ws.send(JSON.stringify({ type: "new_session" }));
 				sessionInitRef.current = false;
 				setState(emptyState(gridRef.current.rows, gridRef.current.cols));
-				setThinkingText("");
-				setShowThinking(false);
+				setInput("");
 			}
 			return;
 		}
