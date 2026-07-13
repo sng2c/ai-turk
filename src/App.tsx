@@ -344,6 +344,7 @@ export default function App() {
 				}
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
+					if (msg.data.isStreaming) setLoading(true); // 응답 기다리는 중 상태 복원 (재연결 시)
 					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); }
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);

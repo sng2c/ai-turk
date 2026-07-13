@@ -67,6 +67,7 @@ interface Session {
 	scheduler: Scheduler;
 	pushSubscription: any; // 마지막 구독 (1인 — 세션당 1개)
 	ws: Set<WebSocket>; // 같은 유저 다중 탭 — 동일 세션 broadcast
+	lastAssistantText: string | null; // 마지막 assistant 응답 (WS 끊김 시 재연결 복원용)
 	lastPrompt: string | null; // 마지막 프롬프트 (새로고침 복원용)
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
 	lastActivity: number; // 마지막 활동 타임스탬프 (LRU 정리용)
@@ -95,6 +96,9 @@ function startBackend(session: Session): void {
 			session.isStreaming = false;
 			session.lastPrompt = null;
 			session.scheduler.drainQueue();
+			// 마지막 assistant 응답 보관 — WS 끊김 시 재연결 복원용 (push 권한 무관)
+			const messages = (ev as any).messages;
+			if (Array.isArray(messages)) session.lastAssistantText = extractTextFromMessages(messages);
 			if (session.pushSubscription) sendPushNotification(session, ev);
 		}
 		// get_state 응답 보강: lastPrompt + isStreaming 주입
@@ -180,6 +184,7 @@ function createSession(userKey: string): Session {
 		}),
 		pushSubscription: null,
 		ws: new Set(),
+		lastAssistantText: null,
 		lastPrompt: null,
 		isStreaming: false,
 		lastActivity: Date.now(),
@@ -254,7 +259,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 // ── WebSocket 서버 ──────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: "/ws" });
-const customCommands = ["restart_pi", "schedule", "push_subscribe"];
+const customCommands = ["restart_pi", "schedule", "push_subscribe", "get_last_assistant_text"];
 
 wss.on("connection", (ws, req) => {
 	const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -300,6 +305,13 @@ wss.on("connection", (ws, req) => {
 				} else if (msg.type === "push_subscribe") {
 					session.pushSubscription = msg.subscription;
 					console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신: ${msg.subscription?.endpoint?.slice(0, 60)}`);
+				} else if (msg.type === "get_last_assistant_text") {
+					broadcast(session, {
+						type: "response",
+						command: "get_last_assistant_text",
+						success: true,
+						data: { text: session.lastAssistantText ?? "" },
+					});
 				}
 			} else {
 				sendToBackend(session, msg);
