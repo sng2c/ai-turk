@@ -8,7 +8,10 @@ import {
 import type { TurkState, ToolStatus } from "./lib/turk";
 
 // 모바일(터치) 감지 — 모바일에서는 자동 포커스로 가상 키보드 자동 노출 방지
-const IS_COARSE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches === true;
+const IS_COARSE_POINTER = typeof window !== "undefined" && (
+	window.matchMedia?.("(pointer: coarse)")?.matches === true ||
+	/Android|iPhone|iPad|iPod|Mobi|Mobile/i.test(navigator.userAgent || "")
+);
 
 // ── 앱 ─────────────────────────────────────────────────────────────────
 export default function App() {
