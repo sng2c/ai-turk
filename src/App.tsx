@@ -37,8 +37,8 @@ export default function App() {
 	// OFF 순환 감지용: 첫 켜진 레벨(firstLevel)에 다시 도달하면 OFF로
 	const firstThinkingLevelRef = useRef<string | null>(null);
 	const thinkingCycleHitsRef = useRef(0);
-	const THINKING_LABEL: Record<string, string> = { off: "OFF", low: "LOW", medium: "MEDIUM", high: "HIGH", xhigh: "XHIGH" };
-	const THINKING_COLOR: Record<string, string> = { off: "var(--muted-foreground)", low: "var(--success)", medium: "#06b6d4", high: "var(--warning)", xhigh: "var(--destructive)" };
+	const THINKING_LABEL: Record<string, string> = { off: "OFF", minimal: "MINIMAL", low: "LOW", medium: "MEDIUM", high: "HIGH", xhigh: "XHIGH" };
+	const THINKING_COLOR: Record<string, string> = { off: "var(--muted-foreground)", minimal: "#94a3b8", low: "var(--success)", medium: "#06b6d4", high: "var(--warning)", xhigh: "var(--destructive)" };
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
