@@ -22,6 +22,7 @@ export default function App() {
 	const [connected, setConnected] = useState(false);
 	const [piReady, setPiReady] = useState(false);
 	const [restored, setRestored] = useState(false); // 초기화 상태 복원 완료 여부
+	const [modelChanging, setModelChanging] = useState(false); // 모델 변경 중 (지원 레벨/컨텍스트 갱신)
 	const restorePendingRef = useRef(0); // 복원 대기 응답 카운터 (get_state + get_last_assistant_text)
 	const [backendKind, setBackendKind] = useState<string>("pi");
 	const [, setSessionId] = useState("");
@@ -356,6 +357,7 @@ export default function App() {
 					if (--restorePendingRef.current <= 0) setRestored(true);
 				}
 				if (msg.command === "get_state" && msg.success && msg.data) {
+					setModelChanging(false); // 모델 변경 완료 — 지원 레벨/컨텍스트 갱신됨
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
 					if (--restorePendingRef.current <= 0) setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) setLoading(true); // 응답 기다리는 중 상태 복원 (재연결 시)
@@ -656,6 +658,7 @@ export default function App() {
 			const model = availableModels.current.find((m: any) =>
 				`${m.provider}/${m.name || m.id}` === text);
 			if (model && ws?.readyState === WebSocket.OPEN) {
+				setModelChanging(true);
 				ws.send(JSON.stringify({
 					type: "set_model",
 					provider: model.provider,
@@ -695,7 +698,7 @@ export default function App() {
 	};
 
 	return (
-		<div className="turk-app" style={!restored ? { opacity: 0.4, pointerEvents: "none" } : undefined}>
+		<div className="turk-app" style={!restored || modelChanging ? { opacity: 0.4, pointerEvents: "none" } : undefined}>
 			<header className="turk-header">
 				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
