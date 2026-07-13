@@ -368,7 +368,11 @@ export default function App() {
 					}
 					// 새로고침 복원: 스트리밍 중이면 lastPrompt로 입력창 복원
 					if (msg.data.isStreaming === true && msg.data.lastPrompt) {
-						setInput(msg.data.lastPrompt);
+						// systemPrompt가 앞에 붙어있으면 제거 — userInput 분리 미반영 시에도 순수 사용자 입력만 복원
+						const { rows: r, cols: c } = gridRef.current;
+						const sp = systemPrompt(r, c);
+						const lp = msg.data.lastPrompt;
+						setInput(lp.startsWith(sp) ? lp.slice(sp.length).replace(/^\n+/, "") : lp);
 					}
 				}
 				if (msg.command === "schedule") {
