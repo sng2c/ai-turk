@@ -7,6 +7,9 @@ import {
 } from "./lib/turk";
 import type { TurkState, ToolStatus } from "./lib/turk";
 
+// 모바일(터치) 감지 — 모바일에서는 자동 포커스로 가상 키보드 자동 노출 방지
+const IS_COARSE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches === true;
+
 // ── 앱 ─────────────────────────────────────────────────────────────────
 export default function App() {
 	const rows = DEFAULT_ROWS;
@@ -74,6 +77,7 @@ export default function App() {
 		setCanScrollDown(el.scrollTop + el.clientHeight < el.scrollHeight - 2);
 	}, []);
 	const wsRef = useRef<WebSocket | null>(null);
+	const inputRef = useRef<HTMLInputElement>(null);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const shouldReconnect = useRef(true);
 	const showSessionDetail = useRef(false);
@@ -190,6 +194,8 @@ export default function App() {
 				}
 				setLoading(false);
 				setInput("");
+				// 데스크톱만 응답 완료 시 입력창 포커스 — 모바일은 가상 키보드 자동 노출 방지
+				if (!IS_COARSE_POINTER) inputRef.current?.focus();
 				// scheduler_trigger가 대기 중이면 응답 message 앞에 prefix 부착 + id 보존(repeat 처리용)
 				let triggerScheduleId: string | null = null;
 				if (schedulerTriggerRef.current) {
@@ -764,6 +770,7 @@ export default function App() {
 				}}
 			>
 				<input
+					ref={inputRef}
 					className="turk-input-field"
 					title="메시지 입력"
 					enterKeyHint="send"
@@ -772,7 +779,7 @@ export default function App() {
 					onChange={(e) => setInput(e.target.value)}
 					placeholder={piReady ? "명령어 입력..." : "세션 초기화 중..."}
 					disabled={loading || !piReady}
-					autoFocus
+					autoFocus={!IS_COARSE_POINTER}
 				/>
 				<button
 					type={loading ? "button" : "submit"}
