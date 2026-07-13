@@ -430,7 +430,11 @@ export default function App() {
 					setContextPct(msg.data.contextUsage.percent);
 				}
 				if (msg.command === "get_available_models" && msg.success && msg.data?.models) {
-						availableModels.current = msg.data.models;
+					availableModels.current = [...msg.data.models].sort((a, b) => {
+						const ka = `${a.provider}/${a.name || a.id}`;
+						const kb = `${b.provider}/${b.name || b.id}`;
+						return ka < kb ? -1 : ka > kb ? 1 : 0;
+					});
 					modelPage.current = 0;
 					renderModelGrid();
 				}
