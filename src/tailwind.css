@@ -235,9 +235,7 @@ body {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	display: inline-flex;
-	align-items: center;
-	gap: 0.2em;
+	display: inline-block;
 }
 
 @media (hover: hover) {
