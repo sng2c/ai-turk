@@ -39,8 +39,6 @@ export default function App() {
 	const firstThinkingLevelRef = useRef<string | null>(null);
 	const thinkingCycleHitsRef = useRef(0);
 	const THINKING_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-	const THINKING_LABEL: Record<string, string> = { off: "OFF", minimal: "MINIMAL", low: "LOW", medium: "MEDIUM", high: "HIGH", xhigh: "XHIGH", max: "MAX" };
-	const THINKING_COLOR: Record<string, string> = { off: "var(--muted-foreground)", minimal: "#94a3b8", low: "var(--success)", medium: "#06b6d4", high: "var(--warning)", xhigh: "var(--destructive)", max: "#991b1b" };
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
@@ -714,7 +712,7 @@ export default function App() {
 						prevStateRef.current = state;
 						ws.send(JSON.stringify({ type: "get_available_models" }));
 					}
-				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: THINKING_COLOR[thinkingLevel] }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{THINKING_LABEL[thinkingLevel]}</button> <button className="turk-new-btn" onClick={() => {
+				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: thinkingLevel === "off" ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{thinkingLevel.toUpperCase()}</button> <button className="turk-new-btn" onClick={() => {
 				if (!confirm("새 세션을 시작할까요?")) return;
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {
