@@ -21,6 +21,8 @@ export default function App() {
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
 	const [piReady, setPiReady] = useState(false);
+	const [restored, setRestored] = useState(false); // 초기화 상태 복원 완료 여부
+	const restorePendingRef = useRef(0); // 복원 대기 응답 카운터 (get_state + get_last_assistant_text)
 	const [backendKind, setBackendKind] = useState<string>("pi");
 	const [, setSessionId] = useState("");
 	const [currentModel, setCurrentModel] = useState("");
@@ -148,6 +150,9 @@ export default function App() {
 				if (typeof msg.backend === "string") setBackendKind(msg.backend);
 				// 웹 푸시 구독: VAPID 공개키로 서비스 워커 등록 + 구독 → 서버 전송
 				if (typeof msg.vapidPublicKey === "string") subscribePush(msg.vapidPublicKey, wsRef.current);
+				// 상태 복원: get_state + get_last_assistant_text 응답 대기 — 복원 전까지 dim
+				restorePendingRef.current = 2;
+				setRestored(false);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_last_assistant_text" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
@@ -335,15 +340,19 @@ export default function App() {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				}
-				if (msg.command === "get_last_assistant_text" && msg.success && msg.data?.text) {
-					const result = parseTurkJSON(msg.data.text);
-					if (result && "parsed" in result) setState(result.parsed);
-					// 주의: 여기서 sessionInitRef를 true로 하지 않음.
-					// 기존 대화 복원 시에도 다음 사용자 프롬프트에 시스템 지시가
-					// 다시 붙도록 두어야 JSON 형식이 유지됨.
+				if (msg.command === "get_last_assistant_text") {
+					if (msg.success && msg.data?.text) {
+						const result = parseTurkJSON(msg.data.text);
+						if (result && "parsed" in result) setState(result.parsed);
+						// 주의: 여기서 sessionInitRef를 true로 하지 않음.
+						// 기존 대화 복원 시에도 다음 사용자 프롬프트에 시스템 지시가
+						// 다시 붙도록 두어야 JSON 형식이 유지됨.
+					}
+					if (--restorePendingRef.current <= 0) setRestored(true);
 				}
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
+					if (--restorePendingRef.current <= 0) setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) setLoading(true); // 응답 기다리는 중 상태 복원 (재연결 시)
 					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); }
 					if (msg.data.thinkingLevel !== undefined) {
@@ -686,7 +695,7 @@ export default function App() {
 	};
 
 	return (
-		<div className="turk-app">
+		<div className="turk-app" style={!restored ? { opacity: 0.4, pointerEvents: "none" } : undefined}>
 			<header className="turk-header">
 				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
