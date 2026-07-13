@@ -362,7 +362,7 @@ export default function App() {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
 					if (--restorePendingRef.current <= 0) setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) setLoading(true); // 응답 기다리는 중 상태 복원 (재연결 시)
-					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null) : (m.reasoning ? ["off", "high"] : ["off"]); }
+					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => k === "off" || (m.thinkingLevelMap as any)[k] != null) : (m.reasoning ? ["off", "high"] : ["off"]); }
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);
 					if (msg.data.thinkingLevel === "off") {
