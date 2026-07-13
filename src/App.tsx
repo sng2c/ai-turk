@@ -23,6 +23,7 @@ export default function App() {
 	const [piReady, setPiReady] = useState(false);
 	const [restored, setRestored] = useState(false); // 초기화 상태 복원 완료 여부
 	const [modelChanging, setModelChanging] = useState(false); // 모델 변경 중 (지원 레벨/컨텍스트 갱신)
+	const pendingModelUpdateRef = useRef(false); // set_model → get_state 응답 매칭
 	const restorePendingRef = useRef(0); // 복원 대기 응답 카운터 (get_state + get_last_assistant_text)
 	const [backendKind, setBackendKind] = useState<string>("pi");
 	const [, setSessionId] = useState("");
@@ -357,7 +358,7 @@ export default function App() {
 					if (--restorePendingRef.current <= 0) setRestored(true);
 				}
 				if (msg.command === "get_state" && msg.success && msg.data) {
-					setModelChanging(false); // 모델 변경 완료 — 지원 레벨/컨텍스트 갱신됨
+					if (pendingModelUpdateRef.current) { pendingModelUpdateRef.current = false; setModelChanging(false); } // 모델 변경 완료 — 지원 레벨/컨텍스트 갱신됨
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
 					if (--restorePendingRef.current <= 0) setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) setLoading(true); // 응답 기다리는 중 상태 복원 (재연결 시)
@@ -402,7 +403,8 @@ export default function App() {
 						}
 					}
 				if (msg.command === "set_model" && msg.success) {
-					// 모델 변경 후 헤더 모델명 갱신
+					// 모델 변경 후 헤더 갱신 — get_state 응답(갱신 완료)까지 dim 유지
+					pendingModelUpdateRef.current = true;
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				}
 				if (msg.command === "set_thinking_level" && msg.success) {
