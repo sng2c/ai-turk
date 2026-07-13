@@ -706,8 +706,8 @@ export default function App() {
 
 	return (
 		<div className="turk-app" style={!restored || modelChanging ? { pointerEvents: "none" } : undefined}>
-			<header className="turk-header" style={{ ...(!restored || modelChanging ? { opacity: 0.4 } : {}), ...(!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : {}) }}>
-				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} style={!restored || modelChanging ? { filter: "brightness(2.5)" } : undefined} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
+			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
+				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" /></button>
 				<button className="turk-model-btn" onClick={() => {
@@ -737,7 +737,7 @@ export default function App() {
 				</button></span>
 			</header>
 
-			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")} style={!restored || modelChanging ? { opacity: 0.4 } : undefined}>
+			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
 				{canScrollUp && (
 					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로"><ChevronUp className="turk-ico" /></button>
@@ -758,7 +758,7 @@ export default function App() {
 				</div>
 			</div>
 
-			<div className={`turk-grid${loading ? " turk-grid-loading" : ""}${keyboardUp ? " turk-grid-hidden" : ""}`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, ...(!restored || modelChanging ? { opacity: 0.4 } : {}) }}>
+			<div className={`turk-grid${loading ? " turk-grid-loading" : ""}${keyboardUp ? " turk-grid-hidden" : ""}`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
 				{gridRows.flat().map(([idx, label]) =>
 					label ? (
 						<button
@@ -816,7 +816,7 @@ export default function App() {
 					{loading ? "취소" : "전송"}
 				</button>
 			</form>
-			{(loading || !piReady) && <div className="turk-dim-overlay" />}
+			{(!restored || modelChanging || loading || !piReady) && <div className="turk-dim-overlay" />}
 		</div>
 	);
 }
