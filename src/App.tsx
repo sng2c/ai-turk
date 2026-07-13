@@ -8,10 +8,7 @@ import {
 import type { TurkState, ToolStatus } from "./lib/turk";
 
 // 모바일(터치) 감지 — 모바일에서는 자동 포커스로 가상 키보드 자동 노출 방지
-const IS_COARSE_POINTER = typeof window !== "undefined" && (
-	window.matchMedia?.("(pointer: coarse)")?.matches === true ||
-	/Android|iPhone|iPad|iPod|Mobi|Mobile/i.test(navigator.userAgent || "")
-);
+const IS_FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(hover: hover) and (pointer: fine)")?.matches === true;
 
 // ── 앱 ─────────────────────────────────────────────────────────────────
 export default function App() {
@@ -147,7 +144,7 @@ export default function App() {
 
 	// 상태 복원 완료 후 입력창 포커스 (dim 해제 시점 — 데스크톱만)
 	useEffect(() => {
-		if (restored && !IS_COARSE_POINTER) inputRef.current?.focus();
+		if (restored && IS_FINE_POINTER) inputRef.current?.focus();
 	}, [restored]);
 
 	// ── pi 이벤트 처리 ──────────────────────────────────────────────────
@@ -208,7 +205,7 @@ export default function App() {
 				setLoading(false);
 				setInput("");
 				// 데스크톱만 응답 완료 시 입력창 포커스 — 모바일은 가상 키보드 자동 노출 방지
-				if (!IS_COARSE_POINTER) inputRef.current?.focus();
+				if (IS_FINE_POINTER) inputRef.current?.focus();
 				// scheduler_trigger가 대기 중이면 응답 message 앞에 prefix 부착 + id 보존(repeat 처리용)
 				let triggerScheduleId: string | null = null;
 				if (schedulerTriggerRef.current) {
