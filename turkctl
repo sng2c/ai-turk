@@ -46,12 +46,12 @@ export TURK_ENV_FILE="$ENV_FILE"
 # .env 파일에서 TURK_PORT / TURK_HOST 읽기
 # 우선순위: 환경변수 TURK_PORT > TURK_ENV_FILE 파일 > 기본값 3000
 if [ -z "${TURK_PORT:-}" ] && [ -f "$ENV_FILE" ]; then
-  TURK_PORT="$(grep -E '^TURK_PORT=' "$ENV_FILE" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')"
+  TURK_PORT="$(grep -E '^TURK_PORT=' "$ENV_FILE" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || true)"
 fi
 TURK_PORT="${TURK_PORT:-3000}"
 
 if [ -z "${TURK_HOST:-}" ] && [ -f "$ENV_FILE" ]; then
-  TURK_HOST="$(grep -E '^TURK_HOST=' "$ENV_FILE" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')"
+  TURK_HOST="$(grep -E '^TURK_HOST=' "$ENV_FILE" | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || true)"
 fi
 TURK_HOST="${TURK_HOST:-127.0.0.1}"
 
@@ -116,7 +116,6 @@ kill_port() {
   if [ -n "$pids" ]; then
     kill -9 $pids 2>/dev/null || true
   fi
-  fuser -k "$TURK_PORT/tcp" 2>/dev/null || true
 }
 
 cmd_start() {
@@ -154,7 +153,6 @@ cmd_stop() {
       kill -9 "$pid" 2>/dev/null || true        # 해당 포트 vite
     done
   fi
-  fuser -k -9 "$TURK_PORT/tcp" 2>/dev/null || true
 
   echo "✅ 서버 및 관련 프로세스 중지됨 (포트 $TURK_PORT)"
 }
