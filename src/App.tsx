@@ -406,6 +406,7 @@ export default function App() {
 					// 모델 변경 후 헤더 갱신 — get_state 응답(갱신 완료)까지 dim 유지
 					pendingModelUpdateRef.current = true;
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
+					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				}
 				if (msg.command === "set_thinking_level" && msg.success) {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
