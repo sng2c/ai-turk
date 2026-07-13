@@ -150,7 +150,9 @@ function sendPushNotification(session: Session, ev: TurkEvent): void {
 	if (!text) return;
 	let bodyText = text;
 	try {
-		const parsed = JSON.parse(text);
+		// { ... } greedy 추출 — 코드펜스/설명이 섞여도 JSON 블록만 파싱
+		const greedy = text.match(/\{[\s\S]*\}/);
+		const parsed = JSON.parse(greedy?.[0] ?? text);
 		if (parsed && parsed.noResponse) return; // no-response 응답 — push 폐기
 		if (parsed && typeof parsed.message === "string") bodyText = parsed.message;
 	} catch { /* JSON 아니면 text 그대로 */ }
