@@ -5,7 +5,7 @@
  * 백엔드를 직접 호출하지 않고 onTrigger 콜백으로 서버에 위임.
  *
  * 메모리만 사용 (디스크 저장 없음). 서버 프로세스 생명주기 = 세션.
- * 모든 스케줄은 반복 — 1회성은 LLM이 repeat:false 응답으로 자동 제거.
+ * 스케줄은 기본 once — 반복형만 LLM이 repeat:true 응답으로 명시 유지.
  */
 
 import { CronExpressionParser } from "cron-parser";
@@ -73,7 +73,7 @@ export function formatTriggerMessage(entry: ScheduleEntry, executedAt: Date): st
 	const cond = entry.condition
 		? `\n[조건부 스케줄] 조건: "${entry.condition}"\n이 조건을 먼저 평가하세요 — 반드시 명백한 사실(객관적 팩트)을 web_search 등 도구로 확인. 추측이나 주관적 판단 금지.\n- 확실히 참으로 확인됨: 아래 지시에 따라 정상 응답.\n- 확실히 거짓으로 확인됨: 조건이 맞지 않아 수행할 행동이 없음. 응답으로 {"message":"","buttons":{},"noResponse":true} 반환 (응답 폐기됨, 사용자에게 표시/알림 없음).\n- 확인 불가(도구 실패, 정보 부족 등): 사용자에게 상황을 알리는 정상 응답(예: "조건을 확인할 수 없어요: <이유>. 스케줄을 수정해주세요.").`
 		: "";
-	return `[예약 스케줄 실행] id: ${entry.id} · cron: ${entry.cron} · ${executedAt.toLocaleString("ko-KR")}${cond}\n이 메시지는 위 예약 스케줄이 실행된 것입니다. 아래 지시에 따라 응답하세요.\n\n[응답 형식] 반드시 단일 JSON 객체 — {"message":"...","buttons":{...}}. 코드 펜스/설명 금지.\n[반복 여부 — 필수] 매 응답에 "repeat":true 또는 "repeat":false 포함.\n- repeat:true: 계속 반복(스케줄 유지). 지속 반복형이거나 아직 목적 미달성 시.\n- repeat:false: 완료(스케줄 자동 제거). 목적 달성형에서 목표 이룬 경우.\n프롬프트 지시와 현재 상황을 보고 판단하세요.\n\n${entry.prompt}\n`;
+	return `[예약 스케줄 실행] id: ${entry.id} · cron: ${entry.cron} · ${executedAt.toLocaleString("ko-KR")}${cond}\n이 메시지는 위 예약 스케줄이 실행된 것입니다. 아래 지시에 따라 응답하세요.\n\n[응답 형식] 반드시 단일 JSON 객체 — {"message":"...","buttons":{...}}. 코드 펜스/설명 금지.\n[반복 여부 — 선택] 반복형만 "repeat":true 포함(스케줄 유지). once/완료 시 생략 또는 repeat:false(자동 제거).\n프롬프트 지시와 현재 상황을 보고 판단하세요.\n\n${entry.prompt}\n`;
 }
 
 // ── 목록 텍스트 포맷 ────────────────────────────────────────────────────

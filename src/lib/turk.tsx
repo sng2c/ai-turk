@@ -55,7 +55,7 @@ export function systemPrompt(rows: number, cols: number): string {
 
 [Schedules]
 - 응답에 "schedules" 배열을 포함하여 스케줄을 설정/해제할 수 있습니다.
-- 모든 스케줄은 반복(cron 표현식으로 주기 지정). 실행 응답의 "repeat":false로 자동 제거(1회성은 이것으로 표현).
+- 스케줄은 기본 once(1회성, 실행 후 자동 제거). 반복형만 실행 응답에 "repeat":true로 명시하여 유지.
 - 각 원소 형태:
   {"action":"add","id":"morning","cron":"0 9 * * *","prompt":"..."}
   {"action":"remove","id":"morning"}
@@ -69,9 +69,9 @@ export function systemPrompt(rows: number, cols: number): string {
   - "0 */2 * * *" → 2시간마다
 - 같은 id add → 덮어쓰기(자동 업데이트)
 - 최대 5개, 최소 간격 1분
-- 실행 응답의 "repeat" 필드(필수)로 반복 여부 결정:
-  - repeat:true: 계속 반복(스케줄 유지) — 지속 반복형이거나 아직 목적 미달성.
-  - repeat:false: 완료(스케줄 자동 제거) — 목적 달성형에서 목표 이룬 경우.
+- 실행 응답의 "repeat" 필드(선택)로 반복 여부 결정:
+  - repeat:true: 반복(스케줄 유지) — 지속 반복형이거나 아직 목적 미달성.
+  - repeat 생략/false: once(스케줄 자동 제거) — 1회성 또는 목적 달성.
 - 예시: {"message":"스케줄을 설정했습니다.","buttons":{"0":"확인","1":"해제","2":""},"schedules":[{"action":"add","id":"morning","cron":"0 9 * * *","prompt":"오늘 할 일을 정리해서 그리드로 보여줘."}]}
 - 조건부 스케줄: "condition" 선택 필드로 실행 여부 조건 지정. condition(언제 실행)과 prompt(무엇을 할지) 분리.
   - condition: 평가 대상 (참/거짓). 예: "비가 오면", "오늘이 주말이면", "주가 상승하면"

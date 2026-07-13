@@ -216,8 +216,8 @@ export default function App() {
 							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 							return;
 						}
-						// repeat:false 응답 — 스케줄 완료(제거) 요청
-						if (parsed.repeat === false && triggerScheduleId) {
+						// repeat:true 아닌 응답 — once/완료(제거) 요청
+						if (parsed.repeat !== true && triggerScheduleId) {
 							wsRef.current?.send(JSON.stringify({ type: "schedule", action: "remove", id: triggerScheduleId }));
 						}
 						// schedules 배열 추출 → 서버로 전송 (일회성 명령, state에 넣지 않음)
@@ -252,8 +252,8 @@ export default function App() {
 								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 								return;
 							}
-							// repeat:false 응답 — 스케줄 완료(제거) 요청 (1차와 동일)
-							if (parsed.repeat === false && triggerScheduleId) {
+							// repeat:true 아닌 응답 — once/완료(제거) 요청 (1차와 동일)
+							if (parsed.repeat !== true && triggerScheduleId) {
 								wsRef.current?.send(JSON.stringify({ type: "schedule", action: "remove", id: triggerScheduleId }));
 							}
 							if (Array.isArray(parsed.schedules)) {
