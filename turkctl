@@ -56,6 +56,7 @@ fi
 TURK_HOST="${TURK_HOST:-127.0.0.1}"
 
 LOG_FILE="/tmp/ai-turk-${TURK_PORT}.log"
+PID_FILE="/tmp/ai-turk-${TURK_PORT}.pid"
 
 # 자식 프로세스(vite/server.ts) 에 전달 — 환경변수로 명시
 export TURK_PORT="$TURK_PORT"
@@ -110,11 +111,25 @@ is_running() {
 }
 
 # 특정 포트에 묶인 프로세스 종료 (다른 인스턴스 영향 안 줌)
+# PID 파일 우선(표준 관리) — 없거나 살아있으면 lsof 폴백(기존 인스턴스 호환)
 kill_port() {
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill -9 -"$pid" 2>/dev/null || true      # 프로세스 그룹 전체 (자식/손자 포함)
+      pkill -9 -P "$pid" 2>/dev/null || true   # 보조: 직접 자식
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+  fi
   local pids
   pids=$(lsof -t -i :"$TURK_PORT" 2>/dev/null || true)
   if [ -n "$pids" ]; then
-    kill -9 $pids 2>/dev/null || true
+    for pid in $pids; do
+      pkill -9 -P "$pid" 2>/dev/null || true
+      kill -9 "$pid" 2>/dev/null || true
+    done
   fi
 }
 
@@ -128,7 +143,8 @@ cmd_start() {
   kill_port
   sleep 1
   load_env
-  nohup npx vite > "$LOG_FILE" 2>&1 &
+  nohup node "$TURK_DIR/node_modules/vite/bin/vite.js" > "$LOG_FILE" 2>&1 &
+  echo $! > "$PID_FILE"
   sleep 5
   if is_running; then
     echo "✅ 서버 실행됨: http://$TURK_HOST:$TURK_PORT"
@@ -143,17 +159,7 @@ cmd_start() {
 
 cmd_stop() {
   echo "▶ 중지 중... (포트 $TURK_PORT)"
-
-  # 포트 기반 종료만 — 다중 인스턴스 안전 (pkill -f "vite" 금지: 타 인스턴스 죽임)
-  local pids
-  pids=$(lsof -t -i :"$TURK_PORT" 2>/dev/null || true)
-  if [ -n "$pids" ]; then
-    for pid in $pids; do
-      pkill -9 -P "$pid" 2>/dev/null || true   # 자식(pi) 정리
-      kill -9 "$pid" 2>/dev/null || true        # 해당 포트 vite
-    done
-  fi
-
+  kill_port
   echo "✅ 서버 및 관련 프로세스 중지됨 (포트 $TURK_PORT)"
 }
 
@@ -176,7 +182,11 @@ cmd_status() {
     echo "⚪ 서버 미실행 (포트 $TURK_PORT) — turkctl --env $(basename "$ENV_FILE") start"
   fi
   local procs
-  procs=$(lsof -t -i :"$TURK_PORT" 2>/dev/null | wc -l)
+  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    procs=1
+  else
+    procs=$(lsof -t -i :"$TURK_PORT" 2>/dev/null | wc -l)
+  fi
   echo "   관련 프로세스: ${procs}개"
 }
 
