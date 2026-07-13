@@ -141,7 +141,13 @@ export default function App() {
 	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
 	useEffect(() => {
 		if (!("Notification" in window) || Notification.permission !== "default") return;
-		Notification.requestPermission().catch(() => { /* 무시 */ });
+		// Firefox Android 등은 사용자 제스처 내에서만 권한 요청 허용 → 첫 클릭 시 요청
+		const onClick = () => {
+			Notification.requestPermission().catch(() => { /* 무시 */ });
+			window.removeEventListener("click", onClick);
+		};
+		window.addEventListener("click", onClick, { once: true });
+		return () => window.removeEventListener("click", onClick);
 	}, []);
 
 	// 상태 복원 완료 후 입력창 포커스 (dim 해제 시점 — 데스크톱만)
