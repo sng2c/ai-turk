@@ -706,8 +706,8 @@ export default function App() {
 
 	return (
 		<div className="turk-app" style={!restored || modelChanging ? { pointerEvents: "none" } : undefined}>
-			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
-				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
+			<header className="turk-header" style={{ ...(!restored || modelChanging ? { opacity: 0.4 } : {}), ...(!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : {}) }}>
+				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} style={!restored || modelChanging ? { filter: "brightness(2.5)" } : undefined} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" /></button>
 				<button className="turk-model-btn" onClick={() => {
