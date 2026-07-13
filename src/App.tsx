@@ -712,7 +712,7 @@ export default function App() {
 						prevStateRef.current = state;
 						ws.send(JSON.stringify({ type: "get_available_models" }));
 					}
-				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: thinkingLevel === "off" ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{thinkingLevel.toUpperCase()}</button> <button className="turk-new-btn" onClick={() => {
+				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: thinkingLevel === "off" ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 ? "NONE" : thinkingLevel.toUpperCase()}</button> <button className="turk-new-btn" onClick={() => {
 				if (!confirm("새 세션을 시작할까요?")) return;
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {
