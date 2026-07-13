@@ -142,6 +142,11 @@ export default function App() {
 		Notification.requestPermission().catch(() => { /* 무시 */ });
 	}, []);
 
+	// 상태 복원 완료 후 입력창 포커스 (dim 해제 시점 — 데스크톱만)
+	useEffect(() => {
+		if (restored && !IS_COARSE_POINTER) inputRef.current?.focus();
+	}, [restored]);
+
 	// ── pi 이벤트 처리 ──────────────────────────────────────────────────
 	const handleEvent = useCallback((msg: any) => {
 		switch (msg.type) {
@@ -793,7 +798,7 @@ export default function App() {
 					onChange={(e) => setInput(e.target.value)}
 					placeholder={piReady ? "명령어 입력..." : "세션 초기화 중..."}
 					disabled={loading || !piReady}
-					autoFocus={!IS_COARSE_POINTER}
+					autoFocus={false}
 				/>
 				<button
 					type={loading ? "button" : "submit"}
