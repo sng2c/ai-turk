@@ -231,7 +231,7 @@ body {
 	color: var(--accent-foreground);
 	line-height: 1;
 	transition: color 0.1s;
-	max-width: 11rem;
+	max-width: 80%;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
