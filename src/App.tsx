@@ -584,7 +584,7 @@ export default function App() {
 			sessionInitRef.current = true;
 		}
 
-		ws.send(JSON.stringify({ type: "prompt", message }));
+		ws.send(JSON.stringify({ type: "prompt", message, userInput: userText }));
 	}, [piReady]);
 
 	const handleSend = (text: string) => {

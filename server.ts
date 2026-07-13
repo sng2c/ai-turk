@@ -121,7 +121,8 @@ function broadcast(session: Session, data: Record<string, unknown>): void {
 // backend.send 가로채서 lastPrompt 저장. fromScheduler 시 생략 (서버 자체 프롬프트는 복원 제외)
 function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { fromScheduler?: boolean }): void {
 	if (cmd.type === "prompt" && typeof cmd.message === "string" && !opts?.fromScheduler) {
-		session.lastPrompt = cmd.message;
+		// 순수 사용자 입력만 저장 (systemPrompt 제외) — 재연결 복원용
+		session.lastPrompt = typeof cmd.userInput === "string" ? cmd.userInput : cmd.message;
 	}
 	session.backend?.send(cmd);
 }
