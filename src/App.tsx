@@ -33,12 +33,14 @@ export default function App() {
 	const [thinkingLevel, setThinkingLevel] = useState<string>("off");
 	const [contextPct, setContextPct] = useState<number | null>(null);
 	const thinkingLevelRef = useRef("off");
+	const supportedThinkingLevelsRef = useRef<string[]>(["off"]); // model.thinkingLevelMap 기반 지원 레벨
 	thinkingLevelRef.current = thinkingLevel;
 	// OFF 순환 감지용: 첫 켜진 레벨(firstLevel)에 다시 도달하면 OFF로
 	const firstThinkingLevelRef = useRef<string | null>(null);
 	const thinkingCycleHitsRef = useRef(0);
-	const THINKING_LABEL: Record<string, string> = { off: "OFF", minimal: "MINIMAL", low: "LOW", medium: "MEDIUM", high: "HIGH", xhigh: "XHIGH" };
-	const THINKING_COLOR: Record<string, string> = { off: "var(--muted-foreground)", minimal: "#94a3b8", low: "var(--success)", medium: "#06b6d4", high: "var(--warning)", xhigh: "var(--destructive)" };
+	const THINKING_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+	const THINKING_LABEL: Record<string, string> = { off: "OFF", minimal: "MINIMAL", low: "LOW", medium: "MEDIUM", high: "HIGH", xhigh: "XHIGH", max: "MAX" };
+	const THINKING_COLOR: Record<string, string> = { off: "var(--muted-foreground)", minimal: "#94a3b8", low: "var(--success)", medium: "#06b6d4", high: "var(--warning)", xhigh: "var(--destructive)", max: "#991b1b" };
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
@@ -359,7 +361,7 @@ export default function App() {
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
 					if (--restorePendingRef.current <= 0) setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) setLoading(true); // 응답 기다리는 중 상태 복원 (재연결 시)
-					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); }
+					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); if (m.thinkingLevelMap) supportedThinkingLevelsRef.current = THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null); }
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);
 					if (msg.data.thinkingLevel === "off") {
@@ -687,16 +689,11 @@ export default function App() {
 	const cycleThinking = () => {
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
-		const cur = thinkingLevelRef.current;
-		// 켜져 있고 시작 레벨에 다시 도달(한 바퀴)했으면 OFF로
-		if (cur !== "off" && firstThinkingLevelRef.current === cur && thinkingCycleHitsRef.current >= 2) {
-			ws.send(JSON.stringify({ type: "set_thinking_level", level: "off" }));
-			setThinkingLevel("off");
-			firstThinkingLevelRef.current = null;
-			thinkingCycleHitsRef.current = 0;
-			return;
-		}
-		ws.send(JSON.stringify({ type: "cycle_thinking_level" }));
+		// 클라이언트 사이클: model.thinkingLevelMap 기반 지원 레벨 순환
+		const order = supportedThinkingLevelsRef.current;
+		const idx = order.indexOf(thinkingLevelRef.current);
+		const next = order[(idx + 1) % order.length] ?? "off";
+		ws.send(JSON.stringify({ type: "set_thinking_level", level: next }));
 	};
 
 	return (
