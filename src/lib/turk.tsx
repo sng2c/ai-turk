@@ -186,9 +186,18 @@ export async function subscribePush(publicKey: string, ws: WebSocket | null): Pr
 	} catch (e) { console.debug("[Push] 구독 실패:", e); }
 }
 
+// ── non-secure context(LAN IP 등) 대응 — crypto.randomUUID가 없으면 Math.random 폴백
+function uuidv4Fallback(): string {
+	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+		const r = (Math.random() * 16) | 0;
+		const v = c === "x" ? r : (r & 0x3) | 0x8;
+		return v.toString(16);
+	});
+}
+
 // ── 유저 구분키 — 브라우저(localStorage) 고유 ID. 사생활 탭 = 다른 키 = 다른 세션.
 export const TURK_USER_KEY: string = (() => {
 	let k = localStorage.getItem("turk-user-key");
-	if (!k) { k = crypto.randomUUID(); localStorage.setItem("turk-user-key", k); }
+	if (!k) { k = crypto.randomUUID?.() ?? uuidv4Fallback(); localStorage.setItem("turk-user-key", k); }
 	return k;
 })();
