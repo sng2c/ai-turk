@@ -26,7 +26,7 @@ export default function App() {
 	const pendingModelUpdateRef = useRef(false); // set_model → get_state 응답 매칭
 	const restorePendingRef = useRef(0); // 복원 대기 응답 카운터 (get_state + get_last_assistant_text)
 	const [backendKind, setBackendKind] = useState<string>("pi");
-	const [, setSessionId] = useState("");
+	const [sessionId, setSessionId] = useState("");
 	const [currentModel, setCurrentModel] = useState("");
 	const currentModelRef = useRef("");
 	currentModelRef.current = currentModel;
@@ -61,7 +61,7 @@ export default function App() {
 	const MAX_PARSE_RETRIES = 2;
 	// ── 스케줄러 관련 ref ──
 	// schedulerTriggerRef: scheduler_trigger 이벤트 수신 시 설정 → 다음 agent_end 응답 message 앞에 prefix 부착
-	const schedulerTriggerRef = useRef<{ id: string; cron: string } | null>(null);
+	const schedulerTriggerRef = useRef<{ ids: string[]; whens: string[] } | null>(null);
 	// schedulerFeedbackRef: schedule response 결과 → 다음 프롬프트에 주입 (가드 에러 등 안내)
 	const schedulerFeedbackRef = useRef<string | null>(null);
 	// schedulerPrefixRef: scheduler_trigger로부터 생성된 prefix → setState 시 message 앞에 부착
@@ -214,13 +214,11 @@ export default function App() {
 				setInput("");
 				// 데스크톱만 응답 완료 시 입력창 포커스 — 모바일은 가상 키보드 자동 노출 방지
 				if (IS_FINE_POINTER) inputRef.current?.focus();
-				// scheduler_trigger가 대기 중이면 응답 message 앞에 prefix 부착 + id 보존(repeat 처리용)
-				let triggerScheduleId: string | null = null;
+				// scheduler_trigger가 대기 중이면 응답 message 앞에 prefix 부착
 				if (schedulerTriggerRef.current) {
 					const trig = schedulerTriggerRef.current;
-					triggerScheduleId = trig.id;
 					schedulerTriggerRef.current = null; // 1회용
-					schedulerPrefixRef.current = `⏰ [예약 실행: ${trig.id} · ${trig.cron}]\n`;
+					schedulerPrefixRef.current = `⏰ [예약 실행: ${trig.ids.join(", ")}]\n`;
 				}
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				setToolStatus(null);
@@ -239,10 +237,6 @@ export default function App() {
 						if (parsed.noResponse === true) {
 							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 							return;
-						}
-						// repeat:true 아닌 응답 — once/완료(제거) 요청
-						if (parsed.repeat !== true && triggerScheduleId) {
-							wsRef.current?.send(JSON.stringify({ type: "schedule", action: "remove", id: triggerScheduleId }));
 						}
 						// schedules 배열 추출 → 서버로 전송 (일회성 명령, state에 넣지 않음)
 						if (Array.isArray(parsed.schedules)) {
@@ -275,10 +269,6 @@ export default function App() {
 							if (parsed.noResponse === true) {
 								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 								return;
-							}
-							// repeat:true 아닌 응답 — once/완료(제거) 요청 (1차와 동일)
-							if (parsed.repeat !== true && triggerScheduleId) {
-								wsRef.current?.send(JSON.stringify({ type: "schedule", action: "remove", id: triggerScheduleId }));
 							}
 							if (Array.isArray(parsed.schedules)) {
 								for (const sch of parsed.schedules) {
@@ -449,7 +439,7 @@ export default function App() {
 
 			case "scheduler_trigger":
 				// 백엔드 주입 직전 서버가 전송 → 다음 agent_end 응답에 prefix 부착
-				schedulerTriggerRef.current = { id: msg.id, cron: msg.cron };
+				schedulerTriggerRef.current = { ids: msg.ids, whens: msg.whens };
 				break;
 
 			case "extension_ui_request":
@@ -632,7 +622,7 @@ export default function App() {
 		if (text === "/new") {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
-				ws.send(JSON.stringify({ type: "new_session" }));
+				ws.send(JSON.stringify({ type: "restart_pi" }));
 				sessionInitRef.current = false;
 				setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 				setInput("");
@@ -712,7 +702,7 @@ export default function App() {
 	return (
 		<div className="turk-app" style={!restored || modelChanging ? { pointerEvents: "none" } : undefined}>
 			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
-				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (loading || showThinking ? " turk-bot-spin" : "")} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
+				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-bot-spin" : "")} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" /></button>
 				<button className="turk-model-btn" onClick={() => {
@@ -731,7 +721,7 @@ export default function App() {
 				if (!confirm("새 세션을 시작할까요?")) return;
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {
-					ws.send(JSON.stringify({ type: "new_session" }));
+					ws.send(JSON.stringify({ type: "restart_pi" }));
 					sessionInitRef.current = false;
 					setState(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 				}
@@ -741,6 +731,10 @@ export default function App() {
 						) : <span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: "0%" }} /><span className="turk-ctx-pct">—</span></span></span>}
 				</button></span>
 			</header>
+
+			<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${TURK_USER_KEY} | agentSessionId: ${sessionId}`)} style={{ position: "fixed", top: "2.25rem", right: "0.857rem", fontSize: "10px", opacity: 0.5, fontFamily: "monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 60 }}>
+				userKey: {TURK_USER_KEY.slice(0, 8)} | agentSessionId: {sessionId ? sessionId.slice(0, 8) : "(없음)"}
+			</div>
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>

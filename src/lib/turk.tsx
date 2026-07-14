@@ -2,6 +2,35 @@
 // 의존: ReactMarkdown, remarkGfm (Md 컴포넌트), 브라우저 API (localStorage/SW/Push).
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { z } from "zod";
+
+// ── zod 스키마 (LLM 응답 검증) ─────────────────────────────────────
+const ScheduleSchema = z.object({
+	action: z.enum(["add", "remove", "clear", "list"]),
+	id: z.string().optional(),
+	when: z.string().optional(),
+	prompt: z.string().optional(),
+	condition: z.string().optional(),
+}).superRefine((data, ctx) => {
+	if (data.action === "add") {
+		if (!data.id) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "add requires id", path: ["id"] });
+		if (!data.when) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "add requires when", path: ["when"] });
+		if (!data.prompt) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "add requires prompt", path: ["prompt"] });
+	}
+	if (data.action === "remove" && !data.id) {
+		ctx.addIssue({ code: z.ZodIssueCode.custom, message: "remove requires id", path: ["id"] });
+	}
+});
+
+export const TurkStateSchema = z.object({
+	message: z.string(),
+	buttons: z.record(z.string(), z.string()),
+	colors: z.record(z.string(), z.string()).optional(),
+	textColors: z.record(z.string(), z.string()).optional(),
+	schedules: z.array(ScheduleSchema).optional(),
+	noResponse: z.boolean().optional(),
+	repeat: z.boolean().optional(),
+});
 
 // ── 타입 ──────────────────────────────────────────────────────────────
 export interface TurkState {
@@ -55,28 +84,23 @@ export function systemPrompt(rows: number, cols: number): string {
 
 [Schedules]
 - 응답에 "schedules" 배열을 포함하여 스케줄을 설정/해제할 수 있습니다.
-- 스케줄은 기본 once(1회성, 실행 후 자동 제거). 반복형만 실행 응답에 "repeat":true로 명시하여 유지.
+- 스케줄은 기본 once(1회성, 실행 후 자동 제거). 반복 의미가 있으면 실행 응답의 schedules에 동일 id로 재등록.
 - 각 원소 형태:
-  {"action":"add","id":"morning","cron":"0 9 * * *","prompt":"..."}
-  {"action":"remove","id":"morning"}
+  {"action":"add","id":"manse","when":"1m","prompt":"만세를 외쳐 🥳 그리드"}
+  {"action":"remove","id":"manse"}
   {"action":"clear"}
   {"action":"list"}
-- cron 표현식 (분 시 일 월 요일):
-  - "0 9 * * *" → 매일 9시
-  - "*/5 * * * *" → 5분마다
-  - "0 0 11 1 *" → 매년 1월 11일 자정
-  - "0 9 * * 1-5" → 평일 9시
-  - "0 */2 * * *" → 2시간마다
-- 같은 id add → 덮어쓰기(자동 업데이트)
+- when 형식 (LLM이 선택):
+  - 상대(등록 시점부터): "1m"(1분 후), "30m", "2h", "1d"
+  - 절대(다음 해당 시각): "21:00"(HH:MM), "2026-07-12T21:00"(ISO, offset 없으면 로컬)
+  - cron(5필드): "0 9 * * *"(매일 9시), "*/5 * * * *"(5분마다), "0 9 * * 1-5"(평일 9시)
+- 같은 id add → 덮어쓰기(갱신)
 - 최대 5개, 최소 간격 1분
-- 실행 응답의 "repeat" 필드(선택)로 반복 여부 결정:
-  - repeat:true: 반복(스케줄 유지) — 지속 반복형이거나 아직 목적 미달성.
-  - repeat 생략/false: once(스케줄 자동 제거) — 1회성 또는 목적 달성.
-- 예시: {"message":"스케줄을 설정했습니다.","buttons":{"0":"확인","1":"해제","2":""},"schedules":[{"action":"add","id":"morning","cron":"0 9 * * *","prompt":"오늘 할 일을 정리해서 그리드로 보여줘."}]}
+- 예시: {"message":"1분 뒤 만세를 외치겠습니다! 🥳","buttons":{"0":"취소","1":"","2":""},"schedules":[{"action":"add","id":"manse","when":"1m","prompt":"만세를 외쳐 🥳 그리드"}]}
 - 조건부 스케줄: "condition" 선택 필드로 실행 여부 조건 지정. condition(언제 실행)과 prompt(무엇을 할지) 분리.
-  - condition: 평가 대상 (참/거짓). 예: "비가 오면", "오늘이 주말이면", "주가 상승하면"
+  - condition: 평가 대상 (참/거짓). 예: "비가 오면"
   - prompt: 조건 충족 시 수행 지시. 예: "우산 챙기세요 그리드"
-  - 예시: {"action":"add","id":"rain","cron":"0 9 * * *","condition":"비가 오면","prompt":"우산 챙기세요 그리드"}
+  - 예시: {"action":"add","id":"rain","when":"0 9 * * *","condition":"비가 오면","prompt":"우산 챙기세요 그리드"}
 - 조건부 스케줄 실행 시: 조건을 먼저 평가 — 명백한 사실(객관 팩트)을 web_search 등으로 확인. 추측 금지.
   - 확실히 참: prompt 지시로 정상 응답.
   - 확실히 거짓: {"message":"","buttons":{},"noResponse":true} 반환 — 행동 없음, 응답 폐기(표시/알림 없음).
@@ -146,9 +170,11 @@ export function parseTurkJSON(text: string): { parsed: TurkState } | { error: st
 		if (!s) continue;
 		try {
 			const obj = JSON.parse(s);
-			if (obj && typeof obj === "object" && obj.message !== undefined && obj.buttons !== undefined) {
-				return { parsed: obj as TurkState };
+			const result = TurkStateSchema.safeParse(obj);
+			if (result.success) {
+				return { parsed: result.data as TurkState };
 			}
+			lastError = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
 		} catch (e) {
 			lastError = e instanceof Error ? e.message : String(e);
 		}

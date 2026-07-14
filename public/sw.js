@@ -11,8 +11,17 @@ self.addEventListener("push", (event) => {
 	let body = "응답 완료";
 	try {
 		const data = event.data?.json();
-		if (data?.body) body = String(data.body);
+		if (data?.body) {
+			const raw = String(data.body);
+			// body가 JSON이면 message 추출 (LLM 응답) — 아니면 원문 그대로
+			try {
+				const parsed = JSON.parse(raw);
+				body = typeof parsed.message === "string" ? parsed.message : raw;
+			} catch { body = raw; }
+		}
 	} catch { /* 페이로드 파싱 실패 시 기본값 */ }
+	// 마크다운 제거 + 50자 트림
+	body = body.replace(/[#*`_~>\-]/g, "").replace(/\s+/g, " ").trim().slice(0, 50);
 
 	event.waitUntil(
 		self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {

@@ -70,6 +70,7 @@ class JsonlBackend implements Backend {
 
 	/** stdout 청크 → 줄 단위 JSONL → emit(변환된 이벤트). */
 	protected feedStdout(chunk: Buffer): void {
+		console.log(`[PiBackend] stdout 청크: ${chunk.length}바이트`);
 		this.buffer += this.decoder.write(chunk);
 		while (true) {
 			const idx = this.buffer.indexOf("\n");
@@ -128,12 +129,15 @@ export class PiBackend extends JsonlBackend {
 	}
 
 	override send(cmd: Record<string, unknown>): void {
-		if (!this.proc?.stdin?.writable) return;
+		if (!this.proc?.stdin?.writable) { console.log(`[PiBackend] send 실패: stdin 미사용`); return; }
+		console.log(`[PiBackend] stdin write: type=${cmd.type}`);
 		this.proc.stdin.write(JSON.stringify(cmd) + "\n");
 	}
 
 	protected override handleLine(raw: unknown): void {
 		// pi 는 이미 App.tsx 가 기대하는 포맷이므로 그대로 전달.
+		const t = (raw as any)?.type;
+		console.log(`[PiBackend] stdout: type=${t}`);
 		this.emit(raw as TurkEvent);
 	}
 }
