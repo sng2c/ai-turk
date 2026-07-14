@@ -1,23 +1,39 @@
 /**
- * AI Turk 프롬프트 스케줄러 — cron 표현식으로 백엔드에 프롬프트를 자동 주입.
+ * AI Turk 프롬프트 스케줄러 — when 문자열(상대/절대/cron)로 백엔드에 프롬프트 자동 주입.
  *
  * LLM 응답 JSON 의 schedules 배열을 서버가 이 클래스로 관리.
  * 백엔드를 직접 호출하지 않고 onTrigger 콜백으로 서버에 위임.
  *
  * 메모리만 사용 (디스크 저장 없음). 서버 프로세스 생명주기 = 세션.
- * 스케줄은 기본 once — 반복형만 LLM이 repeat:true 응답으로 명시 유지.
+ * 스케줄은 기본 once — 실행 후 자동 제거. 반복/신규/갱신 시 LLM이 schedules 배열로 재등록.
+ *
+ * 동시 트리거는 같은 틱에 모아(batch) 하나의 백엔드 프롬프트로 결합 → 백엔드 1회 호출, 응답 1개.
+ *
+ * when 형식 (LLM이 출력, 서버가 파싱):
+ *   - 상대: "30m" / "2h" / "1d" / "90s" / "5000ms"  (now + delta)
+ *   - 절대: "21:00" (HH:MM, 다음 해당 시각) / "2026-07-12T21:00" (ISO, offset 없으면 로컬)
+ *   - cron: "0 9 * * *" / "0 0 11 1 *"  (5필드, step 예: 별/5 는 '5분마다')
  */
 
 import { CronExpressionParser } from "cron-parser";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 
 // ── 상수 ────────────────────────────────────────────────────────────────
 const MAX_SCHEDULES = 5;
 const MIN_INTERVAL_MS = 60_000;
 
+const UNIT_MS: Record<string, number> = {
+	ms: 1,
+	s: 1_000,
+	m: 60_000,
+	h: 3_600_000,
+	d: 86_400_000,
+};
+
 // ── 타입 정의 ────────────────────────────────────────────────────────────
 export interface ScheduleEntry {
 	id: string;
-	cron: string; // cron 표현식 ("0 9 * * *", "*/5 * * * *", "0 0 11 1 *")
+	when: string; // "30m" | "21:00" | "2026-07-12T21:00" | "0 9 * * *"
 	prompt: string;
 	condition?: string; // 조건부 스케줄 — 충족 시만 실행, 불충족 시 no-response 응답
 	timer: NodeJS.Timeout | null;
@@ -31,49 +47,108 @@ export interface ScheduleResult {
 }
 
 export interface SchedulerOptions {
-	onTrigger: (entry: ScheduleEntry) => void; // 트리거 시 서버가 주입 수행
+	onTrigger: (entries: ScheduleEntry[]) => void; // 트리거 시 서버가 주입 수행 (복수 합치기)
 	isBusy: () => boolean; // 백엔드가 응답 생성 중인지
+	storageDir?: string; // 영속화 디렉토리 (생략 시 메모리만) — schedules.json 저장/로드
 }
 
-// ── cron 표현식 → 다음 실행까지 ms ────────────────────────────────────────
+// ── 정규식 ──────────────────────────────────────────────────────────────
+const RELATIVE_RE = /^(\d+)(ms|s|m|h|d)$/;
+const ABSOLUTE_TIME_RE = /^(\d{1,2}):(\d{2})$/;
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+const CRON_RE = /^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/; // 5필드
+
+// ── when 문자열 → 다음 실행까지 ms ────────────────────────────────────────
 /**
- * cron 표현식을 파싱하여 다음 실행 시각까지의 ms 계산.
- * 형식 오류 시 { ms: 0, error: "..." }
+ * when 문자열을 파싱하여 다음 실행 시각까지의 ms 계산.
+ * 상대/절대/cron 순차 정규식 매칭 — 전부 실패 시 오류 반환(폴백 없음).
  */
-export function parseCron(cron: string): { ms: number; error?: string } {
-	try {
-		const iter = CronExpressionParser.parse(cron, { tz: undefined });
-		let next = iter.next();
-		let ms = next.getTime() - Date.now();
-		// 첫 실행이 최소 간격 미만이면 다음 cron 시각으로 건너뜀 (등록 시각 엣지 케이스)
+export function parseWhen(when: string): { ms: number; error?: string } {
+	// 상대: "30m" / "2h" / "1d" / "90s" / "5000ms"
+	const rel = RELATIVE_RE.exec(when);
+	if (rel) {
+		const ms = Number(rel[1]) * UNIT_MS[rel[2]];
 		if (ms < MIN_INTERVAL_MS) {
-			next = iter.next();
-			ms = next.getTime() - Date.now();
-		}
-		if (ms < MIN_INTERVAL_MS) {
-			return { ms: 0, error: `cron 간격이 최소 1분 미만` };
+			return { ms: 0, error: `relative time below minimum 1 minute: '${when}' — e.g. '30m', '2h', '1d'` };
 		}
 		return { ms };
-	} catch (e) {
-		return { ms: 0, error: `cron 형식 오류: '${cron}' — 예: '0 9 * * *' (매일 9시), '*/5 * * * *' (5분마다), '0 0 11 1 *' (매년 1/11)` };
 	}
+
+	// 절대 HH:MM (다음 해당 시각 — 오늘 지났으면 내일)
+	const abs = ABSOLUTE_TIME_RE.exec(when);
+	if (abs) {
+		const h = Number(abs[1]);
+		const min = Number(abs[2]);
+		if (h > 23 || min > 59) {
+			return { ms: 0, error: `time out of range: '${when}' — HH:MM (00:00~23:59)` };
+		}
+		const now = new Date();
+		const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, min, 0, 0);
+		let ms = target.getTime() - now.getTime();
+		if (ms < MIN_INTERVAL_MS) {
+			target.setDate(target.getDate() + 1);
+			ms = target.getTime() - now.getTime();
+		}
+		return { ms };
+	}
+
+	// 절대 ISO (해당 시각 — offset 없으면 로컬 타임, 지났으면 오류)
+	if (ISO_RE.test(when)) {
+		const target = new Date(when);
+		if (isNaN(target.getTime())) {
+			return { ms: 0, error: `ISO time format error: '${when}' — e.g. '2026-07-12T21:00'` };
+		}
+		const ms = target.getTime() - Date.now();
+		if (ms < MIN_INTERVAL_MS) {
+			return { ms: 0, error: `ISO time not at least 1 minute in future: '${when}'` };
+		}
+		return { ms };
+	}
+
+	// cron 5필드
+	if (CRON_RE.test(when)) {
+		try {
+			const iter = CronExpressionParser.parse(when, { tz: undefined });
+			let next = iter.next();
+			let ms = next.getTime() - Date.now();
+			// 첫 실행이 최소 간격 미만이면 다음 cron 시각으로 건너뜀 (등록 시각 엣지 케이스)
+			if (ms < MIN_INTERVAL_MS) {
+				next = iter.next();
+				ms = next.getTime() - Date.now();
+			}
+			if (ms < MIN_INTERVAL_MS) {
+				return { ms: 0, error: `cron interval below minimum 1 minute: '${when}'` };
+			}
+			return { ms };
+		} catch {
+			return { ms: 0, error: `cron format error: '${when}' — e.g. '0 9 * * *' (daily 9am), '*/5 * * * *' (every 5 min)` };
+		}
+	}
+
+	return { ms: 0, error: `unknown when format: '${when}' — e.g. '30m'(relative), '21:00'(absolute), '0 9 * * *'(cron)` };
 }
 
-// ── 크론 표현식 간단 설명 (표시용) ────────────────────────────────────────
-export function describeCron(cron: string): string {
-	return cron; // LLM/사용자에게 cron 표현식 그대로 표시
+// ── when 표현식 표시용 ──────────────────────────────────────────────────
+export function describeWhen(when: string): string {
+	return when; // LLM/사용자에게 when 문자열 그대로 표시
 }
 
-// ── 백엔드에 주입할 메시지 생성 ──────────────────────────────────────────
+// ── 백엔드에 주입할 메시지 생성 (복수 entry 결합) ──────────────────────────
 /**
- * 백엔드에 주입할 메시지 생성.
+ * 백엔드에 주입할 메시지 생성 — 동시 트리거들을 하나의 프롬프트로 결합.
  * 마지막에 줄바꿈 1개 (systemPrompt 는 sendPrompt 가 별도 부착).
  */
-export function formatTriggerMessage(entry: ScheduleEntry, executedAt: Date): string {
-	const cond = entry.condition
-		? `\n[조건부 스케줄] 조건: "${entry.condition}"\n이 조건을 먼저 평가하세요 — 반드시 명백한 사실(객관적 팩트)을 web_search 등 도구로 확인. 추측이나 주관적 판단 금지.\n- 확실히 참으로 확인됨: 아래 지시에 따라 정상 응답.\n- 확실히 거짓으로 확인됨: 조건이 맞지 않아 수행할 행동이 없음. 응답으로 {"message":"","buttons":{},"noResponse":true} 반환 (응답 폐기됨, 사용자에게 표시/알림 없음).\n- 확인 불가(도구 실패, 정보 부족 등): 사용자에게 상황을 알리는 정상 응답(예: "조건을 확인할 수 없어요: <이유>. 스케줄을 수정해주세요.").`
-		: "";
-	return `[예약 스케줄 실행] id: ${entry.id} · cron: ${entry.cron} · ${executedAt.toLocaleString("ko-KR")}${cond}\n이 메시지는 위 예약 스케줄이 실행된 것입니다. 아래 지시에 따라 응답하세요.\n\n[응답 형식] 반드시 단일 JSON 객체 — {"message":"...","buttons":{...}}. 코드 펜스/설명 금지.\n[반복 여부 — 선택] 반복형만 "repeat":true 포함(스케줄 유지). once/완료 시 생략 또는 repeat:false(자동 제거).\n프롬프트 지시와 현재 상황을 보고 판단하세요.\n\n${entry.prompt}\n`;
+export function formatTriggerMessage(entries: ScheduleEntry[], executedAt: Date): string {
+	const ids = entries.map((e) => e.id).join(", ");
+	const blocks = entries
+		.map((e) => {
+			const cond = e.condition
+				? `\n[Conditional schedule] condition: "${e.condition}"\nEvaluate this condition first — must verify with clear facts (objective) via web_search or other tools. No speculation/subjective judgment.\n- Confirmed true: respond normally per instructions below.\n- Confirmed false: no action to perform. Return {"message":"","buttons":{},"noResponse":true} for this schedule (response discarded, no UI display/notification).\n- Cannot verify (tool failure, insufficient info): respond normally informing the user (e.g., "Cannot verify the condition: <reason>. Please edit the schedule.").`
+				: "";
+			return `--- schedule id: ${e.id} · when: ${e.when} ---${cond}\n${e.prompt}`;
+		})
+		.join("\n\n");
+	return `[Scheduled tasks triggered] ids: ${ids} · ${executedAt.toLocaleString("ko-KR")}\nThis message indicates the above scheduled tasks have triggered. Respond per the instructions below.\n\n[Response format] Must be a single JSON object — {"message":"...","buttons":{...}}. No code fences/explanation.\n[schedules control — once] Each schedule is auto-removed after execution. Control via the schedules array in your response:\n- Recurring: re-register the same schedule (same id)\n- Follow-up/new/sequential tasks: add a new schedule\n- Update: add with the same id (overwrite)\n- once/done: omit schedules\nschedules element format: {"id","when","prompt",...} — when: "30m"(relative) | "21:00"(absolute) | "0 9 * * *"(cron).\nJudge based on the prompt instructions and current context.\n\n${blocks}\n`;
 }
 
 // ── 목록 텍스트 포맷 ────────────────────────────────────────────────────
@@ -81,13 +156,13 @@ export function formatTriggerMessage(entry: ScheduleEntry, executedAt: Date): st
  * list() 결과를 사용자에게 보여줄 텍스트 포맷.
  */
 export function formatListText(entries: ScheduleEntry[]): string {
-	let text = `[현재 스케줄 목록 (${MAX_SCHEDULES}개 중 ${entries.length}개 활성)]\n`;
+	let text = `[Current schedules (${MAX_SCHEDULES} max, ${entries.length} active)]\n`;
 	for (const e of entries) {
 		const preview = e.prompt.slice(0, 30);
-		const cond = e.condition ? ` [조건: ${e.condition}]` : "";
-		text += `- ${e.id}: cron "${e.cron}"${cond} — "${preview}${e.prompt.length > 30 ? "..." : ""}"\n`;
+		const cond = e.condition ? ` [cond: ${e.condition}]` : "";
+		text += `- ${e.id}: when "${e.when}"${cond} — "${preview}${e.prompt.length > 30 ? "..." : ""}"\n`;
 	}
-	text += `[위 목록을 참고하여 사용자에게 스케줄 현황을 버튼 그리드로 보여주세요]`;
+	text += `[Show the user the schedule status above as a button grid]`;
 	return text;
 }
 
@@ -95,17 +170,60 @@ export function formatListText(entries: ScheduleEntry[]): string {
 export class Scheduler {
 	private opts: SchedulerOptions;
 	private schedules = new Map<string, ScheduleEntry>();
-	private queue: string[] = []; // 대기 큐 (entry id 목록, 최대 5, 중복 방지)
+	private pendingBatch: ScheduleEntry[] = []; // 동시 트리거 모음 — busy 시 대기
+	private batchScheduled = false; // queueMicrotask 중복 예약 방지
+	private storageFile: string | null = null;
 
 	constructor(opts: SchedulerOptions) {
 		this.opts = opts;
+		if (opts.storageDir) {
+			this.storageFile = `${opts.storageDir}/schedules.json`;
+			this.loadFromFile();
+		}
+	}
+
+	// ── 영속화: 파일 저장 ──────────────────────────────────────────────
+	private persist(): void {
+		if (!this.storageFile) return;
+		try {
+			const arr = Array.from(this.schedules.values()).map((e) => ({
+				id: e.id, when: e.when, prompt: e.prompt, condition: e.condition, nextRun: e.nextRun,
+			}));
+			mkdirSync(this.opts.storageDir!, { recursive: true });
+			writeFileSync(this.storageFile, JSON.stringify(arr));
+		} catch (err) {
+			console.log(`[Scheduler] persist 실패: ${err instanceof Error ? err.message : err}`);
+		}
+	}
+
+	// ── 영속화: 파일 로드 (서버 시작 시) ────────────────────────────────
+	private loadFromFile(): void {
+		if (!this.storageFile || !existsSync(this.storageFile)) return;
+		try {
+			const arr = JSON.parse(readFileSync(this.storageFile, "utf-8")) as Array<{ id: string; when: string; prompt: string; condition?: string; nextRun: number | null }>;
+			const now = Date.now();
+			for (const item of arr) {
+				if (!item.id || !item.when || !item.prompt) continue;
+				const ms = item.nextRun ? item.nextRun - now : NaN;
+				if (!Number.isFinite(ms) || ms < 0) continue; // once — 과거/무효면 폐기
+				const entry: ScheduleEntry = {
+					id: item.id, when: item.when, prompt: item.prompt, condition: item.condition,
+					timer: setTimeout(() => this.trigger(item.id), ms),
+					nextRun: item.nextRun,
+				};
+				this.schedules.set(item.id, entry);
+			}
+			console.log(`[Scheduler] 로드: ${this.schedules.size}개 복원`);
+		} catch (err) {
+			console.log(`[Scheduler] 로드 실패: ${err instanceof Error ? err.message : err}`);
+		}
 	}
 
 	// ── WebSocket 명령 처리 ──────────────────────────────────────────────
-	handle(cmd: { action: string; id?: string; cron?: string; prompt?: string; condition?: string }): ScheduleResult {
+	handle(cmd: { action: string; id?: string; when?: string; prompt?: string; condition?: string }): ScheduleResult {
 		switch (cmd.action) {
 			case "add":
-				return this.add(cmd.id ?? "", cmd.cron ?? "", cmd.prompt ?? "", cmd.condition);
+				return this.add(cmd.id ?? "", cmd.when ?? "", cmd.prompt ?? "", cmd.condition);
 			case "remove":
 				return this.remove(cmd.id ?? "");
 			case "clear":
@@ -113,23 +231,29 @@ export class Scheduler {
 			case "list":
 				return this.list();
 			default:
-				return { success: false, error: `알 수 없는 action: ${cmd.action ?? "(미지정)"}` };
+				return { success: false, error: `unknown action: ${cmd.action ?? "(unspecified)"}` };
 		}
 	}
 
 	// ── 스케줄 추가 ──────────────────────────────────────────────────────
-	add(id: string, cron: string, prompt: string, condition?: string): ScheduleResult {
-		if (!id) {
-			return { success: false, error: "id가 필요합니다" };
+	add(id: string, when: string, prompt: string, condition?: string): ScheduleResult {
+		if (typeof id !== "string" || !id) {
+			return { success: false, error: `[Schedule error] id missing — schedules element requires a string id` };
 		}
-		const parsed = parseCron(cron);
+		if (typeof when !== "string" || !when) {
+			return { success: false, error: `[Schedule error] id="${id}" when missing — e.g. '30m', '21:00', '0 9 * * *'` };
+		}
+		if (typeof prompt !== "string" || !prompt) {
+			return { success: false, error: `[Schedule error] id="${id}" prompt missing — execution instruction (string) required` };
+		}
+		const parsed = parseWhen(when);
 		if (parsed.error) {
-			return { success: false, error: parsed.error };
+			return { success: false, error: `[Schedule error] id="${id}" when="${when}": ${parsed.error}` };
 		}
 
 		// 최대 개수 검사 (기존 id 업데이트 시에는 제외)
 		if (this.schedules.size >= MAX_SCHEDULES && !this.schedules.has(id)) {
-			return { success: false, error: `스케줄 최대 개수(${MAX_SCHEDULES}개) 초과` };
+			return { success: false, error: `[Schedule error] id="${id}" max schedules (${MAX_SCHEDULES}) exceeded — remove an existing schedule before add` };
 		}
 
 		// 기존 id가 있으면 타이머 정리 후 덮어쓰기
@@ -141,7 +265,7 @@ export class Scheduler {
 		const now = Date.now();
 		const entry: ScheduleEntry = {
 			id,
-			cron,
+			when,
 			prompt,
 			condition,
 			timer: null,
@@ -150,22 +274,22 @@ export class Scheduler {
 
 		entry.timer = setTimeout(() => this.trigger(id), parsed.ms);
 		this.schedules.set(id, entry);
+		this.persist();
 
-		return { success: true, data: { id, cron, nextRun: entry.nextRun } };
+		return { success: true, data: { id, when, nextRun: entry.nextRun } };
 	}
 
 	// ── 스케줄 제거 ──────────────────────────────────────────────────────
 	remove(id: string): ScheduleResult {
 		const entry = this.schedules.get(id);
-		if (!entry) {
-			return { success: false, error: `스케줄을 찾을 수 없습니다: ${id}` };
-		}
+		if (!entry) return { success: true, data: { id } }; // idempotent — 이미 제거됨
 		if (entry.timer) {
 			clearTimeout(entry.timer);
 		}
 		this.schedules.delete(id);
-		// 큐에서도 제거
-		this.queue = this.queue.filter((qid) => qid !== id);
+		// pendingBatch에서도 제거
+		this.pendingBatch = this.pendingBatch.filter((e) => e.id !== id);
+		this.persist();
 
 		return { success: true, data: { id } };
 	}
@@ -177,7 +301,8 @@ export class Scheduler {
 		}
 		const count = this.schedules.size;
 		this.schedules.clear();
-		this.queue = [];
+		this.pendingBatch = [];
+		this.persist();
 		return { success: true, data: { count } };
 	}
 
@@ -195,13 +320,8 @@ export class Scheduler {
 
 	// ── 큐 비우기 (agent_end 후 호출) ─────────────────────────────────────
 	drainQueue(): void {
-		if (this.queue.length === 0 || this.opts.isBusy()) return;
-		const id = this.queue.shift()!;
-		const entry = this.schedules.get(id);
-		if (entry) {
-			this.opts.onTrigger(entry);
-		}
-		// 큐에 더 있고 백엔드가 여전히 안 바쁘면 연속 실행은 다음 drainQueue 호출에 위임
+		// pendingBatch가 비어있지 않고 백엔드가 idle이면 flushBatch 실행
+		this.flushBatch();
 	}
 
 	// ── 모든 타이머 정리 (서버 종료 시) ─────────────────────────────────
@@ -210,31 +330,40 @@ export class Scheduler {
 			if (entry.timer) clearTimeout(entry.timer);
 		}
 		this.schedules.clear();
-		this.queue = [];
+		this.pendingBatch = [];
 	}
 
-	// ── 내부: 트리거 실행 (cron 기반 — 실행 후 다음 시각 재예약) ─────────
+	// ── 내부: 트리거 도달 — batch에 적재 후 같은 틱에 flush ───────────────
 	private trigger(id: string): void {
 		const entry = this.schedules.get(id);
 		if (!entry) return; // 제거된 스케줄
 
-		// 백엔드 busy 시 큐에 적재 (재예약은 계속 진행)
-		if (this.opts.isBusy()) {
-			if (this.queue.length < MAX_SCHEDULES && !this.queue.includes(id)) {
-				this.queue.push(id);
-			}
-		} else {
-			this.opts.onTrigger(entry);
-		}
+		// once — batch에 적재 (타이머 만료, 즉시 제거)
+		if (entry.timer) clearTimeout(entry.timer);
+		this.schedules.delete(id);
+		this.pendingBatch.push(entry);
 
-		// 다음 cron 실행 시각으로 재예약 (반복)
-		const parsed = parseCron(entry.cron);
-		if (parsed.error) {
-			// cron이 더 이상 유효하지 않으면 제거
-			this.remove(id);
+		console.log(`[Scheduler] trigger 도달: id=${id} when=${entry.when} → batch(${this.pendingBatch.length})`);
+
+		// 같은 틱의 다른 트리거들과 합치기 위해 microtask로 flush 예약 (중복 방지)
+		if (!this.batchScheduled) {
+			this.batchScheduled = true;
+			queueMicrotask(() => this.flushBatch());
+		}
+	}
+
+	// ── 내부: batch flush — busy면 대기(pendingBatch 유지), idle이면 주입 ─
+	private flushBatch(): void {
+		this.batchScheduled = false;
+		if (this.pendingBatch.length === 0) return;
+		if (this.opts.isBusy()) {
+			// 백엔드 busy — pendingBatch 유지, 다음 drainQueue(agent_end)에서 재시도
+			console.log(`[Scheduler] flush 지연(busy): batch(${this.pendingBatch.length}) 대기`);
 			return;
 		}
-		entry.nextRun = Date.now() + parsed.ms;
-		entry.timer = setTimeout(() => this.trigger(id), parsed.ms);
+		const entries = this.pendingBatch.splice(0);
+		const ids = entries.map((e) => e.id).join(",");
+		console.log(`[Scheduler] flush 실행: ids=${ids} (${entries.length}개)`);
+		this.opts.onTrigger(entries);
 	}
 }

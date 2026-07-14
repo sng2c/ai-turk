@@ -4,11 +4,12 @@ import tailwindcss from "@tailwindcss/vite";
 import { WebSocketServer, WebSocket } from "ws";
 import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
+import envPaths from "env-paths";
 import webpush from "web-push";
 import removeMarkdown from "remove-markdown";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -31,6 +32,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 	// ── 세션 구조 — 유저(브라우저)별 독립 백엔드 + 스케줄러 ───────────────────
 	interface Session {
 		userKey: string;
+		agentSessionId: string | null; // 백엔드 세션 ID (config.json 영속, ready 시 get_state로 갱신). null = 새 세션
 		backend: Backend | null;
 		backendReady: boolean;
 		scheduler: Scheduler;
@@ -45,6 +47,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 
 	// 같은 세션(유저) WS 전체에 broadcast — 다중 탭 동기화
 	function broadcast(session: Session, data: Record<string, unknown>): void {
+		console.log(`[${session.userKey.slice(0, 8)}] [WS] 송신: type=${data.type}${data.command ? " command=" + data.command : ""}`);
 		const msg = JSON.stringify(data);
 		for (const ws of session.ws) {
 			if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -94,8 +97,9 @@ function turkPlugin(env: Record<string, string>): Plugin {
 	// backend.send 가로채서 lastPrompt 저장. fromScheduler 시 생략
 	function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { fromScheduler?: boolean }): void {
 		if (cmd.type === "prompt" && typeof cmd.message === "string" && !opts?.fromScheduler) {
-			session.lastPrompt = cmd.message;
+			session.lastPrompt = typeof cmd.userInput === "string" ? cmd.userInput : cmd.message;
 		}
+		console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 전송: type=${cmd.type}${opts?.fromScheduler ? " (scheduler)" : ""}`);
 		session.backend?.send(cmd);
 	}
 
@@ -104,13 +108,23 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		try { mkdirSync(AGENT_CWD, { recursive: true }); } catch { /* 무시 */ }
 		session.backend = createBackend({
 			cwd: AGENT_CWD,
-			userKey: session.userKey, // pi --session-id 영속 세션 (claude는 무시)
+			userKey: session.agentSessionId ?? undefined, // 저장된 agentSessionId 있으면 지정(같은 세션 복원), 없으면 undefined(새 세션). claude는 무시
 			onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
 		});
 		session.backend.onEvent((ev: TurkEvent) => {
+			console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 이벤트: type=${ev.type}`);
 			if (ev.type === "pi_ready") {
 				session.backendReady = true;
 				(ev as any).vapidPublicKey = VAPID_PUBLIC_KEY;
+			}
+			// get_state 응답에서 실제 agentSessionId 확인 → config 영속 (ready 후 갱신)
+			if (ev.type === "response" && (ev as any).command === "get_state") {
+				const sid = (ev as any).data?.sessionId;
+				if (typeof sid === "string" && sid && sid !== session.agentSessionId) {
+					session.agentSessionId = sid;
+					saveAgentSessionId(session.userKey, sid);
+					console.log(`[${session.userKey.slice(0, 8)}] [config] agentSessionId 갱신: ${sid.slice(0, 8)}`);
+				}
 			}
 			if (ev.type === "pi_exit" || ev.type === "pi_error") session.backendReady = false;
 			if (ev.type === "agent_start") session.isStreaming = true;
@@ -128,21 +142,60 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		session.backend.start();
 	}
 
+	// ── agentSessionId 영속화 (config.json) ────────────────────────────────────
+	function configPath(userKey: string): string {
+		return `${envPaths("ai-turk").data}/${userKey}/agent-session-id`;
+	}
+	function loadAgentSessionId(userKey: string): string | null {
+		try {
+			const f = configPath(userKey);
+			if (!existsSync(f)) return null;
+			const id = readFileSync(f, "utf-8").trim();
+			return id || null;
+		} catch { return null; }
+	}
+	function saveAgentSessionId(userKey: string, agentSessionId: string): void {
+		try {
+			const dir = `${envPaths("ai-turk").data}/${userKey}`;
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(configPath(userKey), agentSessionId); // 평문 UUID
+		} catch (err) { console.log(`[${userKey.slice(0, 8)}] [config] 저장 실패: ${err instanceof Error ? err.message : err}`); }
+	}
+	function pushPath(userKey: string): string {
+		return `${envPaths("ai-turk").data}/${userKey}/push.json`;
+	}
+	function loadPushSubscription(userKey: string): any | null {
+		try {
+			const f = pushPath(userKey);
+			if (!existsSync(f)) return null;
+			return JSON.parse(readFileSync(f, "utf-8"));
+		} catch { return null; }
+	}
+	function savePushSubscription(userKey: string, sub: any): void {
+		try {
+			const dir = `${envPaths("ai-turk").data}/${userKey}`;
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(pushPath(userKey), JSON.stringify(sub));
+		} catch (err) { console.log(`[${userKey.slice(0, 8)}] [push] 저장 실패: ${err instanceof Error ? err.message : err}`); }
+	}
+
 	// ── 세션 관리 ────────────────────────────────────────────────────────────
 	function createSession(userKey: string): Session {
 		const session: Session = {
 			userKey,
+			agentSessionId: loadAgentSessionId(userKey), // 저장된 ID 있으면 복원, 없으면 null(새 세션)
 			backend: null,
 			backendReady: false,
 			scheduler: new Scheduler({
-				onTrigger: (entry) => {
-					const msg = formatTriggerMessage(entry, new Date());
+				onTrigger: (entries) => {
+					const msg = formatTriggerMessage(entries, new Date());
 					sendToBackend(session, { type: "prompt", message: msg }, { fromScheduler: true });
-					broadcast(session, { type: "scheduler_trigger", id: entry.id, cron: entry.cron });
+					broadcast(session, { type: "scheduler_trigger", ids: entries.map((e) => e.id), whens: entries.map((e) => e.when) });
 				},
 				isBusy: () => session.isStreaming,
+				storageDir: `${envPaths("ai-turk").data}/${userKey}`,
 			}),
-			pushSubscription: null,
+			pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원
 			ws: new Set(),
 			lastPrompt: null,
 			isStreaming: false,
@@ -228,10 +281,13 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				ws.on("message", (raw) => {
 					try {
 						const msg = JSON.parse(raw.toString());
+						console.log(`[${userKey.slice(0, 8)}] [WS] 수신: type=${msg.type}`);
 						if (customCommands.includes(msg.type)) {
 							if (msg.type === "restart_pi") {
 								if (session.backend) { session.backend.stop(); session.backend = null; }
 								session.backendReady = false;
+								session.agentSessionId = null; // 새 세션 — 클리어 → 백엔드 새 세션 → ready 후 get_state로 새 ID 갱신
+								console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 								setTimeout(() => startBackend(session), 500);
 							} else if (msg.type === "schedule") {
 								const r = session.scheduler.handle(msg);
@@ -243,6 +299,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 								});
 							} else if (msg.type === "push_subscribe") {
 								session.pushSubscription = msg.subscription;
+								savePushSubscription(userKey, msg.subscription); // 영속화
 								console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신: ${msg.subscription?.endpoint?.slice(0, 60)}`);
 							}
 						} else {

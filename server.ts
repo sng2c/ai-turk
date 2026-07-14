@@ -11,14 +11,14 @@
 
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { readFileSync, mkdirSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
+import envPaths from "env-paths";
 import webpush from "web-push";
-import removeMarkdown from "remove-markdown";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -62,6 +62,7 @@ const MIME: Record<string, string> = {
 // ── 세션 구조 — 유저(브라우저)별 독립 백엔드 + 스케줄러 ───────────────────
 interface Session {
 	userKey: string;
+	agentSessionId: string | null; // 백엔드 세션 ID (config.json 영속, ready 시 get_state로 갱신). null = 새 세션
 	backend: Backend | null;
 	backendReady: boolean;
 	scheduler: Scheduler;
@@ -80,20 +81,31 @@ function startBackend(session: Session): void {
 	try { mkdirSync(AGENT_CWD, { recursive: true }); } catch { /* 무시 */ }
 	session.backend = createBackend({
 		cwd: AGENT_CWD,
-		userKey: session.userKey, // pi --session-id 영속 세션 (claude는 무시)
+		userKey: session.agentSessionId ?? undefined, // 저장된 agentSessionId 있으면 지정(같은 세션 복원), 없으면 undefined(새 세션). claude는 무시
 		onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
 	});
 	session.backend.onEvent((ev: TurkEvent) => {
+		console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 이벤트: type=${ev.type}`);
 		if (ev.type === "pi_ready") {
 			session.backendReady = true;
 			(ev as any).vapidPublicKey = VAPID_PUBLIC_KEY;
 		}
+		// get_state 응답에서 실제 agentSessionId 확인 → config 영속 (ready 후 갱신)
+		if (ev.type === "response" && (ev as any).command === "get_state") {
+			const sid = (ev as any).data?.sessionId;
+			if (typeof sid === "string" && sid && sid !== session.agentSessionId) {
+				session.agentSessionId = sid;
+				saveAgentSessionId(session.userKey, sid);
+				console.log(`[${session.userKey.slice(0, 8)}] [config] agentSessionId 갱신: ${sid.slice(0, 8)}`);
+			}
+		}
 		if (ev.type === "pi_exit" || ev.type === "pi_error") session.backendReady = false;
 		// agent_start: 스트리밍 시작
-		if (ev.type === "agent_start") session.isStreaming = true;
+		if (ev.type === "agent_start") { session.isStreaming = true; console.log(`[${session.userKey.slice(0, 8)}] [백엔드] agent_start`); }
 		// agent_end: 스트리밍 종료 + 큐 드레인 + lastPrompt 초기화 + 웹 푸시
 		if (ev.type === "agent_end") {
 			session.isStreaming = false;
+			console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] agent_end 도착 — drainQueue 호출`);
 			session.lastPrompt = null;
 			session.scheduler.drainQueue();
 			// 마지막 assistant 응답 보관 — WS 끊김 시 재연결 복원용 (push 권한 무관)
@@ -112,6 +124,7 @@ function startBackend(session: Session): void {
 
 // 같은 세션(유저) WS 전체에 broadcast — 다중 탭 동기화
 function broadcast(session: Session, data: Record<string, unknown>): void {
+	console.log(`[${session.userKey.slice(0, 8)}] [WS] 송신: type=${data.type}${data.command ? " command=" + data.command : ""}`);
 	const msg = JSON.stringify(data);
 	for (const ws of session.ws) {
 		if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -123,6 +136,8 @@ function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { 
 	if (cmd.type === "prompt" && typeof cmd.message === "string" && !opts?.fromScheduler) {
 		// 순수 사용자 입력만 저장 (systemPrompt 제외) — 재연결 복원용
 		session.lastPrompt = typeof cmd.userInput === "string" ? cmd.userInput : cmd.message;
+		const preview = typeof cmd.userInput === "string" ? cmd.userInput : (typeof cmd.message === "string" ? cmd.message : "");
+		console.log(`[${session.userKey.slice(0, 8)}] [백엔드] prompt 전송: ${preview.slice(0, 60)}`);
 	}
 	session.backend?.send(cmd);
 }
@@ -141,49 +156,79 @@ function extractTextFromMessages(messages: any[]): string {
 	return "";
 }
 
-function stripMarkdownServer(text: string): string {
-	return removeMarkdown(text)
-		.replace(/\n/g, " ")
-		.replace(/\s+/g, " ")
-		.trim();
-}
-
 function sendPushNotification(session: Session, ev: TurkEvent): void {
 	const messages = (ev as any).messages;
 	if (!Array.isArray(messages)) return;
 	const text = extractTextFromMessages(messages);
 	if (!text) return;
-	let bodyText = text;
+	// noResponse 응답은 push 폐기 — sw.js 파싱 중복 방지 목적 서버에서 선별
 	try {
-		// { ... } greedy 추출 — 코드펜스/설명이 섞여도 JSON 블록만 파싱
 		const greedy = text.match(/\{[\s\S]*\}/);
 		const parsed = JSON.parse(greedy?.[0] ?? text);
-		if (parsed && parsed.noResponse) return; // no-response 응답 — push 폐기
-		if (parsed && typeof parsed.message === "string") bodyText = parsed.message;
-	} catch { /* JSON 아니면 text 그대로 */ }
-	const body = stripMarkdownServer(bodyText).slice(0, 50);
-	if (!body) return;
-	const payload = JSON.stringify({ body: body.length === 50 ? body + "..." : body });
+		if (parsed && parsed.noResponse) return;
+	} catch { /* JSON 아니면 계속 */ }
+	// 전체 text 전송 → sw.js가 message 추출 및 표시
+	const payload = JSON.stringify({ body: text });
 	webpush.sendNotification(session.pushSubscription, payload)
 		.then(() => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 성공`))
 		.catch((err) => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 실패: ${err.message}`));
+}
+
+// ── agentSessionId 영속화 (config.json) ────────────────────────────────────
+function configPath(userKey: string): string {
+	return `${envPaths("ai-turk").data}/${userKey}/agent-session-id`;
+}
+function loadAgentSessionId(userKey: string): string | null {
+	try {
+		const f = configPath(userKey);
+		if (!existsSync(f)) return null;
+		const id = readFileSync(f, "utf-8").trim();
+		return id || null;
+	} catch { return null; }
+}
+function saveAgentSessionId(userKey: string, agentSessionId: string): void {
+	try {
+		const dir = `${envPaths("ai-turk").data}/${userKey}`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(configPath(userKey), agentSessionId); // 평문 UUID
+	} catch (err) { console.log(`[${userKey.slice(0, 8)}] [config] 저장 실패: ${err instanceof Error ? err.message : err}`); }
+}
+function pushPath(userKey: string): string {
+	return `${envPaths("ai-turk").data}/${userKey}/push.json`;
+}
+function loadPushSubscription(userKey: string): any | null {
+	try {
+		const f = pushPath(userKey);
+		if (!existsSync(f)) return null;
+		return JSON.parse(readFileSync(f, "utf-8"));
+	} catch { return null; }
+}
+function savePushSubscription(userKey: string, sub: any): void {
+	try {
+		const dir = `${envPaths("ai-turk").data}/${userKey}`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(pushPath(userKey), JSON.stringify(sub));
+	} catch (err) { console.log(`[${userKey.slice(0, 8)}] [push] 저장 실패: ${err instanceof Error ? err.message : err}`); }
 }
 
 // ── 세션 관리 ────────────────────────────────────────────────────────────
 function createSession(userKey: string): Session {
 	const session: Session = {
 		userKey,
+		agentSessionId: loadAgentSessionId(userKey), // 저장된 ID 있으면 복원, 없으면 null(새 세션)
 		backend: null,
 		backendReady: false,
 		scheduler: new Scheduler({
-			onTrigger: (entry) => {
-				const msg = formatTriggerMessage(entry, new Date());
+			onTrigger: (entries) => {
+				console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] onTrigger → 백엔드 주입: ids=${entries.map((e) => e.id).join(",")}`);
+				const msg = formatTriggerMessage(entries, new Date());
 				sendToBackend(session, { type: "prompt", message: msg }, { fromScheduler: true });
-				broadcast(session, { type: "scheduler_trigger", id: entry.id, cron: entry.cron });
+				broadcast(session, { type: "scheduler_trigger", ids: entries.map((e) => e.id), whens: entries.map((e) => e.when) });
 			},
 			isBusy: () => session.isStreaming,
+			storageDir: `${envPaths("ai-turk").data}/${userKey}`,
 		}),
-		pushSubscription: null,
+		pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원 (재시작 후 재구독 불필요)
 		ws: new Set(),
 		lastAssistantText: null,
 		lastPrompt: null,
@@ -290,12 +335,16 @@ wss.on("connection", (ws, req) => {
 	ws.on("message", (raw) => {
 		try {
 			const msg = JSON.parse(raw.toString());
+			console.log(`[${userKey.slice(0, 8)}] [WS] 수신: type=${msg.type}`);
 			if (customCommands.includes(msg.type)) {
 				if (msg.type === "restart_pi") {
 					if (session.backend) { session.backend.stop(); session.backend = null; }
 					session.backendReady = false;
+					session.agentSessionId = null; // 새 세션 — 저장된 ID 클리어 → 백엔드 --no-session(새 세션) → ready 후 get_state로 새 ID 갱신
+					console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 					setTimeout(() => startBackend(session), 500);
 				} else if (msg.type === "schedule") {
+					console.log(`[${userKey.slice(0, 8)}] [Scheduler] 명령 수신: action=${msg.action} id=${msg.id ?? "-"} when=${msg.when ?? "-"}`);
 					const r = session.scheduler.handle(msg);
 					broadcast(session, {
 						type: "response",
@@ -305,7 +354,8 @@ wss.on("connection", (ws, req) => {
 					});
 				} else if (msg.type === "push_subscribe") {
 					session.pushSubscription = msg.subscription;
-					console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신: ${msg.subscription?.endpoint?.slice(0, 60)}`);
+					savePushSubscription(userKey, msg.subscription); // 영속화
+					console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신+저장: ${msg.subscription?.endpoint?.slice(0, 60)}`);
 				} else if (msg.type === "get_last_assistant_text") {
 					broadcast(session, {
 						type: "response",
@@ -322,10 +372,10 @@ wss.on("connection", (ws, req) => {
 		}
 	});
 
-	ws.on("close", () => {
+	ws.on("close", (code, reason) => {
 		session.ws.delete(ws);
 		session.lastActivity = Date.now();
-		console.log(`[Turk] 종료: ${userKey.slice(0, 8)} (남은 WS ${session.ws.size})`);
+		console.log(`[Turk] 종료: ${userKey.slice(0, 8)} code=${code} reason=${reason.toString() || "-"} (남은 WS ${session.ws.size})`);
 	});
 });
 
