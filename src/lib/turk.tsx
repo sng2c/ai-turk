@@ -83,28 +83,28 @@ export function systemPrompt(rows: number, cols: number): string {
 {"message":"Select a zone.","buttons":{"0":"A","1":"B","2":"C","3":"D"},"colors":{"0":"destructive","1":"warning","2":"success","3":"primary"},"textColors":{"0":"destructive","1":"warning","2":"success","3":"primary"}}
 
 [Schedules]
-- 응답에 "schedules" 배열을 포함하여 스케줄을 설정/해제할 수 있습니다.
-- 스케줄은 기본 once(1회성, 실행 후 자동 제거). 반복 의미가 있으면 실행 응답의 schedules에 동일 id로 재등록.
-- 각 원소 형태:
-  {"action":"add","id":"manse","when":"1m","prompt":"만세를 외쳐 🥳 그리드"}
+- Include a "schedules" array in your response to set/remove schedules.
+- Schedules are once by default (executed once, then auto-removed). To repeat, re-register with the same id in the execution response's schedules array (chaining).
+- Element forms:
+  {"action":"add","id":"manse","when":"1m","prompt":"Shout hurrah 🥳 grid"}
   {"action":"remove","id":"manse"}
   {"action":"clear"}
   {"action":"list"}
-- when 형식 (LLM이 선택):
-  - 상대(등록 시점부터): "1m"(1분 후), "30m", "2h", "1d"
-  - 절대(다음 해당 시각): "21:00"(HH:MM), "2026-07-12T21:00"(ISO, offset 없으면 로컬)
-  - cron(5필드): "0 9 * * *"(매일 9시), "*/5 * * * *"(5분마다), "0 9 * * 1-5"(평일 9시)
-- 같은 id add → 덮어쓰기(갱신)
-- 최대 5개, 최소 간격 1분
-- 예시: {"message":"1분 뒤 만세를 외치겠습니다! 🥳","buttons":{"0":"취소","1":"","2":""},"schedules":[{"action":"add","id":"manse","when":"1m","prompt":"만세를 외쳐 🥳 그리드"}]}
-- 조건부 스케줄: "condition" 선택 필드로 실행 여부 조건 지정. condition(언제 실행)과 prompt(무엇을 할지) 분리.
-  - condition: 평가 대상 (참/거짓). 예: "비가 오면"
-  - prompt: 조건 충족 시 수행 지시. 예: "우산 챙기세요 그리드"
-  - 예시: {"action":"add","id":"rain","when":"0 9 * * *","condition":"비가 오면","prompt":"우산 챙기세요 그리드"}
-- 조건부 스케줄 실행 시: 조건을 먼저 평가 — 명백한 사실(객관 팩트)을 web_search 등으로 확인. 추측 금지.
-  - 확실히 참: prompt 지시로 정상 응답.
-  - 확실히 거짓: {"message":"","buttons":{},"noResponse":true} 반환 — 행동 없음, 응답 폐기(표시/알림 없음).
-  - 확인 불가: 사용자에게 상황 알리는 정상 응답(보완 유도).
+- when formats (LLM chooses):
+  - relative (from registration time): "1m"(in 1 min), "30m", "2h", "1d"
+  - absolute (next occurrence, 24h): "21:00"(HH:MM), "2026-07-12T21:00"(ISO, local if no offset)
+  - cron NOT supported — use relative/absolute + re-register for recurring (chaining enforced)
+- Same id add → overwrite (update)
+- Max 5 schedules, minimum interval 1 minute
+- Example: {"message":"I'll shout hurrah in 1 minute! 🥳","buttons":{"0":"cancel","1":"","2":""},"schedules":[{"action":"add","id":"manse","when":"1m","prompt":"Shout hurrah 🥳 grid"}]}
+- Conditional schedule: optional "condition" field to gate execution. Separate condition (when to run) from prompt (what to do).
+  - condition: the predicate to evaluate (true/false). e.g. "if it's raining"
+  - prompt: the instruction to run when the condition holds. e.g. "Remind to bring an umbrella grid"
+  - example: {"action":"add","id":"rain","when":"09:00","condition":"if it's raining","prompt":"Remind to bring an umbrella grid"}
+- On conditional trigger: evaluate the condition first — verify obvious facts (objective) via web_search etc. No guessing.
+  - clearly true: respond normally per the prompt instruction.
+  - clearly false: return {"message":"","buttons":{},"noResponse":true} — no action, discard the response (no display/notification).
+  - uncertain: respond normally telling the user the situation (prompt for clarification).
 
 [CRITICAL FORMAT]
 Respond with ONLY this JSON (fill values, do not include comments). First character must be "{" and last must be "}":

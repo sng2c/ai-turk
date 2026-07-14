@@ -1,21 +1,20 @@
 /**
- * AI Turk 프롬프트 스케줄러 — when 문자열(상대/절대/cron)로 백엔드에 프롬프트 자동 주입.
+ * AI Turk 프롬프트 스케줄러 — when 문자열(상대/절대)로 백엔드에 프롬프트 자동 주입.
  *
  * LLM 응답 JSON 의 schedules 배열을 서버가 이 클래스로 관리.
  * 백엔드를 직접 호출하지 않고 onTrigger 콜백으로 서버에 위임.
  *
  * 메모리만 사용 (디스크 저장 없음). 서버 프로세스 생명주기 = 세션.
- * 스케줄은 기본 once — 실행 후 자동 제거. 반복/신규/갱신 시 LLM이 schedules 배열로 재등록.
+ * 스케줄은 기본 once — 실행 후 자동 제거. 반복/신규/갱신 시 LLM이 schedules 배열로 재등록 (체이닝 강제).
  *
- * 동시 트리거는 같은 틱에 모아(batch) 하나의 백엔드 프롬프트로 결합 → 백엔드 1회 호출, 응답 1개.
+ * 동시 트리거는 같은 timers 단계에 모아(batch) 하나의 백엔드 프롬프트로 결합 → 백엔드 1회 호출, 응답 1개.
  *
  * when 형식 (LLM이 출력, 서버가 파싱):
  *   - 상대: "30m" / "2h" / "1d" / "90s" / "5000ms"  (now + delta)
  *   - 절대: "21:00" (HH:MM, 다음 해당 시각) / "2026-07-12T21:00" (ISO, offset 없으면 로컬)
- *   - cron: "0 9 * * *" / "0 0 11 1 *"  (5필드, step 예: 별/5 는 '5분마다')
+ *   - cron 미지원 — 반복 시 상대/절대 시간 + 재등록 (체이닝)
  */
 
-import { CronExpressionParser } from "cron-parser";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 
 // ── 상수 ────────────────────────────────────────────────────────────────
@@ -33,7 +32,7 @@ const UNIT_MS: Record<string, number> = {
 // ── 타입 정의 ────────────────────────────────────────────────────────────
 export interface ScheduleEntry {
 	id: string;
-	when: string; // "30m" | "21:00" | "2026-07-12T21:00" | "0 9 * * *"
+	when: string; // "30m" | "21:00" | "2026-07-12T21:00" (cron 미지원 — once 체이닝)
 	prompt: string;
 	condition?: string; // 조건부 스케줄 — 충족 시만 실행, 불충족 시 no-response 응답
 	timer: NodeJS.Timeout | null;
@@ -61,7 +60,7 @@ const CRON_RE = /^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/; // 5필드
 // ── when 문자열 → 다음 실행까지 ms ────────────────────────────────────────
 /**
  * when 문자열을 파싱하여 다음 실행 시각까지의 ms 계산.
- * 상대/절대/cron 순차 정규식 매칭 — 전부 실패 시 오류 반환(폴백 없음).
+ * 상대/절대 순차 정규식 매칭 — 전부 실패 시 오류 반환(폴백 없음). cron 미지원(once 체이닝 강제).
  */
 export function parseWhen(when: string): { ms: number; error?: string } {
 	// 상대: "30m" / "2h" / "1d" / "90s" / "5000ms"
@@ -105,27 +104,12 @@ export function parseWhen(when: string): { ms: number; error?: string } {
 		return { ms };
 	}
 
-	// cron 5필드
+	// cron 5필드 — 미지원 (once 체이닝 강제: cron 자동 반복 대신 상대/절대 시간 + 재등록)
 	if (CRON_RE.test(when)) {
-		try {
-			const iter = CronExpressionParser.parse(when, { tz: undefined });
-			let next = iter.next();
-			let ms = next.getTime() - Date.now();
-			// 첫 실행이 최소 간격 미만이면 다음 cron 시각으로 건너뜀 (등록 시각 엣지 케이스)
-			if (ms < MIN_INTERVAL_MS) {
-				next = iter.next();
-				ms = next.getTime() - Date.now();
-			}
-			if (ms < MIN_INTERVAL_MS) {
-				return { ms: 0, error: `cron interval below minimum 1 minute: '${when}'` };
-			}
-			return { ms };
-		} catch {
-			return { ms: 0, error: `cron format error: '${when}' — e.g. '0 9 * * *' (daily 9am), '*/5 * * * *' (every 5 min)` };
-		}
+		return { ms: 0, error: `cron not supported: '${when}' — use relative ('30m') or absolute ('21:00') and re-register for recurring` };
 	}
 
-	return { ms: 0, error: `unknown when format: '${when}' — e.g. '30m'(relative), '21:00'(absolute), '0 9 * * *'(cron)` };
+	return { ms: 0, error: `unknown when format: '${when}' — e.g. '30m'(relative), '21:00'(absolute), '2026-07-12T21:00'(ISO)` };
 }
 
 // ── when 표현식 표시용 ──────────────────────────────────────────────────
@@ -148,7 +132,7 @@ export function formatTriggerMessage(entries: ScheduleEntry[], executedAt: Date)
 			return `--- schedule id: ${e.id} · when: ${e.when} ---${cond}\n${e.prompt}`;
 		})
 		.join("\n\n");
-	return `[Scheduled tasks triggered] ids: ${ids} · ${executedAt.toLocaleString("ko-KR")}\nThis message indicates the above scheduled tasks have triggered. Respond per the instructions below.\n\n[Response format] Must be a single JSON object — {"message":"...","buttons":{...}}. No code fences/explanation.\n[schedules control — once] Each schedule is auto-removed after execution. Control via the schedules array in your response:\n- Recurring: re-register the same schedule (same id)\n- Follow-up/new/sequential tasks: add a new schedule\n- Update: add with the same id (overwrite)\n- once/done: omit schedules\nschedules element format: {"id","when","prompt",...} — when: "30m"(relative) | "21:00"(absolute) | "0 9 * * *"(cron).\nJudge based on the prompt instructions and current context.\n\n${blocks}\n`;
+	return `[Scheduled tasks triggered] ids: ${ids} · ${executedAt.toLocaleString("ko-KR")}\nThis message indicates the above scheduled tasks have triggered. Respond per the instructions below.\n\n[Response format] Must be a single JSON object — {"message":"...","buttons":{...}}. No code fences/explanation.\n[schedules control — once] Each schedule is auto-removed after execution. Control via the schedules array in your response:\n- Recurring: re-register the same schedule (same id)\n- Follow-up/new/sequential tasks: add a new schedule\n- Update: add with the same id (overwrite)\n- once/done: omit schedules\nschedules element format: {"id","when","prompt",...} — when: "30m"(relative) | "21:00"(absolute) | "2026-07-12T21:00"(ISO). No cron — re-register for recurring.\nJudge based on the prompt instructions and current context.\n\n${blocks}\n`;
 }
 
 // ── 목록 텍스트 포맷 ────────────────────────────────────────────────────
@@ -171,7 +155,7 @@ export class Scheduler {
 	private opts: SchedulerOptions;
 	private schedules = new Map<string, ScheduleEntry>();
 	private pendingBatch: ScheduleEntry[] = []; // 동시 트리거 모음 — busy 시 대기
-	private batchScheduled = false; // queueMicrotask 중복 예약 방지
+	private batchScheduled = false; // setImmediate 중복 예약 방지
 	private storageFile: string | null = null;
 
 	constructor(opts: SchedulerOptions) {
@@ -205,10 +189,11 @@ export class Scheduler {
 			for (const item of arr) {
 				if (!item.id || !item.when || !item.prompt) continue;
 				const ms = item.nextRun ? item.nextRun - now : NaN;
-				if (!Number.isFinite(ms) || ms < 0) continue; // once — 과거/무효면 폐기
+				if (!Number.isFinite(ms)) continue; // 무효만 폐기
+				const delay = Math.max(ms, 0); // 과거 nextRun은 즉시 실행(놓친 스케줄 복구)
 				const entry: ScheduleEntry = {
 					id: item.id, when: item.when, prompt: item.prompt, condition: item.condition,
-					timer: setTimeout(() => this.trigger(item.id), ms),
+					timer: setTimeout(() => this.trigger(item.id), delay),
 					nextRun: item.nextRun,
 				};
 				this.schedules.set(item.id, entry);
@@ -241,7 +226,7 @@ export class Scheduler {
 			return { success: false, error: `[Schedule error] id missing — schedules element requires a string id` };
 		}
 		if (typeof when !== "string" || !when) {
-			return { success: false, error: `[Schedule error] id="${id}" when missing — e.g. '30m', '21:00', '0 9 * * *'` };
+			return { success: false, error: `[Schedule error] id="${id}" when missing — e.g. '30m', '21:00', '2026-07-12T21:00'` };
 		}
 		if (typeof prompt !== "string" || !prompt) {
 			return { success: false, error: `[Schedule error] id="${id}" prompt missing — execution instruction (string) required` };
@@ -345,10 +330,10 @@ export class Scheduler {
 
 		console.log(`[Scheduler] trigger 도달: id=${id} when=${entry.when} → batch(${this.pendingBatch.length})`);
 
-		// 같은 틱의 다른 트리거들과 합치기 위해 microtask로 flush 예약 (중복 방지)
+		// 같은 timers 단계의 다른 트리거들과 합치기 위해 setImmediate로 flush 예약 (queueMicrotask는 현재 macrotask 끝에 실행 → 별도 setTimeout 콜백과 합쳐지지 않음)
 		if (!this.batchScheduled) {
 			this.batchScheduled = true;
-			queueMicrotask(() => this.flushBatch());
+			setImmediate(() => this.flushBatch());
 		}
 	}
 
