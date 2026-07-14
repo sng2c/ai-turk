@@ -16,6 +16,9 @@ import { ChildProcess, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { mkdirSync } from "node:fs";
 
+// 진단 로그 토글: TURK_DEBUG=1
+const DEBUG = !!process.env.TURK_DEBUG;
+
 // ── 외부로 노출되는 이벤트: pi 호환 포맷 ──────────────────────────────
 // App.tsx 가 처리하는 이벤트 타입과 1:1. 변경 시 App.tsx 도 함께 수정.
 export type TurkEvent = Record<string, unknown>;
@@ -70,7 +73,7 @@ class JsonlBackend implements Backend {
 
 	/** stdout 청크 → 줄 단위 JSONL → emit(변환된 이벤트). */
 	protected feedStdout(chunk: Buffer): void {
-		console.log(`[PiBackend] stdout 청크: ${chunk.length}바이트`);
+		if (DEBUG) console.log(`[PiBackend] stdout 청크: ${chunk.length}바이트`);
 		this.buffer += this.decoder.write(chunk);
 		while (true) {
 			const idx = this.buffer.indexOf("\n");
@@ -130,14 +133,14 @@ export class PiBackend extends JsonlBackend {
 
 	override send(cmd: Record<string, unknown>): void {
 		if (!this.proc?.stdin?.writable) { console.log(`[PiBackend] send 실패: stdin 미사용`); return; }
-		console.log(`[PiBackend] stdin write: type=${cmd.type}`);
+		if (DEBUG) console.log(`[PiBackend] stdin write: type=${cmd.type}`);
 		this.proc.stdin.write(JSON.stringify(cmd) + "\n");
 	}
 
 	protected override handleLine(raw: unknown): void {
 		// pi 는 이미 App.tsx 가 기대하는 포맷이므로 그대로 전달.
 		const t = (raw as any)?.type;
-		console.log(`[PiBackend] stdout: type=${t}`);
+		if (DEBUG) console.log(`[PiBackend] stdout: type=${t}`);
 		this.emit(raw as TurkEvent);
 	}
 }
