@@ -45,6 +45,9 @@ const MAX_SESSIONS = parseInt(process.env.TURK_MAX_SESSIONS || "5");
 const vapidKeys = webpush.generateVAPIDKeys();
 const VAPID_PUBLIC_KEY: string = vapidKeys.publicKey;
 const VAPID_PRIVATE_KEY: string = vapidKeys.privateKey;
+
+// 진단 로그 토글: TURK_DEBUG=1
+const DEBUG = !!process.env.TURK_DEBUG;
 webpush.setVapidDetails("mailto:ai-turk@local", VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
 const MIME: Record<string, string> = {
@@ -85,7 +88,7 @@ function startBackend(session: Session): void {
 		onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
 	});
 	session.backend.onEvent((ev: TurkEvent) => {
-		console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 이벤트: type=${ev.type}`);
+		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 이벤트: type=${ev.type}`);
 		if (ev.type === "pi_ready") {
 			session.backendReady = true;
 			(ev as any).vapidPublicKey = VAPID_PUBLIC_KEY;
@@ -101,11 +104,11 @@ function startBackend(session: Session): void {
 		}
 		if (ev.type === "pi_exit" || ev.type === "pi_error") session.backendReady = false;
 		// agent_start: 스트리밍 시작
-		if (ev.type === "agent_start") { session.isStreaming = true; console.log(`[${session.userKey.slice(0, 8)}] [백엔드] agent_start`); }
+		if (ev.type === "agent_start") { session.isStreaming = true; if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] agent_start`); }
 		// agent_end: 스트리밍 종료 + 큐 드레인 + lastPrompt 초기화 + 웹 푸시
 		if (ev.type === "agent_end") {
 			session.isStreaming = false;
-			console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] agent_end 도착 — drainQueue 호출`);
+			if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] agent_end 도착 — drainQueue 호출`);
 			session.lastPrompt = null;
 			session.scheduler.drainQueue();
 			// 마지막 assistant 응답 보관 — WS 끊김 시 재연결 복원용 (push 권한 무관)
@@ -124,7 +127,7 @@ function startBackend(session: Session): void {
 
 // 같은 세션(유저) WS 전체에 broadcast — 다중 탭 동기화
 function broadcast(session: Session, data: Record<string, unknown>): void {
-	console.log(`[${session.userKey.slice(0, 8)}] [WS] 송신: type=${data.type}${data.command ? " command=" + data.command : ""}`);
+	if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [WS] 송신: type=${data.type}${data.command ? " command=" + data.command : ""}`);
 	const msg = JSON.stringify(data);
 	for (const ws of session.ws) {
 		if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -137,7 +140,7 @@ function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { 
 		// 순수 사용자 입력만 저장 (systemPrompt 제외) — 재연결 복원용
 		session.lastPrompt = typeof cmd.userInput === "string" ? cmd.userInput : cmd.message;
 		const preview = typeof cmd.userInput === "string" ? cmd.userInput : (typeof cmd.message === "string" ? cmd.message : "");
-		console.log(`[${session.userKey.slice(0, 8)}] [백엔드] prompt 전송: ${preview.slice(0, 60)}`);
+		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] prompt 전송: ${preview.slice(0, 60)}`);
 	}
 	session.backend?.send(cmd);
 }
@@ -335,7 +338,7 @@ wss.on("connection", (ws, req) => {
 	ws.on("message", (raw) => {
 		try {
 			const msg = JSON.parse(raw.toString());
-			console.log(`[${userKey.slice(0, 8)}] [WS] 수신: type=${msg.type}`);
+			if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [WS] 수신: type=${msg.type}`);
 			if (customCommands.includes(msg.type)) {
 				if (msg.type === "restart_pi") {
 					if (session.backend) { session.backend.stop(); session.backend = null; }
@@ -355,7 +358,7 @@ wss.on("connection", (ws, req) => {
 				} else if (msg.type === "push_subscribe") {
 					session.pushSubscription = msg.subscription;
 					savePushSubscription(userKey, msg.subscription); // 영속화
-					console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신+저장: ${msg.subscription?.endpoint?.slice(0, 60)}`);
+					if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신+저장: ${msg.subscription?.endpoint?.slice(0, 60)}`);
 				} else if (msg.type === "get_last_assistant_text") {
 					broadcast(session, {
 						type: "response",

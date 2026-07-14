@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { WebSocketServer, WebSocket } from "ws";
 import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
+
+// 진단 로그 토글: TURK_DEBUG=1
+const DEBUG = !!process.env.TURK_DEBUG;
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
 import envPaths from "env-paths";
 import webpush from "web-push";
@@ -47,7 +50,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 
 	// 같은 세션(유저) WS 전체에 broadcast — 다중 탭 동기화
 	function broadcast(session: Session, data: Record<string, unknown>): void {
-		console.log(`[${session.userKey.slice(0, 8)}] [WS] 송신: type=${data.type}${data.command ? " command=" + data.command : ""}`);
+		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [WS] 송신: type=${data.type}${data.command ? " command=" + data.command : ""}`);
 		const msg = JSON.stringify(data);
 		for (const ws of session.ws) {
 			if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -99,7 +102,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		if (cmd.type === "prompt" && typeof cmd.message === "string" && !opts?.fromScheduler) {
 			session.lastPrompt = typeof cmd.userInput === "string" ? cmd.userInput : cmd.message;
 		}
-		console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 전송: type=${cmd.type}${opts?.fromScheduler ? " (scheduler)" : ""}`);
+		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 전송: type=${cmd.type}${opts?.fromScheduler ? " (scheduler)" : ""}`);
 		session.backend?.send(cmd);
 	}
 
@@ -112,7 +115,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
 		});
 		session.backend.onEvent((ev: TurkEvent) => {
-			console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 이벤트: type=${ev.type}`);
+			if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 이벤트: type=${ev.type}`);
 			if (ev.type === "pi_ready") {
 				session.backendReady = true;
 				(ev as any).vapidPublicKey = VAPID_PUBLIC_KEY;
@@ -281,7 +284,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				ws.on("message", (raw) => {
 					try {
 						const msg = JSON.parse(raw.toString());
-						console.log(`[${userKey.slice(0, 8)}] [WS] 수신: type=${msg.type}`);
+						if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [WS] 수신: type=${msg.type}`);
 						if (customCommands.includes(msg.type)) {
 							if (msg.type === "restart_pi") {
 								if (session.backend) { session.backend.stop(); session.backend = null; }
@@ -300,7 +303,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 							} else if (msg.type === "push_subscribe") {
 								session.pushSubscription = msg.subscription;
 								savePushSubscription(userKey, msg.subscription); // 영속화
-								console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신: ${msg.subscription?.endpoint?.slice(0, 60)}`);
+								if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신: ${msg.subscription?.endpoint?.slice(0, 60)}`);
 							}
 						} else {
 							sendToBackend(session, msg);

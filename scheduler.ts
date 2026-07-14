@@ -17,8 +17,15 @@
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 
+// 진단 로그 토글: TURK_DEBUG=1
+const DEBUG = !!process.env.TURK_DEBUG;
+
 // ── 상수 ────────────────────────────────────────────────────────────────
-const MAX_SCHEDULES = 5;
+// 0 = unlimited. 환경변수 TURK_MAX_SCHEDULES로 덮어쓰기.
+const MAX_SCHEDULES = (() => {
+	const v = Number(process.env.TURK_MAX_SCHEDULES ?? "20");
+	return Number.isFinite(v) && v >= 0 ? v : 20;
+})();
 const MIN_INTERVAL_MS = 60_000;
 
 const UNIT_MS: Record<string, number> = {
@@ -140,7 +147,7 @@ export function formatTriggerMessage(entries: ScheduleEntry[], executedAt: Date)
  * list() 결과를 사용자에게 보여줄 텍스트 포맷.
  */
 export function formatListText(entries: ScheduleEntry[]): string {
-	let text = `[Current schedules (${MAX_SCHEDULES} max, ${entries.length} active)]\n`;
+	let text = `[Current schedules (${MAX_SCHEDULES > 0 ? `${MAX_SCHEDULES} max` : "unlimited"}, ${entries.length} active)]\n`;
 	for (const e of entries) {
 		const preview = e.prompt.slice(0, 30);
 		const cond = e.condition ? ` [cond: ${e.condition}]` : "";
@@ -176,7 +183,7 @@ export class Scheduler {
 			mkdirSync(this.opts.storageDir!, { recursive: true });
 			writeFileSync(this.storageFile, JSON.stringify(arr));
 		} catch (err) {
-			console.log(`[Scheduler] persist 실패: ${err instanceof Error ? err.message : err}`);
+			if (DEBUG) console.log(`[Scheduler] persist 실패: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
@@ -237,7 +244,7 @@ export class Scheduler {
 		}
 
 		// 최대 개수 검사 (기존 id 업데이트 시에는 제외)
-		if (this.schedules.size >= MAX_SCHEDULES && !this.schedules.has(id)) {
+		if (MAX_SCHEDULES > 0 && this.schedules.size >= MAX_SCHEDULES && !this.schedules.has(id)) {
 			return { success: false, error: `[Schedule error] id="${id}" max schedules (${MAX_SCHEDULES}) exceeded — remove an existing schedule before add` };
 		}
 
@@ -328,7 +335,7 @@ export class Scheduler {
 		this.schedules.delete(id);
 		this.pendingBatch.push(entry);
 
-		console.log(`[Scheduler] trigger 도달: id=${id} when=${entry.when} → batch(${this.pendingBatch.length})`);
+		if (DEBUG) console.log(`[Scheduler] trigger 도달: id=${id} when=${entry.when} → batch(${this.pendingBatch.length})`);
 
 		// 같은 timers 단계의 다른 트리거들과 합치기 위해 setImmediate로 flush 예약 (queueMicrotask는 현재 macrotask 끝에 실행 → 별도 setTimeout 콜백과 합쳐지지 않음)
 		if (!this.batchScheduled) {
@@ -343,12 +350,12 @@ export class Scheduler {
 		if (this.pendingBatch.length === 0) return;
 		if (this.opts.isBusy()) {
 			// 백엔드 busy — pendingBatch 유지, 다음 drainQueue(agent_end)에서 재시도
-			console.log(`[Scheduler] flush 지연(busy): batch(${this.pendingBatch.length}) 대기`);
+			if (DEBUG) console.log(`[Scheduler] flush 지연(busy): batch(${this.pendingBatch.length}) 대기`);
 			return;
 		}
 		const entries = this.pendingBatch.splice(0);
 		const ids = entries.map((e) => e.id).join(",");
-		console.log(`[Scheduler] flush 실행: ids=${ids} (${entries.length}개)`);
+		if (DEBUG) console.log(`[Scheduler] flush 실행: ids=${ids} (${entries.length}개)`);
 		this.opts.onTrigger(entries);
 	}
 }
