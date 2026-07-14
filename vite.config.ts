@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
+// @tailwindcss/vite 제거 — @tailwindcss/postcss 전환 (CSS HMR full-reload 방지, tailwindlabs/tailwindcss#19903)
 import { WebSocketServer, WebSocket } from "ws";
 import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 
@@ -329,7 +329,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 
 export default defineConfig(() => {
 	return {
-		plugins: [react(), tailwindcss(), turkPlugin(process.env as Record<string, string>)],
+		plugins: [react(), turkPlugin(process.env as Record<string, string>)],
 		resolve: {
 			alias: {
 				"@": "/root/ai-turk/src",
