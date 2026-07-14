@@ -24,6 +24,7 @@ export default function App() {
 	const [restored, setRestored] = useState(false); // 초기화 상태 복원 완료 여부
 	const [modelChanging, setModelChanging] = useState(false); // 모델 변경 중 (지원 레벨/컨텍스트 갱신)
 	const pendingModelUpdateRef = useRef(false); // set_model → get_state 응답 매칭
+	const userSentRef = useRef(false); // 사용자 전송 → agent_end 시 입력창 클리어 (스케줄러 응답은 유지)
 	const restorePendingRef = useRef(0); // 복원 대기 응답 카운터 (get_state + get_last_assistant_text)
 	const [backendKind, setBackendKind] = useState<string>("pi");
 	const [sessionId, setSessionId] = useState("");
@@ -211,7 +212,8 @@ export default function App() {
 					break;
 				}
 				setLoading(false);
-				setInput("");
+				// 사용자 전송 응답 종료 시 입력창 클리어 (스케줄러 응답은 유지)
+				if (userSentRef.current) { setInput(""); userSentRef.current = false; }
 				// 데스크톱만 응답 완료 시 입력창 포커스 — 모바일은 가상 키보드 자동 노출 방지
 				if (IS_FINE_POINTER) inputRef.current?.focus();
 				// scheduler_trigger가 대기 중이면 응답 message 앞에 prefix 부착
@@ -591,6 +593,7 @@ export default function App() {
 	const sendPrompt = useCallback((userText: string) => {
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
+		userSentRef.current = true; // 사용자 전송 — agent_end 시 클리어
 
 		const { rows: r, cols: c } = gridRef.current;
 		let message = userText;
