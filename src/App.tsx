@@ -16,7 +16,8 @@ export default function App() {
 	const cols = DEFAULT_COLS;
 	const [state, setState] = useState<TurkState>(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 	const [loading, setLoading] = useState(false);
-	const [input, setInput] = useState("");
+	const clearInput = () => { setInput(""); localStorage.removeItem("turk-input"); };
+	const [input, setInput] = useState(() => localStorage.getItem("turk-input") || "");
 
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
@@ -215,7 +216,7 @@ export default function App() {
 				setLoading(false);
 				setIsScheduled(false); // 스케줄 실행 종료
 				// 사용자 전송 응답 종료 시 입력창 클리어 (스케줄러 응답은 유지)
-				if (userSentRef.current) { setInput(""); userSentRef.current = false; }
+				if (userSentRef.current) { clearInput(); userSentRef.current = false; }
 				// 데스크톱만 응답 완료 시 입력창 포커스 — 모바일은 가상 키보드 자동 노출 방지
 				if (IS_FINE_POINTER) inputRef.current?.focus();
 				// scheduler_trigger가 대기 중이면 응답 message 앞에 prefix 부착
@@ -632,7 +633,7 @@ export default function App() {
 				ws.send(JSON.stringify({ type: "restart_pi" }));
 				sessionInitRef.current = false;
 				setState(emptyState(gridRef.current.rows, gridRef.current.cols));
-				setInput("");
+				clearInput();
 			}
 			return;
 		}
@@ -805,7 +806,7 @@ export default function App() {
 					enterKeyHint="send"
 					inputMode="text"
 					value={input}
-					onChange={(e) => setInput(e.target.value)}
+					onChange={(e) => { setInput(e.target.value); localStorage.setItem("turk-input", e.target.value); }}
 					placeholder={piReady ? "명령어 입력..." : "세션 초기화 중..."}
 					disabled={loading || !piReady}
 					autoFocus={false}
