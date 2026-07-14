@@ -25,6 +25,7 @@ export default function App() {
 	const [modelChanging, setModelChanging] = useState(false); // 모델 변경 중 (지원 레벨/컨텍스트 갱신)
 	const pendingModelUpdateRef = useRef(false); // set_model → get_state 응답 매칭
 	const userSentRef = useRef(false); // 사용자 전송 → agent_end 시 입력창 클리어 (스케줄러 응답은 유지)
+	const [isScheduled, setIsScheduled] = useState(false); // 스케줄 실행 중 — 로고 시계 럭닥 전환
 	const restorePendingRef = useRef(0); // 복원 대기 응답 카운터 (get_state + get_last_assistant_text)
 	const [backendKind, setBackendKind] = useState<string>("pi");
 	const [sessionId, setSessionId] = useState("");
@@ -212,6 +213,7 @@ export default function App() {
 					break;
 				}
 				setLoading(false);
+				setIsScheduled(false); // 스케줄 실행 종료
 				// 사용자 전송 응답 종료 시 입력창 클리어 (스케줄러 응답은 유지)
 				if (userSentRef.current) { setInput(""); userSentRef.current = false; }
 				// 데스크톱만 응답 완료 시 입력창 포커스 — 모바일은 가상 키보드 자동 노출 방지
@@ -442,6 +444,8 @@ export default function App() {
 			case "scheduler_trigger":
 				// 백엔드 주입 직전 서버가 전송 → 다음 agent_end 응답에 prefix 부착
 				schedulerTriggerRef.current = { ids: msg.ids, whens: msg.whens };
+				setIsScheduled(true); // 스케줄 실행 중 — 로고 시계 럭닥 전환
+				console.log("[debug] scheduler_trigger 수신 → isScheduled=true", msg.ids);
 				break;
 
 			case "extension_ui_request":
@@ -705,7 +709,7 @@ export default function App() {
 	return (
 		<div className="turk-app" style={!restored || modelChanging ? { pointerEvents: "none" } : undefined}>
 			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
-				<h1 title={statusText}><Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-bot-spin" : "")} /> AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
+				<h1 title={statusText}>{isScheduled ? <AlarmClock className="turk-ico turk-ico-green turk-bot-tick" style={{ width: "1.3em", height: "1.3em" }} /> : <Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-bot-spin" : "")} />} AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" /></button>
 				<button className="turk-model-btn" onClick={() => {
