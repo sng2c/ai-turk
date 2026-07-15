@@ -123,8 +123,8 @@ export class PiBackend extends JsonlBackend {
 		const bin = process.env.TURK_PI_BIN || "pi";
 		const model = process.env.TURK_PI_MODEL || "";
 		const extra = (process.env.TURK_PI_ARGS || "").split(/\s+/).filter(Boolean);
-		// userKey 있으면 영속 세션(--session-id), 없으면 ephemeral(--no-session) — 기존 동작 유지
-		const sessionArgs = this.opts.userKey ? ["--session-id", this.opts.userKey] : ["--no-session"];
+		// userKey 있으면 해당 세션 복원(--session-id), 없으면 pi가 자체 영속 세션 생성 (--no-session 사용 안함)
+		const sessionArgs = this.opts.userKey ? ["--session-id", this.opts.userKey] : [];
 		const args = ["--mode", "rpc", ...sessionArgs, ...(model ? ["--model", model] : []), ...extra];
 		this.log(`[Turk] ${bin} ${args.join(" ")} 시작`);
 		this.attach(spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], cwd: this.opts.cwd }), "pi");
