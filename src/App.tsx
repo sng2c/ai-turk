@@ -733,9 +733,9 @@ export default function App() {
 	return (
 		<div className="turk-app" style={!restored || modelChanging ? { pointerEvents: "none" } : undefined}>
 			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
-				<h1 title={statusText}>{logoMode === "tool" ? <Settings className="turk-ico turk-ico-green turk-bot-spin-slow" style={{ width: "1.1em", height: "1.1em" }} /> : logoMode === "alarm" ? <AlarmClock className="turk-ico turk-ico-green turk-bot-tick" style={{ width: "1.3em", height: "1.3em" }} /> : <Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-bot-spin" : "")} />} AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
+				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-bot-gear" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-bot-spin" : "")} />} AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
-				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" /></button>
+				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<button className="turk-model-btn" onClick={() => {
 					if (modelMode.current) {
 						modelMode.current = false;
