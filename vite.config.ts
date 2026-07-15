@@ -83,6 +83,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		if (!Array.isArray(messages)) return;
 		const text = extractTextFromMessages(messages);
 		if (!text) return;
+		console.log(`[${session.userKey.slice(0, 8)}] [Push] text=${text.slice(0, 120)}`);
 		let bodyText = text;
 		try {
 			const parsed = JSON.parse(text);
@@ -102,7 +103,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		if (cmd.type === "prompt" && typeof cmd.message === "string" && !opts?.fromScheduler) {
 			session.lastPrompt = typeof cmd.userInput === "string" ? cmd.userInput : cmd.message;
 		}
-		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 전송: type=${cmd.type}${opts?.fromScheduler ? " (scheduler)" : ""}`);
+		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 전송: type=${cmd.type}${opts?.fromScheduler ? " (scheduler)" : ""}` + (cmd.type === "prompt" && typeof cmd.message === "string" ? ` msg=${cmd.message.slice(0, 200)}` : ""));
 		session.backend?.send(cmd);
 	}
 
@@ -134,6 +135,11 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			if (ev.type === "agent_end") {
 				session.isStreaming = false;
 				session.lastPrompt = null;
+				// LLM 응답 전체 로깅 (디버그) — push 파싱 원인 확정용
+				if (DEBUG) {
+					const msgs = (ev as any).messages;
+					if (Array.isArray(msgs)) console.log(`[${session.userKey.slice(0, 8)}] [agent_end] messages=${JSON.stringify(msgs).slice(0, 1000)}`);
+				}
 				session.scheduler.drainQueue();
 				if (session.pushSubscription) sendPushNotification(session, ev);
 			}
