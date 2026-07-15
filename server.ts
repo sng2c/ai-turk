@@ -71,7 +71,6 @@ interface Session {
 	scheduler: Scheduler;
 	pushSubscription: any; // 마지막 구독 (1인 — 세션당 1개)
 	ws: Set<WebSocket>; // 같은 유저 다중 탭 — 동일 세션 broadcast
-	lastAssistantText: string | null; // 마지막 assistant 응답 (WS 끊김 시 재연결 복원용)
 	lastPrompt: string | null; // 마지막 프롬프트 (새로고침 복원용)
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
 	lastActivity: number; // 마지막 활동 타임스탬프 (LRU 정리용)
@@ -187,13 +186,6 @@ function startBackend(session: Session): void {
 			if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] agent_end 도착 — drainQueue 호출`);
 			session.lastPrompt = null;
 			session.scheduler.drainQueue();
-			// 마지막 assistant 응답 보관 — WS 끊김 시 재연결 복원용 (push 권한 무관)
-			const messages = (ev as any).messages;
-			if (Array.isArray(messages)) {
-					const _text = extractTextFromMessages(messages);
-					// silent 응답은 캐시하지 않음 — 재연결 시 복원 제외
-					try { const _p = JSON.parse(_text.match(/\{[\s\S]*\}/)?.[0] ?? _text); if (!(_p && _p.silent === true)) { session.lastAssistantText = _text; saveLastAssistantText(session.userKey, session.agentSessionId ?? "", _text); } } catch { session.lastAssistantText = _text; saveLastAssistantText(session.userKey, session.agentSessionId ?? "", _text); }
-				}
 			if (session.pushSubscription) sendPushNotification(session, ev);
 		}
 		// get_state 응답 보강: lastPrompt + isStreaming 주입
@@ -283,9 +275,6 @@ function saveAgentSessionId(userKey: string, agentSessionId: string): void {
 		writeFileSync(configPath(userKey), agentSessionId); // 평문 UUID
 	} catch (err) { console.log(`[${userKey.slice(0, 8)}] [config] 저장 실패: ${err instanceof Error ? err.message : err}`); }
 }
-function lastAssistantTextPath(userKey: string): string {
-	return `${envPaths("ai-turk").data}/${userKey}/last-assistant-text`;
-}
 function pushPath(userKey: string): string {
 	return `${envPaths("ai-turk").data}/${userKey}/push.json`;
 }
@@ -295,20 +284,6 @@ function loadPushSubscription(userKey: string): any | null {
 		if (!existsSync(f)) return null;
 		return JSON.parse(readFileSync(f, "utf-8"));
 	} catch { return null; }
-}
-function loadLastAssistantText(userKey: string): { sessionId: string; text: string } | null {
-	try {
-		const f = lastAssistantTextPath(userKey);
-		if (!existsSync(f)) return null;
-		return JSON.parse(readFileSync(f, "utf-8"));
-	} catch { return null; }
-}
-function saveLastAssistantText(userKey: string, sessionId: string, text: string): void {
-	try {
-		const dir = `${envPaths("ai-turk").data}/${userKey}`;
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(lastAssistantTextPath(userKey), JSON.stringify({ sessionId, text }));
-	} catch (err) { console.log(`[${userKey.slice(0, 8)}] [lastText] 저장 실패: ${err instanceof Error ? err.message : err}`); }
 }
 function savePushSubscription(userKey: string, sub: any): void {
 	try {
@@ -337,7 +312,6 @@ function createSession(userKey: string): Session {
 		}),
 		pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원 (재시작 후 재구독 불필요)
 		ws: new Set(),
-		lastAssistantText: loadLastAssistantText(userKey)?.text ?? null,
 		lastPrompt: null,
 		isStreaming: false,
 		lastActivity: Date.now(),
@@ -413,7 +387,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 // ── WebSocket 서버 ──────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: "/ws" });
-const customCommands = ["restart_pi", "schedule", "push_subscribe", "get_last_assistant_text"];
+const customCommands = ["restart_pi", "schedule", "push_subscribe"];
 
 wss.on("connection", (ws, req) => {
 	const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -449,7 +423,6 @@ wss.on("connection", (ws, req) => {
 					if (session.backend) { session.backend.stop(); session.backend = null; }
 					session.backendReady = false;
 					session.agentSessionId = null;
-				session.lastAssistantText = null;
 				session.lastPrompt = null; // 새 세션 — 저장된 ID 클리어 → 백엔드 --no-session(새 세션) → ready 후 get_state로 새 ID 갱신
 					console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 					setTimeout(() => startBackend(session), 500);
@@ -466,13 +439,6 @@ wss.on("connection", (ws, req) => {
 					session.pushSubscription = msg.subscription;
 					savePushSubscription(userKey, msg.subscription); // 영속화
 					if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신+저장: ${msg.subscription?.endpoint?.slice(0, 60)}`);
-				} else if (msg.type === "get_last_assistant_text") {
-					broadcast(session, {
-						type: "response",
-						command: "get_last_assistant_text",
-						success: true,
-						data: { text: (() => { const s = loadLastAssistantText(userKey); return (s && s.sessionId === session.agentSessionId) ? s.text : ""; })() },
-					});
 				}
 			} else {
 				sendToBackend(session, msg);
