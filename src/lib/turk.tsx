@@ -28,7 +28,7 @@ export const TurkStateSchema = z.object({
 	colors: z.record(z.string(), z.string()).optional(),
 	textColors: z.record(z.string(), z.string()).optional(),
 	schedules: z.array(ScheduleSchema).optional(),
-	noResponse: z.boolean().optional(),
+	silent: z.boolean().optional(),
 	repeat: z.boolean().optional(),
 });
 
@@ -39,7 +39,7 @@ export interface TurkState {
 	colors?: Record<string, string>;
 	textColors?: Record<string, string>;
 	schedules?: any[]; // LLM 응답의 schedules 배열 (일회성 명령 — state에 저장하지 않고 즉시 서버로 전송)
-	noResponse?: boolean; // 조건부 스케줄 불충족 — 응답 폐기 (UI 갱신/알림 없음)
+	silent?: boolean; // true면 사용자에게 미표시 + 캐싱 안 함 (schedules는 처리)
 	repeat?: boolean; // 스케줄 반복 여부 — false면 자동 제거, true/생략 시 유지
 }
 
@@ -56,7 +56,13 @@ export const DEFAULT_COLS = 5;
 export function systemPrompt(rows: number, cols: number): string {
 	const nb = rows * cols;
 	const ex = Array.from({ length: nb }, (_, i) => `"${i}": ""`).join(", ");
-	return `You are a UI controller. Your ENTIRE response must be a single JSON object — no prose, no markdown, no code fences, no explanation before or after.
+	return `# AI-Turk UI Controller
+
+You are a UI controller. Your ENTIRE response must be a single JSON object — no prose, no markdown, no code fences, no explanation before or after.
+
+## Silent Responses
+- silent: true -> The response is delivered but NOT shown to the user (no screen update, no cache, no push). Use for repeating schedules where the condition is false (skip silently, try again next cycle). Schedules in the response are still processed.
+- silent: false (or omitted) -> Normal: cache + show to user. Use for one-time schedules where condition is false (user needs to know) or condition check failure (user needs to fix).
 
 [Grid]
 - ${rows} rows × ${cols} columns, ${nb} buttons. Keys "0"~"${nb - 1}".
@@ -80,7 +86,7 @@ export function systemPrompt(rows: number, cols: number): string {
 [Examples]
 {"message":"What do you need?","buttons":{"0":"Weather","1":"Time","2":"News","3":"Help","4":""}}
 {"message":"Settings saved.","buttons":{"0":"OK","1":"Cancel","2":""},"colors":{"0":"success","1":"destructive"}}
-{"message":"Select a zone.","buttons":{"0":"A","1":"B","2":"C","3":"D"},"colors":{"0":"destructive","1":"warning","2":"success","3":"primary"},"textColors":{"0":"destructive","1":"warning","2":"success","3":"primary"}}
+{"silent":true,"message":"","buttons":{},"schedules":[{"action":"add","id":"test","when":"1m","prompt":"Hello"}]}
 
 [Schedules]
 - Include a "schedules" array in your response to set/remove schedules.
@@ -100,11 +106,12 @@ export function systemPrompt(rows: number, cols: number): string {
 - Conditional schedule: optional "condition" field to gate execution. Separate condition (when to run) from prompt (what to do).
   - condition: the predicate to evaluate (true/false). e.g. "if it's raining"
   - prompt: the instruction to run when the condition holds. e.g. "Remind to bring an umbrella grid"
-  - example: {"action":"add","id":"rain","when":"09:00","condition":"if it's raining","prompt":"Remind to bring an umbrella grid"}
+  - example: {"message":"Check if it's raining...","buttons":{},"schedules":[{"action":"add","id":"rain","when":"09:00","condition":"if it's raining","prompt":"Remind to bring an umbrella grid"}]}
 - On conditional trigger: evaluate the condition first — verify obvious facts (objective) via web_search etc. No guessing.
   - clearly true: respond normally per the prompt instruction.
-  - clearly false: return {"message":"","buttons":{},"noResponse":true} — no action, discard the response (no display/notification).
-  - uncertain: respond normally telling the user the situation (prompt for clarification).
+  - clearly false + REPEATING schedule: return {"silent":true,"message":"","buttons":{}} — skip silently, try again next cycle.
+  - clearly false + ONE-TIME schedule: return {"silent":false,"message":"Condition not met: <reason>","buttons":{}} — user needs to know (no retry).
+  - check FAILED (tool error, cannot verify): return {"message":"Cannot verify condition: <reason>. Please fix the schedule.","buttons":{}} — user needs to fix.
 
 [CRITICAL FORMAT]
 Respond with ONLY this JSON (fill values, do not include comments). First character must be "{" and last must be "}":

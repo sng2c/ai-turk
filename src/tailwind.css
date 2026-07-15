@@ -31,7 +31,7 @@
 /* 다크 테마 (AI Turk 기본) */
 :root {
 	--turk-font-size: 1rem;
-	--radius: 0rem;
+	--radius: 0.5rem;
 	--background: oklch(0.17 0 0);
 	--foreground: oklch(0.985 0 0);
 	--popover: oklch(0.17 0 0);
@@ -150,6 +150,10 @@ body {
 	animation: turk-bot-flip 2.6s ease-in-out infinite;
 }
 
+.turk-bot-spin-slow {
+	animation: turk-bot-spin 3s linear infinite;
+}
+
 .turk-bot-tick {
 	animation: turk-bot-tick 1.2s ease-in-out infinite;
 }
@@ -157,6 +161,11 @@ body {
 @keyframes turk-bot-tick {
 	0%, 100% { transform: scale(1); }
 	50% { transform: scale(0.8); }
+}
+
+@keyframes turk-bot-spin {
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
 }
 
 @keyframes turk-bot-flip {
@@ -189,6 +198,7 @@ body {
 }
 
 .turk-thinking-btn {
+	border-radius: var(--radius-md);
 	background: none;
 	border: none;
 	cursor: pointer;
@@ -203,6 +213,7 @@ body {
 }
 
 .turk-schedule-btn {
+	border-radius: var(--radius-md);
 	background: none;
 	border: none;
 	cursor: pointer;
@@ -224,6 +235,7 @@ body {
 
 
 .turk-new-btn {
+	border-radius: var(--radius-md);
 	background: none;
 	border: none;
 	cursor: pointer;
@@ -235,6 +247,7 @@ body {
 }
 
 .turk-model-btn {
+	border-radius: var(--radius-md);
 	background: none;
 	border: none;
 	cursor: pointer;
@@ -271,7 +284,10 @@ body {
 	display: inline-block;
 	width: 2.5rem;
 	height: 1rem;
-	border: 0.071rem solid var(--foreground);
+	border-top: 0.071rem solid var(--foreground);
+	border-bottom: 0.071rem solid var(--foreground);
+	border-left: 0.143rem solid var(--foreground);
+	border-right: 0.143rem solid var(--foreground);
 	background: var(--muted);
 	overflow: hidden;
 }
@@ -315,6 +331,7 @@ body {
 }
 
 .turk-message {
+	border-radius: var(--radius-md);
 	background: var(--card);
 	border: 0.143rem solid var(--foreground);
 	box-shadow: var(--pixel-box-shadow);
@@ -329,8 +346,9 @@ body {
 }
 
 .turk-scroll-arrow {
+	border-radius: var(--radius-md);
 	position: absolute;
-	right: 0rem;
+	right: 0.3rem;
 	background: var(--card);
 	border: 0.143rem solid var(--foreground);
 	box-shadow: var(--pixel-box-shadow);
@@ -346,26 +364,26 @@ body {
 	line-height: 1;
 	cursor: pointer;
 	z-index: 5;
-	opacity: 0.85;
+	opacity: 0.4;
 	transition: opacity 0.15s, transform 0.15s;
 }
 
 .turk-scroll-arrow:hover {
 	opacity: 1;
-	transform: scale(1.1);
 }
 
 .turk-scroll-up {
-	top: 0rem;
+	top: 0.3rem;
 }
 
 .turk-scroll-down {
-	bottom: 2.2rem;
+	bottom: 2.5rem;
 }
 .turk-copy-btn {
+	border-radius: var(--radius-md);
 	position: absolute;
-	right: 0rem;
-	bottom: 0rem;
+	right: 0.3rem;
+	bottom: 0.3rem;
 	background: var(--card);
 	border: 0.143rem solid var(--foreground);
 	box-shadow: var(--pixel-box-shadow);
@@ -381,13 +399,12 @@ body {
 	line-height: 1;
 	cursor: pointer;
 	z-index: 5;
-	opacity: 0.85;
+	opacity: 0.4;
 	transition: opacity 0.15s, transform 0.15s, color 0.2s;
 }
 
 .turk-copy-btn:hover {
 	opacity: 1;
-	transform: scale(1.1);
 }
 
 .turk-copy-done {
@@ -435,7 +452,7 @@ body {
 .turk-message p { margin: 0.2em 0; }
 .turk-message blockquote { padding-left: 0.5em; border-left: 0.143rem solid currentColor; opacity: 0.7; margin: 0.2em 0; }
 .turk-message hr { border: none; border-top: 0.071rem solid currentColor; opacity: 0.3; margin: 0.3em 0; }
-.turk-message pre { background: var(--muted); padding: 0.4em; overflow: auto; margin: 0.2em 0; }
+.turk-message pre { background: var(--muted); padding: 0.4em; overflow: auto; margin: 0.2em 0; border-radius: var(--radius-md); }
 .turk-message table { border-collapse: collapse; margin: 0.2em 0; }
 .turk-message th, .turk-message td { border: 0.071rem solid var(--muted-foreground); padding: 0.2em 0.4em; }
 
@@ -502,6 +519,7 @@ body {
 }
 
 .turk-grid-btn {
+	border-radius: var(--radius-md);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -581,6 +599,7 @@ body {
 }
 
 .turk-input-field {
+	border-radius: var(--radius-md);
 	flex: 1;
 	padding: 0.571rem 0.857rem;
 	border: 0.143rem solid var(--foreground);
@@ -607,6 +626,7 @@ body {
 }
 
 .turk-submit-btn {
+	border-radius: var(--radius-md);
 	position: relative;
 	z-index: 50;
 	display: flex;

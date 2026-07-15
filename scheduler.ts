@@ -133,13 +133,11 @@ export function formatTriggerMessage(entries: ScheduleEntry[], executedAt: Date)
 	const ids = entries.map((e) => e.id).join(", ");
 	const blocks = entries
 		.map((e) => {
-			const cond = e.condition
-				? `\n[Conditional schedule] condition: "${e.condition}"\nEvaluate this condition first — must verify with clear facts (objective) via web_search or other tools. No speculation/subjective judgment.\n- Confirmed true: respond normally per instructions below.\n- Confirmed false: no action to perform. Return {"message":"","buttons":{},"noResponse":true} for this schedule (response discarded, no UI display/notification).\n- Cannot verify (tool failure, insufficient info): respond normally informing the user (e.g., "Cannot verify the condition: <reason>. Please edit the schedule.").`
-				: "";
-			return `--- schedule id: ${e.id} · when: ${e.when} ---${cond}\n${e.prompt}`;
+			const cond = e.condition ? ` (condition: "${e.condition}")` : "";
+			return `--- ${e.id} · ${e.when}${cond} ---\n${e.prompt}`;
 		})
 		.join("\n\n");
-	return `[Scheduled tasks triggered] ids: ${ids} · ${executedAt.toLocaleString("ko-KR")}\nThis message indicates the above scheduled tasks have triggered. Respond per the instructions below.\n\n[Response format] Must be a single JSON object — {"message":"...","buttons":{...}}. No code fences/explanation.\n[schedules control — once] Each schedule is auto-removed after execution. Control via the schedules array in your response:\n- Recurring: re-register the same schedule (same id)\n- Follow-up/new/sequential tasks: add a new schedule\n- Update: add with the same id (overwrite)\n- once/done: omit schedules\nschedules element format: {"id","when","prompt",...} — when: "30m"(relative) | "21:00"(absolute) | "2026-07-12T21:00"(ISO). No cron — re-register for recurring.\nJudge based on the prompt instructions and current context.\n\n${blocks}\n`;
+	return `[Scheduled tasks triggered] ids: ${ids} · ${executedAt.toLocaleString("ko-KR")}\n\n${blocks}\n`;
 }
 
 // ── 목록 텍스트 포맷 ────────────────────────────────────────────────────
@@ -333,6 +331,7 @@ export class Scheduler {
 		// once — batch에 적재 (타이머 만료, 즉시 제거)
 		if (entry.timer) clearTimeout(entry.timer);
 		this.schedules.delete(id);
+		this.persist(); // 메모리 삭제를 파일에 반영 — 재시작 시 중복 로드 방지
 		this.pendingBatch.push(entry);
 
 		if (DEBUG) console.log(`[Scheduler] trigger 도달: id=${id} when=${entry.when} → batch(${this.pendingBatch.length})`);

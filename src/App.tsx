@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings } from "lucide-react";
 import {
 	DEFAULT_COLS, DEFAULT_ROWS, TURK_USER_KEY,
 	emptyState, errState, extractAssistantText, parseTurkJSON,
@@ -26,7 +26,8 @@ export default function App() {
 	const [modelChanging, setModelChanging] = useState(false); // 모델 변경 중 (지원 레벨/컨텍스트 갱신)
 	const pendingModelUpdateRef = useRef(false); // set_model → get_state 응답 매칭
 	const userSentRef = useRef(false); // 사용자 전송 → agent_end 시 입력창 클리어 (스케줄러 응답은 유지)
-	const [isScheduled, setIsScheduled] = useState(false); // 스케줄 실행 중 — 로고 시계 럭닥 전환
+	const [logoMode, setLogoMode] = useState<"robot" | "alarm" | "tool">("robot");
+	const baseLogoModeRef = useRef<"robot" | "alarm" | "tool">("robot"); // 톨 종료 후 복귀용
 	const restorePendingRef = useRef(0); // 복원 대기 응답 카운터 (get_state + get_last_assistant_text)
 	const [backendKind, setBackendKind] = useState<string>("pi");
 	const [sessionId, setSessionId] = useState("");
@@ -206,6 +207,10 @@ export default function App() {
 				setShowThinking(false);
 				setThinkingExpanded(false);
 				setToolStatus(null);
+				// route 기반 로고 결정 — scheduler=알람, tool=톱니, 그 외=로봇
+				const base = msg.route === "scheduler" ? "alarm" : msg.route === "tool" ? "tool" : "robot";
+				baseLogoModeRef.current = base;
+				setLogoMode(base);
 				break;
 
 			case "agent_end": {
@@ -214,7 +219,7 @@ export default function App() {
 					break;
 				}
 				setLoading(false);
-				setIsScheduled(false); // 스케줄 실행 종료
+				setLogoMode("robot");
 				// 사용자 전송 응답 종료 시 입력창 클리어 (스케줄러 응답은 유지)
 				if (userSentRef.current) { clearInput(); userSentRef.current = false; }
 				// 데스크톱만 응답 완료 시 입력창 포커스 — 모바일은 가상 키보드 자동 노출 방지
@@ -238,17 +243,19 @@ export default function App() {
 					if (result && "parsed" in result) {
 						retryCountRef.current = 0; // 성공 시 카운터 리셋
 						const parsed = result.parsed;
-						// no-response 응답 폐기 — 조건부 스케줄 불충족 (UI 갱신/알림 없음)
-						if (parsed.noResponse === true) {
-							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
-							return;
-						}
-						// schedules 배열 추출 → 서버로 전송 (일회성 명령, state에 넣지 않음)
+						// schedules는 silent 여부와 무관하게 항상 처리
 						if (Array.isArray(parsed.schedules)) {
 							for (const sch of parsed.schedules) {
 								wsRef.current?.send(JSON.stringify({ type: "schedule", ...sch }));
 							}
-							// state에는 schedules 키 제외
+						}
+						// silent: 사용자에게 미표시 — schedules는 이미 처리됨
+						if (parsed.silent === true) {
+							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
+							return;
+						}
+						// 화면 표시
+						if (Array.isArray(parsed.schedules)) {
 							const { schedules, ...stateWithoutSchedules } = parsed;
 							if (schedulerPrefixRef.current) {
 								stateWithoutSchedules.message = schedulerPrefixRef.current + (stateWithoutSchedules.message || "");
@@ -270,15 +277,18 @@ export default function App() {
 						if (fallback && "parsed" in fallback) {
 							retryCountRef.current = 0;
 							const parsed = fallback.parsed;
-							// no-response 응답 폐기 (1차와 동일)
-							if (parsed.noResponse === true) {
-								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
-								return;
-							}
+							// schedules는 silent 여부와 무관하게 항상 처리
 							if (Array.isArray(parsed.schedules)) {
 								for (const sch of parsed.schedules) {
 									wsRef.current?.send(JSON.stringify({ type: "schedule", ...sch }));
 								}
+							}
+							// silent: 사용자에게 미표시
+							if (parsed.silent === true) {
+								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
+								return;
+							}
+							if (Array.isArray(parsed.schedules)) {
 								const { schedules, ...stateWithoutSchedules } = parsed;
 								if (schedulerPrefixRef.current) {
 									stateWithoutSchedules.message = schedulerPrefixRef.current + (stateWithoutSchedules.message || "");
@@ -301,7 +311,7 @@ export default function App() {
 							const errInfo = (result && "error" in result) ? result.error
 								: (fallback && "error" in fallback) ? fallback.error : "";
 							const retry = `지난 응답이 올바른 JSON 형식이 아닙니다. JSON.parse 에러: ${errInfo}\n다음 원문을 참고하여, 동일한 내용으로 올바른 JSON 버튼 그리드 하나만 다시 출력하세요. 원문 외 설명/코드펜스 금지.\n\n[잘못된 응답]\n${text.slice(0, 800)}`;
-							sendPrompt(retry); // sendPrompt가 sessionInitRef=false 확인 → systemPrompt 재부착
+							sendPrompt(retry, "tool"); // sendPrompt가 sessionInitRef=false 확인 → systemPrompt 재부착
 						} else {
 							retryCountRef.current = 0;
 							schedulerPrefixRef.current = null; // prefix 클리어
@@ -351,7 +361,10 @@ export default function App() {
 				if (msg.command === "get_last_assistant_text") {
 					if (msg.success && msg.data?.text) {
 						const result = parseTurkJSON(msg.data.text);
-						if (result && "parsed" in result) setState(result.parsed);
+						if (result && "parsed" in result) {
+							const parsed = result.parsed;
+							if (parsed.silent !== true) setState(parsed);
+						}
 						// 주의: 여기서 sessionInitRef를 true로 하지 않음.
 						// 기존 대화 복원 시에도 다음 사용자 프롬프트에 시스템 지시가
 						// 다시 붙도록 두어야 JSON 형식이 유지됨.
@@ -362,7 +375,7 @@ export default function App() {
 					if (pendingModelUpdateRef.current) { pendingModelUpdateRef.current = false; setModelChanging(false); } // 모델 변경 완료 — 지원 레벨/컨텍스트 갱신됨
 					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
 					if (--restorePendingRef.current <= 0) setRestored(true); // 상태 복원 완료 → dim 해제
-					if (msg.data.isStreaming) setLoading(true); // 응답 기다리는 중 상태 복원 (재연결 시)
+					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
 					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null) : (m.reasoning ? ["off", "high"] : ["off"]); }
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);
@@ -394,12 +407,17 @@ export default function App() {
 					}
 				}
 				if (msg.command === "schedule") {
-						// schedule 명령 결과 → 다음 프롬프트에 주입
+						// schedule 명령 결과 → list 결과는 즉시 자동 재주입, 그 외는 다음 프롬프트에 주입
 						if (msg.success) {
-							// 성공: 결과 텍스트를 캐시 (list 결과 등)
-							schedulerFeedbackRef.current = msg.data?.text ?? null;
+							const feedback = msg.data?.text ?? null;
+							if (feedback) {
+								// list 결과를 자동으로 LLM에 재주입 → 즉시 렌더링 (사용자 재요청 불필요)
+								schedulerFeedbackRef.current = null;
+								sendPrompt(feedback, "tool");
+							} else {
+								schedulerFeedbackRef.current = null;
+								}
 						} else {
-							// 실패: 에러 메시지를 캐시
 							schedulerFeedbackRef.current = `[스케줄 오류] ${msg.error}`;
 						}
 					}
@@ -445,8 +463,7 @@ export default function App() {
 			case "scheduler_trigger":
 				// 백엔드 주입 직전 서버가 전송 → 다음 agent_end 응답에 prefix 부착
 				schedulerTriggerRef.current = { ids: msg.ids, whens: msg.whens };
-				setIsScheduled(true); // 스케줄 실행 중 — 로고 시계 럭닥 전환
-				console.log("[debug] scheduler_trigger 수신 → isScheduled=true", msg.ids);
+				console.log("[debug] scheduler_trigger 수신", msg.ids);
 				break;
 
 			case "extension_ui_request":
@@ -595,7 +612,7 @@ export default function App() {
 	};
 
 	// ── 프롬프트 전송 ───────────────────────────────────────────────────
-	const sendPrompt = useCallback((userText: string) => {
+	const sendPrompt = useCallback((userText: string, route: "user" | "tool" = "user") => {
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
 		userSentRef.current = true; // 사용자 전송 — agent_end 시 클리어
@@ -615,7 +632,7 @@ export default function App() {
 			sessionInitRef.current = true;
 		}
 
-		ws.send(JSON.stringify({ type: "prompt", message, userInput: userText }));
+		ws.send(JSON.stringify({ type: "prompt", message, userInput: userText, route }));
 	}, [piReady]);
 
 	const handleSend = (text: string) => {
@@ -710,7 +727,7 @@ export default function App() {
 	return (
 		<div className="turk-app" style={!restored || modelChanging ? { pointerEvents: "none" } : undefined}>
 			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
-				<h1 title={statusText}>{isScheduled ? <AlarmClock className="turk-ico turk-ico-green turk-bot-tick" style={{ width: "1.3em", height: "1.3em" }} /> : <Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-bot-spin" : "")} />} AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
+				<h1 title={statusText}>{logoMode === "tool" ? <Settings className="turk-ico turk-ico-green turk-bot-spin-slow" style={{ width: "1.1em", height: "1.1em" }} /> : logoMode === "alarm" ? <AlarmClock className="turk-ico turk-ico-green turk-bot-tick" style={{ width: "1.3em", height: "1.3em" }} /> : <Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-bot-spin" : "")} />} AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" /></button>
 				<button className="turk-model-btn" onClick={() => {
@@ -741,8 +758,8 @@ export default function App() {
 			</header>
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
-				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${TURK_USER_KEY} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
-					{TURK_USER_KEY.slice(0, 8)}|{sessionId ? sessionId.slice(0, 8) : "—"}
+				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${TURK_USER_KEY} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "\"NeoDunggeunmo\", monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
+					{TURK_USER_KEY.slice(-6)}|{sessionId ? sessionId.slice(-6) : "—"}
 				</div>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
 				{canScrollUp && (
