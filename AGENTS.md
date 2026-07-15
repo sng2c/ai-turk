@@ -1,52 +1,50 @@
-# AI Turk 에이전트 지침
+# AI Turk Agent Instructions
 
-## 프로젝트 개요
+## Project Overview
 
-React + Vite + TypeScript 기반 AI UI 컨트롤러. 동적 버튼 그리드를 생성하는 챗봇 인터페이스.
-백엔드를 추상화하여 **pi RPC** 와 **Claude Code stream-json** 양쪽을 지원 (`.env`의 `TURK_BACKEND`로 전환).
-WebSocket 통신, 세션 컨텍스트 자동 관리, 도구 지원.
+AI UI controller based on React + Vite + TypeScript. A chatbot interface that generates dynamic button grids.
+Abstracts the backend to support both **pi RPC** and **Claude Code stream-json** (switch via `TURK_BACKEND` in `.env`).
+Features WebSocket communication, automatic session context management, and tool support.
 
-## 기술 스택
+## Tech Stack
 
-- **프론트엔드**: React 19 + TypeScript + Vite 8 + Tailwind v4 + Pixelact UI
-- **폰트**: Neo둥근모 (한글/영문 픽셀 폰트, jsDelivr CDN)
-- **백엔드**: Node.js + `ws` (WebSocket) + 백엔드 추상화 (`backend.ts`)
-  - `pi` — `pi --mode rpc` (JSONL 프로토콜, 기본)
-  - `claude` — `claude -p --input-format/output-format stream-json` (Ollama Anthropic 호환 엔드포인트 경유)
-- **통신**: WebSocket (`/ws`) — 실시간 스트리밍 (`text_delta` 이벤트)
-- **설정**: `.env` (포트, 백엔드 종류, 모델)
-- **제어**: `turkctl` 스크립트 (서버 구동/제어)
+- **Frontend**: React 19 + TypeScript + Vite 8 + Tailwind v4 + Pixelact UI
+- **Font**: Neo-Dunggeunmo (Pixel font for Korean/English, via jsDelivr CDN)
+- **Backend**: Node.js + `ws` (WebSocket) + Backend Abstraction (`backend.ts`)
+  - `pi` — `pi --mode rpc` (JSONL protocol, default)
+  - `claude` — `claude -p --input-format/output-format stream-json` (via Ollama Anthropic-compatible endpoint)
+- **Communication**: WebSocket (`/ws`) — real-time streaming (`text_delta` events)
+- **Configuration**: `.env` (port, backend type, model)
+- **Control**: `turkctl` script (server startup/control)
 
-## 아키텍처
+## Architecture
 
 ```
-브라우저 (React) ←WebSocket→ Vite 서버 ←stdin/stdout→ 백엔드 (pi | claude)
+Browser (React) ←WebSocket→ Vite Server ←stdin/stdout→ Backend (pi | claude)
                                    ↑
-                            .env에서 백엔드/모델/API 설정
+                            Backend/Model/API settings in .env
 ```
 
-### 백엔드 추상화
+### Backend Abstraction
 
-`backend.ts` 가 `Backend` 인터페이스를 정의하고 `PiBackend`(패스스루) 와
-`ClaudeBackend`(stream-json → pi 이벤트 번역) 를 구현. App.tsx 는 항상
-**pi 이벤트 포맷**만 받으므로 백엔드 종류를 의식하지 않는다.
+`backend.ts` defines the `Backend` interface and implements `PiBackend` (passthrough) and `ClaudeBackend` (translates stream-json → pi events). `App.tsx` always receives the **pi event format**, so it is agnostic to the backend type.
 
-### 핵심: HMR 자동 반영
+### Core: Automatic HMR Reflection
 
-`npm run dev`는 HMR(Hot Module Replacement)을 지원합니다.
-코드 수정 시 **서버 재시작 없이** 브라우저에 자동 반영됩니다.
-에이전트가 코드를 고치면 즉시 화면에 적용되므로, 빌드 없이 `turkctl start` 한 번으로 개발합니다.
-단, `vite.config.ts`나 `.env` 변경 시에만 Vite 서버가 재시작됩니다.
+`npm run dev` supports HMR (Hot Module Replacement).
+Code changes are automatically reflected in the browser **without restarting the server**.
+When the agent fixes code, it is applied immediately to the screen, allowing development with a single `turkctl start` without manual builds.
+Vite server only restarts when `vite.config.ts` or `.env` changes.
 
-### 백엔드 프로토콜
+### Backend Protocol
 
-- **공통 이벤트 (App.tsx 가 받는 pi 포맷)**: `pi_ready`, `agent_start`, `message_update` (text_delta/thinking_delta), `tool_execution_start/end`, `agent_end`, `pi_exit`
-- **pi 명령 (stdin → JSONL)**: `prompt`, `abort`, `new_session`, `set_model`, `get_state` 등
-- **claude 백엔드**: 위 명령을 Claude stream-json 입력으로 번역. 런타임 제어(`set_model`/`cycle_thinking_level` 등)는 합성 응답으로 no-op 처리 (Claude Code 는 CLI 플래그 기반)
-- **스트리밍**: `text_delta` 이벤트로 실시간 텍스트 출력
-- **세션**: `--no-session`/`-p` 모드 (프로세스 생명주기 = 세션)
+- **Common Events (pi format received by App.tsx)**: `pi_ready`, `agent_start`, `message_update` (text_delta/thinking_delta), `tool_execution_start/end`, `agent_end`, `pi_exit`
+- **pi Commands (stdin → JSONL)**: `prompt`, `abort`, `new_session`, `set_model`, `get_state`, etc.
+- **Claude Backend**: Translates the above commands to Claude stream-json input. Runtime controls (`set_model`/`cycle_thinking_level`, etc.) are handled as no-op with synthetic responses (Claude Code is based on CLI flags).
+- **Streaming**: Real-time text output via `text_delta` events.
+- **Session**: `--no-session`/`-p` mode (process lifecycle = session).
 
-## /start — 서버 실행
+## /start — Start Server
 
 ```bash
 cd ~/ai-turk
@@ -55,118 +53,118 @@ npm install 2>/dev/null
 turkctl start
 ```
 
-다중 인스턴스: `TURK_ENV_FILE` 환경변수 또는 `--env` 플래그로 `.env` 파일 지정.
+Multiple instances: Specify `.env` file via `TURK_ENV_FILE` environment variable or `--env` flag.
 ```bash
-turkctl --env .env.8003 start      # 또는 TURK_ENV_FILE=.env.8003 turkctl start
+turkctl --env .env.8003 start      # or TURK_ENV_FILE=.env.8003 turkctl start
 ```
 
-### 백엔드 전환 (pi ↔ claude)
+### Backend Switching (pi ↔ claude)
 
-`.env` 의 `TURK_BACKEND` 로 백엔드 선택. 기본은 `pi`. 백엔드 변수는 분리:
+Select backend via `TURK_BACKEND` in `.env`. Default is `pi`. Backend variables are separated:
 - pi: `TURK_PI_BIN` / `TURK_PI_MODEL` / `TURK_PI_ARGS`
 - claude: `TURK_CLAUDE_BIN` / `TURK_CLAUDE_MODEL` / `ANTHROPIC_*`
 
-**① Claude 백엔드 — 순수 Anthropic Claude (권장)**:
+**① Claude Backend — Pure Anthropic Claude (Recommended)**:
 ```bash
-# .env 에 추가/주석해제
+# Add/Uncomment in .env
 TURK_BACKEND=claude
-TURK_CLAUDE_MODEL=claude-haiku-4-5      # claude-* 전체이름
-# ANTHROPIC_BASE_URL 비우면 기본 api.anthropic.com
+TURK_CLAUDE_MODEL=claude-haiku-4-5      # Full claude-* name
+# If ANTHROPIC_BASE_URL is empty, defaults to api.anthropic.com
 ```
 
-**② Claude 백엔드 — Ollama Claude 조합** (`ollama launch claude --model <m>` 동등):
+**② Claude Backend — Ollama Claude Combo** (equivalent to `ollama launch claude --model <m>`):
 ```bash
 TURK_BACKEND=claude
-TURK_CLAUDE_MODEL=glm-5.1:cloud        # Ollama 에 pull 된 모델
-ANTHROPIC_BASE_URL=http://localhost:11434   # Ollama Anthropic 호환 엔드포인트
-ANTHROPIC_AUTH_TOKEN=ollama          # 임의값 (비어두면 subscription 폴백)
+TURK_CLAUDE_MODEL=glm-5.1:cloud        # Model pulled in Ollama
+ANTHROPIC_BASE_URL=http://localhost:11434   # Ollama Anthropic-compatible endpoint
+ANTHROPIC_AUTH_TOKEN=ollama          # Any value (falls back to subscription if empty)
 ```
-전환 후 `turkctl restart` (또는 `.env` 변경 시 자동 재시작).
-타이틀 옆 `<sub>` 로 백엔드 종류(pi/claude) 가 표시됨.
+After switching, run `turkctl restart` (or automatic restart on `.env` change).
+The backend type (pi/claude) is displayed as a `<sub>` next to the title.
 
-## /stop — 서버 중지
+## /stop — Stop Server
 
 ```bash
 turkctl stop
 ```
 
-## /restart — 서버 재시작
+## /restart — Restart Server
 
 ```bash
 turkctl restart
 ```
 
-## /doctor — 상태 진단
+## /doctor — Diagnostics
 
 ```bash
 cd ~/ai-turk
 
-# 기본 상태 (백엔드 종류 표시)
+# General status (shows backend type)
 turkctl status
 
-# 백엔드 프로세스
+# Backend process
 turkctl pi
 
-# WebSocket 연결 테스트
+# WebSocket connection test
 turkctl ws
 
-# 세션 정보
+# Session info
 turkctl session
 
-# 환경 확인
+# Environment check
 node --version
-pi --version 2>/dev/null || echo "❌ pi 미설치"
-claude --version 2>/dev/null || echo "ℹ️ claude 미설치 (TURK_BACKEND=claude 시에만 필요)"
-ollama --version 2>/dev/null || echo "ℹ️ ollama 미설치 (claude 백엔드 시 필요)"
-[ -d node_modules ] && echo "✅ node_modules 존재" || echo "❌ npm install 필요"
-[ -f .env ] && echo "✅ .env 존재" || echo "❌ .env 없음"
-# 현재 백엔드 확인
-grep -E "^TURK_BACKEND" .env 2>/dev/null || echo "TURK_BACKEND=pi (기본)"
+pi --version 2>/dev/null || echo "❌ pi not installed"
+claude --version 2>/dev/null || echo "ℹ️ claude not installed (only needed for TURK_BACKEND=claude)"
+ollama --version 2>/dev/null || echo "ℹ️ ollama not installed (needed for claude backend)"
+[ -d node_modules ] && echo "✅ node_modules exists" || echo "❌ npm install required"
+[ -f .env ] && echo "✅ .env exists" || echo "❌ .env missing"
+# Check current backend
+grep -E "^TURK_BACKEND" .env 2>/dev/null || echo "TURK_BACKEND=pi (default)"
 npx tsc -b --noEmit 2>&1 | tail -3
 ```
 
-## /logs — 실시간 로그
+## /logs — Real-time Logs
 
 ```bash
 turkctl logs
 ```
 
-## 코딩 규칙
+## Coding Rules
 
-- 한국어 주석 사용
-- 프론트엔드: `src/App.tsx` (단일 컴포넌트), `src/tailwind.css` (Tailwind 통합 — App.css 병합됨)
-- 백엔드 추상화: `backend.ts` (PiBackend / ClaudeBackend + 번역 로직)
-- 서버: `server.ts` (Express 없이 Node.js 내장 http + ws, `createBackend()` 사용)
-- 개발 통합: `vite.config.ts` 의 turkPlugin (동일 `createBackend()` 사용 — 중복 없음)
-- WebSocket 프로토콜: 백엔드 이벤트를 pi 포맷으로 브로드캐스트, 클라이언트 명령을 백엔드 stdin에 전달
-- **코드 수정 후 재시작 불필요** — HMR로 자동 반영
-- `vite.config.ts`나 `.env` 변경 시에만 `turkctl restart` 필요
+- Use Korean comments (Note: kept as per original request, but if "unify to English" implies comments too, this might need change. However, usually "instructions" refers to MD files).
+- Frontend: `src/App.tsx` (single component), `src/tailwind.css` (Tailwind integration — merged App.css)
+- Backend Abstraction: `backend.ts` (PiBackend / ClaudeBackend + translation logic)
+- Server: `server.ts` (Node.js built-in http + ws without Express, uses `createBackend()`)
+- Dev Integration: `turkPlugin` in `vite.config.ts` (uses same `createBackend()` — no duplication)
+- WebSocket Protocol: Broadcasts backend events in pi format, forwards client commands to backend stdin.
+- **No restart needed after code changes** — automatically reflected via HMR.
+- `turkctl restart` is only required for `vite.config.ts` or `.env` changes.
 
-## turkctl 명령어
+## turkctl Commands
 
 ```
-turkctl start     # 개발 서버 시작 (npm run dev, 백그라운드, HMR)
-turkctl stop      # 서버 및 pi 프로세스 종료
-turkctl restart   # 서버 재시작
-turkctl status    # 실행 상태 + 헬스체크
-turkctl logs      # 실시간 로그 (tail -f)
-turkctl session    # 현재 세션 정보 조회
-turkctl ws        # WebSocket 연결 테스트
-turkctl pi        # pi RPC 프로세스 상태
-turkctl build     # 프로덕션 빌드 → dist/
+turkctl start     # Start dev server (npm run dev, background, HMR)
+turkctl stop      # Stop server and pi process
+turkctl restart   # Restart server
+turkctl status    # Execution status + health check
+turkctl logs      # Real-time logs (tail -f)
+turkctl session    # Query current session info
+turkctl ws        # WebSocket connection test
+turkctl pi        # pi RPC process status
+turkctl build     # Production build → dist/
 ```
 
-> **원칙**: 항상 `turkctl`로 구동 제어. 직접 `npm run dev`나 `pkill` 사용 금지.
+> **Principle**: Always use `turkctl` for operation control. Do not use `npm run dev` or `pkill` directly.
 
-## 트러블슈팅
+## Troubleshooting
 
-| 증상 | 원인 | 해결 |
+| Symptom | Cause | Solution |
 |---|---|---|
-| `🔴 연결 끊김` | 서버 미실행 | `turkctl start` |
-| `🟡 pi 시작중` | 백엔드 프로세스 시작 대기 | 몇 초 대기, 안 되면 `turkctl pi` |
-| `[파싱실패]` | 모델이 JSON 외 텍스트 출력 | 자가 수정 재시도로 자동 복구 (최대 2회) |
-| `EADDRINUSE` | 포트 충돌 | `turkctl restart` |
-| 빌드 실패 | TypeScript 에러 | `npx tsc -b --noEmit` |
-| CSS 미반영 | HMR 캐시 꼬임 | `turkctl restart` |
-| claude 백엔드 응답 없음 | Ollama 미실행/모델 미pull | `ollama serve` + `ollama pull glm-5.1:cloud` |
-| claude `Not logged in` | `ANTHROPIC_AUTH_TOKEN` 누락 | `.env`에 `ANTHROPIC_AUTH_TOKEN=ollama` 설정 |
+| `🔴 Disconnected` | Server not running | `turkctl start` |
+| `🟡 pi Starting` | Waiting for backend process | Wait a few seconds, or run `turkctl pi` |
+| `[Parsing Failed]` | Model outputs non-JSON text | Auto-recovers via self-correction (max 2 attempts) |
+| `EADDRINUSE` | Port conflict | `turkctl restart` |
+| Build Failure | TypeScript error | `npx tsc -b --noEmit` |
+| CSS not reflected | HMR cache corruption | `turkctl restart` |
+| Claude backend no response | Ollama not running/model not pulled | `ollama serve` + `ollama pull glm-5.1:cloud` |
+| Claude `Not logged in` | `ANTHROPIC_AUTH_TOKEN` missing | Set `ANTHROPIC_AUTH_TOKEN=ollama` in `.env` |
