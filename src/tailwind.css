@@ -150,6 +150,10 @@ body {
 	animation: turk-bot-flip 2.6s ease-in-out infinite;
 }
 
+.turk-bot-spin-slow {
+	animation: turk-bot-spin 3s linear infinite;
+}
+
 .turk-bot-tick {
 	animation: turk-bot-tick 1.2s ease-in-out infinite;
 }
@@ -157,6 +161,11 @@ body {
 @keyframes turk-bot-tick {
 	0%, 100% { transform: scale(1); }
 	50% { transform: scale(0.8); }
+}
+
+@keyframes turk-bot-spin {
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
 }
 
 @keyframes turk-bot-flip {

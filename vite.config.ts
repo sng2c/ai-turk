@@ -42,9 +42,78 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		pushSubscription: any;
 		ws: Set<WebSocket>;
 		lastPrompt: string | null;
+		lastAssistantText: string | null; // 마지막 assistant 응답 (WS 끊김 시 재연결 복원용)
 		isStreaming: boolean;
 		lastActivity: number;
+		currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
 	}
+
+	// AGENTS.md 기본 템플릿 — 코딩 에이전트가 CWD에서 자동으로 읽음
+	const AGENTS_MD_TEMPLATE = (rows = 5, cols = 5) => {
+		const nb = rows * cols;
+		const ex = Array.from({ length: nb }, (_, i) => `"${i}": ""`).join(", ");
+		return `# AI-Turk UI Controller
+
+You are a UI controller. Your ENTIRE response must be a single JSON object — no prose, no markdown, no code fences, no explanation before or after.
+
+## Communication Targets
+- silent: true -> The response is delivered but NOT shown to the user (no screen update, no cache, no push). Use for repeating schedules where the condition is false (skip silently, try again next cycle). Schedules in the response are still processed.
+- silent: false (or omitted) -> Normal: cache + show to user. Use for one-time schedules where condition is false (user needs to know) or condition check failure (user needs to fix).
+
+[Grid]
+- ${rows} rows × ${cols} columns, ${nb} buttons. Keys "0"~"${nb - 1}".
+- Empty button: "". Group related functions in the same row.
+- Label: keep within 8 display-width units (Korean/fullwidth=2, ASCII=1). Emoji allowed.
+  Longer labels are accepted but auto-shrink (min 0.8em), so prefer concise ones.
+- Place primary buttons in the center.
+
+[Message]
+- Markdown supported: headings, lists, tables, code, links, bold/italic. Use it to structure content.
+- Display area fits ~10 plain lines; longer content scrolls — use scroll when detail helps, but prefer concise.
+- Tables and lists need a blank line before them (GFM rule).
+- Max 42 chars per line (Korean=2, English/digit=1).
+
+[Colors]
+- colors: button background — success(녹)/warning(주)/destructive(빨)/primary(진한 강조)/accent(강조)/secondary(기본)/muted(회)
+- textColors: text color — white/black. OMIT to auto-contrast by background.
+- Auto contrast: dark bg (secondary/muted/accent/destructive)→white; light bg (primary/success/warning)→black.
+- Hidden text: set textColors same as colors (label invisible, still clickable).
+
+[Examples]
+{"message":"What do you need?","buttons":{"0":"Weather","1":"Time","2":"News","3":"Help","4":""}}
+{"message":"Settings saved.","buttons":{"0":"OK","1":"Cancel","2":""},"colors":{"0":"success","1":"destructive"}}
+{"silent":true,"message":"","buttons":{},"schedules":[{"action":"add","id":"test","when":"1m","prompt":"Hello"}]}
+
+[Schedules]
+- Include a "schedules" array in your response to set/remove schedules.
+- Schedules are once by default (executed once, then auto-removed). To repeat, re-register with the same id in the execution response's schedules array (chaining).
+- Element forms:
+  {"action":"add","id":"manse","when":"1m","prompt":"Shout hurrah 🥳 grid"}
+  {"action":"remove","id":"manse"}
+  {"action":"clear"}
+  {"action":"list"}
+- when formats (LLM chooses):
+  - relative (from registration time): "1m"(in 1 min), "30m", "2h", "1d"
+  - absolute (next occurrence, 24h): "21:00"(HH:MM), "2026-07-12T21:00"(ISO, local if no offset)
+  - cron NOT supported — use relative/absolute + re-register for recurring (chaining enforced)
+- Same id add → overwrite (update)
+- Max 5 schedules, minimum interval 1 minute
+- Example: {"message":"I'll shout hurrah in 1 minute! 🥳","buttons":{"0":"cancel","1":"","2":""},"schedules":[{"action":"add","id":"manse","when":"1m","prompt":"Shout hurrah 🥳 grid"}]}
+- Conditional schedule: optional "condition" field to gate execution. Separate condition (when to run) from prompt (what to do).
+  - condition: the predicate to evaluate (true/false). e.g. "if it's raining"
+  - prompt: the instruction to run when the condition holds. e.g. "Remind to bring an umbrella grid"
+  - example: {"message":"Check if it's raining...","buttons":{},"schedules":[{"action":"add","id":"rain","when":"09:00","condition":"if it's raining","prompt":"Remind to bring an umbrella grid"}]}
+- On conditional trigger: evaluate the condition first — verify obvious facts (objective) via web_search etc. No guessing.
+  - clearly true: respond normally per the prompt instruction.
+  - clearly false + REPEATING schedule: return {"silent":true,"message":"","buttons":{}} — skip silently, try again next cycle.
+  - clearly false + ONE-TIME schedule: return {"silent":false,"message":"Condition not met: <reason>","buttons":{}} — user needs to know (no retry).
+  - check FAILED (tool error, cannot verify): return {"message":"Cannot verify condition: <reason>. Please fix the schedule.","buttons":{}} — user needs to fix.
+  - uncertain: respond normally telling the user the situation (prompt for clarification).
+
+[CRITICAL FORMAT]
+Respond with ONLY this JSON (fill values, do not include comments). First character must be "{" and last must be "}":
+{"message":"text","buttons":{${ex}},"colors":{},"textColors":{}}`;
+}
 
 	const sessions = new Map<string, Session>();
 
@@ -87,7 +156,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		let bodyText = text;
 		try {
 			const parsed = JSON.parse(text);
-			if (parsed && parsed.noResponse) return; // no-response 응답 — push 폐기
+			if (parsed && parsed.silent === true) return; // silent 응답 — push 폐기
 			if (parsed && typeof parsed.message === "string") bodyText = parsed.message;
 		} catch { /* JSON 아니면 text 그대로 */ }
 		const body = stripMarkdownServer(bodyText).slice(0, 50);
@@ -98,18 +167,32 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			.catch((err) => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 실패: ${err.message}`));
 	}
 
-	// backend.send 가로채서 lastPrompt 저장. fromScheduler 시 생략
-	function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { fromScheduler?: boolean }): void {
-		if (cmd.type === "prompt" && typeof cmd.message === "string" && !opts?.fromScheduler) {
+	// backend.send 가로채서 lastPrompt 저장 + route 추적
+	function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { route?: "user" | "scheduler" | "tool" }): void {
+		const route = (opts?.route ?? cmd.route ?? "user") as "user" | "scheduler" | "tool";
+		session.currentRoute = route;
+		if (cmd.type === "prompt" && typeof cmd.message === "string" && route !== "scheduler") {
 			session.lastPrompt = typeof cmd.userInput === "string" ? cmd.userInput : cmd.message;
 		}
-		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 전송: type=${cmd.type}${opts?.fromScheduler ? " (scheduler)" : ""}` + (cmd.type === "prompt" && typeof cmd.message === "string" ? ` msg=${cmd.message.slice(0, 200)}` : ""));
+		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 전송: type=${cmd.type}${route !== "user" ? ` (${route})` : ""}` + (cmd.type === "prompt" && typeof cmd.message === "string" ? ` msg=${cmd.message.slice(0, 200)}` : ""));
+		// prompt 전송 전에 합성 agent_start broadcast — 즉시 로고 전환 + dim
+		if (cmd.type === "prompt") {
+			session.isStreaming = true;
+			broadcast(session, { type: "agent_start", route });
+		}
 		session.backend?.send(cmd);
 	}
 
 	// ── 백엔드 시작 (세션별) ────────────────────────────────────────────────
 	function startBackend(session: Session): void {
-		try { mkdirSync(AGENT_CWD, { recursive: true }); } catch { /* 무시 */ }
+		try { 
+			mkdirSync(AGENT_CWD, { recursive: true }); 
+			const agentsMdPath = join(AGENT_CWD, "AGENTS.md");
+			if (!existsSync(agentsMdPath)) {
+				writeFileSync(agentsMdPath, AGENTS_MD_TEMPLATE(), "utf8");
+				console.log(`[Turk] AGENTS.md 생성됨: ${agentsMdPath}`);
+			}
+		} catch (e) { console.error(`[Turk] AGENTS.md 생성 실패: ${e}`); }
 		session.backend = createBackend({
 			cwd: AGENT_CWD,
 			userKey: session.agentSessionId ?? undefined, // 저장된 agentSessionId 있으면 지정(같은 세션 복원), 없으면 undefined(새 세션). claude는 무시
@@ -131,7 +214,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				}
 			}
 			if (ev.type === "pi_exit" || ev.type === "pi_error") session.backendReady = false;
-			if (ev.type === "agent_start") session.isStreaming = true;
+			if (ev.type === "agent_start") { session.isStreaming = true; return; } // pi 것 스킵 — 서버가 이미 합성 전송
 			if (ev.type === "agent_end") {
 				session.isStreaming = false;
 				session.lastPrompt = null;
@@ -141,10 +224,16 @@ function turkPlugin(env: Record<string, string>): Plugin {
 					if (Array.isArray(msgs)) console.log(`[${session.userKey.slice(0, 8)}] [agent_end] messages=${JSON.stringify(msgs).slice(0, 1000)}`);
 				}
 				session.scheduler.drainQueue();
+				const messages = (ev as any).messages;
+				if (Array.isArray(messages)) {
+					const _text = extractTextFromMessages(messages);
+					// silent 응답은 캐시하지 않음 — 재연결 시 복원 제외
+					try { const _p = JSON.parse(_text.match(/\{[\s\S]*\}/)?.[0] ?? _text); if (!(_p && _p.silent === true)) session.lastAssistantText = _text; } catch { session.lastAssistantText = _text; }
+				}
 				if (session.pushSubscription) sendPushNotification(session, ev);
 			}
 			if (ev.type === "response" && ev.command === "get_state") {
-				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming };
+				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute };
 			}
 			broadcast(session, ev);
 		});
@@ -198,7 +287,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			scheduler: new Scheduler({
 				onTrigger: (entries) => {
 					const msg = formatTriggerMessage(entries, new Date());
-					sendToBackend(session, { type: "prompt", message: msg }, { fromScheduler: true });
+					sendToBackend(session, { type: "prompt", message: msg }, { route: "scheduler" });
 					broadcast(session, { type: "scheduler_trigger", ids: entries.map((e) => e.id), whens: entries.map((e) => e.when) });
 				},
 				isBusy: () => session.isStreaming,
@@ -207,8 +296,10 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원
 			ws: new Set(),
 			lastPrompt: null,
+			lastAssistantText: null,
 			isStreaming: false,
 			lastActivity: Date.now(),
+			currentRoute: "user",
 		};
 		sessions.set(userKey, session);
 		startBackend(session);
@@ -247,7 +338,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		return createSession(userKey);
 	}
 
-	const customCommands = ["restart_pi", "schedule", "push_subscribe"];
+	const customCommands = ["restart_pi", "schedule", "push_subscribe", "get_last_assistant_text"];
 
 	return {
 		name: "turk-rpc",
@@ -295,7 +386,9 @@ function turkPlugin(env: Record<string, string>): Plugin {
 							if (msg.type === "restart_pi") {
 								if (session.backend) { session.backend.stop(); session.backend = null; }
 								session.backendReady = false;
-								session.agentSessionId = null; // 새 세션 — 클리어 → 백엔드 새 세션 → ready 후 get_state로 새 ID 갱신
+								session.agentSessionId = null;
+				session.lastAssistantText = null;
+				session.lastPrompt = null; // 새 세션 — 클리어 → 백엔드 새 세션 → ready 후 get_state로 새 ID 갱신
 								console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 								setTimeout(() => startBackend(session), 500);
 							} else if (msg.type === "schedule") {
@@ -310,6 +403,13 @@ function turkPlugin(env: Record<string, string>): Plugin {
 								session.pushSubscription = msg.subscription;
 								savePushSubscription(userKey, msg.subscription); // 영속화
 								if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신: ${msg.subscription?.endpoint?.slice(0, 60)}`);
+							} else if (msg.type === "get_last_assistant_text") {
+								broadcast(session, {
+									type: "response",
+									command: "get_last_assistant_text",
+									success: true,
+									data: { text: session.lastAssistantText ?? "" },
+								});
 							}
 						} else {
 							sendToBackend(session, msg);
