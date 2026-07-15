@@ -28,7 +28,7 @@ export default function App() {
 	const userSentRef = useRef(false); // 사용자 전송 → agent_end 시 입력창 클리어 (스케줄러 응답은 유지)
 	const [logoMode, setLogoMode] = useState<"robot" | "alarm" | "tool">("robot");
 	const baseLogoModeRef = useRef<"robot" | "alarm" | "tool">("robot"); // 톨 종료 후 복귀용
-	const restorePendingRef = useRef(0); // 복원 대기 응답 카운터 (get_state + get_last_assistant_text)
+
 	const [backendKind, setBackendKind] = useState<string>("pi");
 	const [sessionId, setSessionId] = useState("");
 	const [currentModel, setCurrentModel] = useState("");
@@ -167,11 +167,9 @@ export default function App() {
 				if (typeof msg.backend === "string") setBackendKind(msg.backend);
 				// 웹 푸시 구독: VAPID 공개키로 서비스 워커 등록 + 구독 → 서버 전송
 				if (typeof msg.vapidPublicKey === "string") subscribePush(msg.vapidPublicKey, wsRef.current);
-				// 상태 복원: get_state + get_last_assistant_text 응답 대기 — 복원 전까지 dim
-				restorePendingRef.current = 2;
+				// 상태 복원: get_state 응답 대기 — 복원 전까지 dim (last-assistant-text는 브라우저 localStorage)
 				setRestored(false);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
-				wsRef.current?.send(JSON.stringify({ type: "get_last_assistant_text" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				break;
 			case "pi_starting":
@@ -254,6 +252,8 @@ export default function App() {
 							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 							return;
 						}
+						// 브라우저 localStorage에 마지막 응답 저장 (sessionId 기준)
+						if (sessionId) localStorage.setItem("ai-turk:last-response:" + TURK_USER_KEY, JSON.stringify({ sessionId, text }));
 						// 화면 표시
 						if (Array.isArray(parsed.schedules)) {
 							const { schedules, ...stateWithoutSchedules } = parsed;
@@ -288,6 +288,8 @@ export default function App() {
 								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 								return;
 							}
+							// 브라우저 localStorage에 마지막 응답 저장 (sessionId 기준)
+							if (sessionId) localStorage.setItem("ai-turk:last-response:" + TURK_USER_KEY, JSON.stringify({ sessionId, text }));
 							if (Array.isArray(parsed.schedules)) {
 								const { schedules, ...stateWithoutSchedules } = parsed;
 								if (schedulerPrefixRef.current) {
@@ -358,23 +360,27 @@ export default function App() {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				}
-				if (msg.command === "get_last_assistant_text") {
-					if (msg.success && msg.data?.text) {
-						const result = parseTurkJSON(msg.data.text);
-						if (result && "parsed" in result) {
-							const parsed = result.parsed;
-							if (parsed.silent !== true) setState(parsed);
-						}
-						// 주의: 여기서 sessionInitRef를 true로 하지 않음.
-						// 기존 대화 복원 시에도 다음 사용자 프롬프트에 시스템 지시가
-						// 다시 붙도록 두어야 JSON 형식이 유지됨.
-					}
-					if (--restorePendingRef.current <= 0) setRestored(true);
-				}
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (pendingModelUpdateRef.current) { pendingModelUpdateRef.current = false; setModelChanging(false); } // 모델 변경 완료 — 지원 레벨/컨텍스트 갱신됨
-					if (msg.data.sessionId) setSessionId(msg.data.sessionId);
-					if (--restorePendingRef.current <= 0) setRestored(true); // 상태 복원 완료 → dim 해제
+					if (msg.data.sessionId) {
+						setSessionId(msg.data.sessionId);
+						// localStorage에서 마지막 응답 복원 — sessionId 일치 시만
+						try {
+							const saved = localStorage.getItem("ai-turk:last-response:" + TURK_USER_KEY);
+							if (saved) {
+									const { sessionId: sid, text } = JSON.parse(saved);
+								if (sid === msg.data.sessionId && text) {
+									const result = parseTurkJSON(text);
+									if (result && "parsed" in result && result.parsed.silent !== true) setState(result.parsed);
+								} else {
+									localStorage.removeItem("ai-turk:last-response:" + TURK_USER_KEY);
+								}
+							}
+						} catch {
+							localStorage.removeItem("ai-turk:last-response:" + TURK_USER_KEY);
+						}
+					}
+					setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
 					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null) : (m.reasoning ? ["off", "high"] : ["off"]); }
 					if (msg.data.thinkingLevel !== undefined) {
