@@ -758,8 +758,8 @@ export default function App() {
 			</header>
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
-				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${TURK_USER_KEY} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
-					{TURK_USER_KEY.slice(0, 8)}|{sessionId ? sessionId.slice(0, 8) : "—"}
+				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${TURK_USER_KEY} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "\"NeoDunggeunmo\", monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
+					{TURK_USER_KEY.slice(-6)}|{sessionId ? sessionId.slice(-6) : "—"}
 				</div>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
 				{canScrollUp && (

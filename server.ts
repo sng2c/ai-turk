@@ -38,7 +38,6 @@ try {
 // ── 설정 ────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.TURK_PORT || "3000");
 const HOST = process.env.TURK_HOST || "127.0.0.1";
-const AGENT_CWD = process.env.TURK_AGENT_CWD || join(__dirname, "workspace");
 const DIST_DIR = join(__dirname, "dist");
 const MAX_SESSIONS = parseInt(process.env.TURK_MAX_SESSIONS || "5");
 
@@ -151,16 +150,16 @@ const sessions = new Map<string, Session>();
 // ── 백엔드 시작 (세션별) ────────────────────────────────────────────────
 function startBackend(session: Session): void {
 	try { 
-		console.log(`[Turk] AGENT_CWD 확인: ${AGENT_CWD}`);
-		mkdirSync(AGENT_CWD, { recursive: true }); 
-		const agentsMdPath = join(AGENT_CWD, "AGENTS.md");
+		const agentCwd = join(envPaths("ai-turk").data, session.userKey, "workspace");
+		mkdirSync(agentCwd, { recursive: true }); 
+		const agentsMdPath = join(agentCwd, "AGENTS.md");
 		if (!existsSync(agentsMdPath)) {
 			writeFileSync(agentsMdPath, AGENTS_MD_TEMPLATE(), "utf8");
 			console.log(`[Turk] AGENTS.md 생성됨: ${agentsMdPath}`);
 		}
 	} catch (e) { console.error(`[Turk] AGENTS.md 생성 실패: ${e}`); }
 	session.backend = createBackend({
-		cwd: AGENT_CWD,
+		cwd: join(envPaths("ai-turk").data, session.userKey, "workspace"),
 		userKey: session.agentSessionId ?? undefined, // 저장된 agentSessionId 있으면 지정(같은 세션 복원), 없으면 undefined(새 세션). claude는 무시
 		onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
 	});
@@ -193,7 +192,7 @@ function startBackend(session: Session): void {
 			if (Array.isArray(messages)) {
 					const _text = extractTextFromMessages(messages);
 					// silent 응답은 캐시하지 않음 — 재연결 시 복원 제외
-					try { const _p = JSON.parse(_text.match(/\{[\s\S]*\}/)?.[0] ?? _text); if (!(_p && _p.silent === true)) session.lastAssistantText = _text; } catch { session.lastAssistantText = _text; }
+					try { const _p = JSON.parse(_text.match(/\{[\s\S]*\}/)?.[0] ?? _text); if (!(_p && _p.silent === true)) { session.lastAssistantText = _text; saveLastAssistantText(session.userKey, _text); } } catch { session.lastAssistantText = _text; saveLastAssistantText(session.userKey, _text); }
 				}
 			if (session.pushSubscription) sendPushNotification(session, ev);
 		}
@@ -284,6 +283,9 @@ function saveAgentSessionId(userKey: string, agentSessionId: string): void {
 		writeFileSync(configPath(userKey), agentSessionId); // 평문 UUID
 	} catch (err) { console.log(`[${userKey.slice(0, 8)}] [config] 저장 실패: ${err instanceof Error ? err.message : err}`); }
 }
+function lastAssistantTextPath(userKey: string): string {
+	return `${envPaths("ai-turk").data}/${userKey}/last-assistant-text`;
+}
 function pushPath(userKey: string): string {
 	return `${envPaths("ai-turk").data}/${userKey}/push.json`;
 }
@@ -293,6 +295,20 @@ function loadPushSubscription(userKey: string): any | null {
 		if (!existsSync(f)) return null;
 		return JSON.parse(readFileSync(f, "utf-8"));
 	} catch { return null; }
+}
+function loadLastAssistantText(userKey: string): string | null {
+	try {
+		const f = lastAssistantTextPath(userKey);
+		if (!existsSync(f)) return null;
+		return readFileSync(f, "utf-8");
+	} catch { return null; }
+}
+function saveLastAssistantText(userKey: string, text: string): void {
+	try {
+		const dir = `${envPaths("ai-turk").data}/${userKey}`;
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(lastAssistantTextPath(userKey), text);
+	} catch (err) { console.log(`[${userKey.slice(0, 8)}] [lastText] 저장 실패: ${err instanceof Error ? err.message : err}`); }
 }
 function savePushSubscription(userKey: string, sub: any): void {
 	try {
@@ -321,7 +337,7 @@ function createSession(userKey: string): Session {
 		}),
 		pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원 (재시작 후 재구독 불필요)
 		ws: new Set(),
-		lastAssistantText: null,
+		lastAssistantText: loadLastAssistantText(userKey),
 		lastPrompt: null,
 		isStreaming: false,
 		lastActivity: Date.now(),
@@ -433,7 +449,7 @@ wss.on("connection", (ws, req) => {
 					if (session.backend) { session.backend.stop(); session.backend = null; }
 					session.backendReady = false;
 					session.agentSessionId = null;
-				session.lastAssistantText = null;
+				session.lastAssistantText = null; saveLastAssistantText(userKey, "");
 				session.lastPrompt = null; // 새 세션 — 저장된 ID 클리어 → 백엔드 --no-session(새 세션) → ready 후 get_state로 새 ID 갱신
 					console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 					setTimeout(() => startBackend(session), 500);
