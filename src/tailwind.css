@@ -154,13 +154,37 @@ body {
 	animation: turk-bot-spin 3s linear infinite;
 }
 
+.turk-bot-gear {
+	animation: turk-bot-gear 3.6s linear infinite;
+}
+
+@keyframes turk-bot-gear {
+	0% { transform: rotate(0deg); }
+	8.33% { transform: rotate(60deg); }
+	16.67% { transform: rotate(60deg); }
+	25% { transform: rotate(120deg); }
+	33.33% { transform: rotate(120deg); }
+	41.67% { transform: rotate(180deg); }
+	50% { transform: rotate(180deg); }
+	58.33% { transform: rotate(240deg); }
+	66.67% { transform: rotate(240deg); }
+	75% { transform: rotate(300deg); }
+	83.33% { transform: rotate(300deg); }
+	91.67% { transform: rotate(360deg); }
+	100% { transform: rotate(360deg); }
+}
+
 .turk-bot-tick {
-	animation: turk-bot-tick 1.2s ease-in-out infinite;
+	animation: turk-bot-tick 1s linear infinite;
 }
 
 @keyframes turk-bot-tick {
-	0%, 100% { transform: scale(1); }
-	50% { transform: scale(0.8); }
+	0% { transform: rotate(0deg); }
+	10% { transform: rotate(10deg); }
+	40% { transform: rotate(10deg); }
+	50% { transform: rotate(-10deg); }
+	90% { transform: rotate(-10deg); }
+	100% { transform: rotate(0deg); }
 }
 
 @keyframes turk-bot-spin {
