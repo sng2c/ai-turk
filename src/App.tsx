@@ -108,6 +108,7 @@ export default function App() {
 	const prevStateRef = useRef<TurkState | null>(null);
 	const availableModels = useRef<any[]>([]);
 	const modelPage = useRef(0);
+	const recentModelsRef = useRef<string[]>([]); // 최근 선택 모델 (provider/name 최신순 최대 3개)
 	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 3; // 22 (나머지 3칸은 이전/다음/취소)
 	const reconnectDelay = useRef(1000);
 	const gridRef = useRef({ rows: DEFAULT_ROWS, cols: DEFAULT_COLS });
@@ -493,7 +494,15 @@ export default function App() {
 						const kb = `${b.provider}/${b.name || b.id}`;
 						return ka < kb ? -1 : ka > kb ? 1 : 0;
 					});
-					modelPage.current = 0;
+					// 최근 선택 모델 로드 (비동기)
+					kvGet("recentModels").then((s) => {
+						try { recentModelsRef.current = s ? JSON.parse(s) : []; } catch { recentModelsRef.current = []; }
+						renderModelGrid();
+					});
+					// 현재 모델이 위치한 페이지로 이동
+					const curIdx = availableModels.current.findIndex((m: any) =>
+						`${m.provider}/${m.name || m.id}` === currentModelRef.current);
+					modelPage.current = curIdx >= 0 ? Math.floor(curIdx / MODELS_PER_PAGE) : 0;
 					renderModelGrid();
 				}
 				break;
@@ -630,10 +639,15 @@ export default function App() {
 		const colors: Record<string, string> = {};
 		const textColors: Record<string, string> = {};
 		pageModels.forEach((m: any, i: number) => {
-			buttons[String(i)] = `${m.provider}/${m.name || m.id}`;
-			// 현재 모델은 배경 강조
-			if (`${m.provider}/${m.name || m.id}` === currentModelRef.current) {
+			const key = `${m.provider}/${m.name || m.id}`;
+			buttons[String(i)] = key;
+			// 현재 모델은 primary 강조, 최근 선택 모델은 secondary 강조
+			if (key === currentModelRef.current) {
 				colors[String(i)] = "primary";
+				textColors[String(i)] = "white";
+			} else if (recentModelsRef.current.includes(key)) {
+				colors[String(i)] = "secondary";
+				textColors[String(i)] = "white";
 			}
 		});
 		for (let i = pageModels.length; i < MODELS_PER_PAGE; i++) {
@@ -729,6 +743,10 @@ export default function App() {
 					provider: model.provider,
 					modelId: model.id,
 				}));
+				// 최근 선택 모델 목록 갱신 (최신순 최대 3개, 중복 제거)
+				const key = `${model.provider}/${model.name || model.id}`;
+				recentModelsRef.current = [key, ...recentModelsRef.current.filter(k => k !== key)].slice(0, 3);
+				kvSet("recentModels", JSON.stringify(recentModelsRef.current));
 				modelMode.current = false;
 				setState(prevStateRef.current ?? emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 				prevStateRef.current = null;
