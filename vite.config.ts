@@ -7,6 +7,7 @@ import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 // 진단 로그 토글: TURK_DEBUG=1
 const DEBUG = !!process.env.TURK_DEBUG;
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
+import { ensureAgentsMd } from "./src/lib/agents-md-server.ts";
 import envPaths from "env-paths";
 import webpush from "web-push";
 import removeMarkdown from "remove-markdown";
@@ -43,73 +44,6 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		lastActivity: number;
 		currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
 	}
-
-	// AGENTS.md 기본 템플릿 — 코딩 에이전트가 CWD에서 자동으로 읽음
-	const AGENTS_MD_TEMPLATE = (rows = 5, cols = 5) => {
-		const nb = rows * cols;
-		const ex = Array.from({ length: nb }, (_, i) => `"${i}": ""`).join(", ");
-		return `# AI-Turk UI Controller
-
-You are a UI controller. Your ENTIRE response must be a single JSON object — no prose, no markdown, no code fences, no explanation before or after.
-
-## Communication Targets
-- silent: true -> The response is delivered but NOT shown to the user (no screen update, no cache, no push). Use for repeating schedules where the condition is false (skip silently, try again next cycle). Schedules in the response are still processed.
-- silent: false (or omitted) -> Normal: cache + show to user. Use for one-time schedules where condition is false (user needs to know) or condition check failure (user needs to fix).
-
-[Grid]
-- ${rows} rows × ${cols} columns, ${nb} buttons. Keys "0"~"${nb - 1}".
-- Empty button: "". Group related functions in the same row.
-- Label: keep within 8 display-width units (Korean/fullwidth=2, ASCII=1). Emoji allowed.
-  Longer labels are accepted but auto-shrink (min 0.8em), so prefer concise ones.
-- Place primary buttons in the center.
-
-[Message]
-- Markdown supported: headings, lists, tables, code, links, bold/italic. Use it to structure content.
-- Display area fits ~10 plain lines; longer content scrolls — use scroll when detail helps, but prefer concise.
-- Tables and lists need a blank line before them (GFM rule).
-- Max 42 chars per line (Korean=2, English/digit=1).
-
-[Colors]
-- colors: button background — success(녹)/warning(주)/destructive(빨)/primary(진한 강조)/accent(강조)/secondary(기본)/muted(회)
-- textColors: text color — white/black. OMIT to auto-contrast by background.
-- Auto contrast: dark bg (secondary/muted/accent/destructive)→white; light bg (primary/success/warning)→black.
-- Hidden text: set textColors same as colors (label invisible, still clickable).
-
-[Examples]
-{"message":"What do you need?","buttons":{"0":"Weather","1":"Time","2":"News","3":"Help","4":""}}
-{"message":"Settings saved.","buttons":{"0":"OK","1":"Cancel","2":""},"colors":{"0":"success","1":"destructive"}}
-{"silent":true,"message":"","buttons":{},"schedules":[{"action":"add","id":"test","when":"1m","prompt":"Hello"}]}
-
-[Schedules]
-- Include a "schedules" array in your response to set/remove schedules.
-- Schedules are once by default (executed once, then auto-removed). To repeat, re-register with the same id in the execution response's schedules array (chaining).
-- Element forms:
-  {"action":"add","id":"manse","when":"1m","prompt":"Shout hurrah 🥳 grid"}
-  {"action":"remove","id":"manse"}
-  {"action":"clear"}
-  {"action":"list"}
-- when formats (LLM chooses):
-  - relative (from registration time): "1m"(in 1 min), "30m", "2h", "1d"
-  - absolute (next occurrence, 24h): "21:00"(HH:MM), "2026-07-12T21:00"(ISO, local if no offset)
-  - cron NOT supported — use relative/absolute + re-register for recurring (chaining enforced)
-- Same id add → overwrite (update)
-- Max 5 schedules, minimum interval 1 minute
-- Example: {"message":"I'll shout hurrah in 1 minute! 🥳","buttons":{"0":"cancel","1":"","2":""},"schedules":[{"action":"add","id":"manse","when":"1m","prompt":"Shout hurrah 🥳 grid"}]}
-- Conditional schedule: optional "condition" field to gate execution. Separate condition (when to run) from prompt (what to do).
-  - condition: the predicate to evaluate (true/false). e.g. "if it's raining"
-  - prompt: the instruction to run when the condition holds. e.g. "Remind to bring an umbrella grid"
-  - example: {"message":"Check if it's raining...","buttons":{},"schedules":[{"action":"add","id":"rain","when":"09:00","condition":"if it's raining","prompt":"Remind to bring an umbrella grid"}]}
-- On conditional trigger: evaluate the condition first — verify obvious facts (objective) via web_search etc. No guessing.
-  - clearly true: respond normally per the prompt instruction.
-  - clearly false + REPEATING schedule: return {"silent":true,"message":"","buttons":{}} — skip silently, try again next cycle.
-  - clearly false + ONE-TIME schedule: return {"silent":false,"message":"Condition not met: <reason>","buttons":{}} — user needs to know (no retry).
-  - check FAILED (tool error, cannot verify): return {"message":"Cannot verify condition: <reason>. Please fix the schedule.","buttons":{}} — user needs to fix.
-  - uncertain: respond normally telling the user the situation (prompt for clarification).
-
-[CRITICAL FORMAT]
-Respond with ONLY this JSON (fill values, do not include comments). First character must be "{" and last must be "}":
-{"message":"text","buttons":{${ex}},"colors":{},"textColors":{}}`;
-}
 
 	const sessions = new Map<string, Session>();
 
@@ -185,10 +119,7 @@ Respond with ONLY this JSON (fill values, do not include comments). First charac
 			const agentCwd = join(envPaths("ai-turk").data, session.userKey, "workspace");
 			mkdirSync(agentCwd, { recursive: true }); 
 			const agentsMdPath = join(agentCwd, "AGENTS.md");
-			if (!existsSync(agentsMdPath)) {
-				writeFileSync(agentsMdPath, AGENTS_MD_TEMPLATE(), "utf8");
-				console.log(`[Turk] AGENTS.md 생성됨: ${agentsMdPath}`);
-			}
+			ensureAgentsMd(agentsMdPath);
 		} catch (e) { console.error(`[Turk] AGENTS.md 생성 실패: ${e}`); }
 		session.backend = createBackend({
 			cwd: join(envPaths("ai-turk").data, session.userKey, "workspace"),

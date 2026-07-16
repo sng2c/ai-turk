@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings } from "lucide-react";
+import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
-	DEFAULT_COLS, DEFAULT_ROWS, TURK_USER_KEY,
+	TURK_USER_KEY,
 	emptyState, errState, extractAssistantText, parseTurkJSON,
-	subscribePush, systemPrompt, Md,
+	subscribePush, Md,
 } from "./lib/turk";
 import type { TurkState, ToolStatus } from "./lib/turk";
 import { kvSet, kvGet, kvDel } from "./lib/storage";
@@ -70,8 +71,6 @@ export default function App() {
 	const [kbHeight, setKbHeight] = useState(0);
 
 
-	// 세션 초기화 추적
-	const sessionInitRef = useRef(false);
 	// 스트리밍 텍스트 누적 (agent_end의 messages가 비었거나 잘렸을 때 fallback용)
 	const streamingTextRef = useRef("");
 	// 파싱 실패 시 자가 수정 재시도 카운터 (무한 루프 방지)
@@ -109,7 +108,7 @@ export default function App() {
 	const availableModels = useRef<any[]>([]);
 	const modelPage = useRef(0);
 	const recentModelsRef = useRef<string[]>([]); // 최근 선택 모델 (provider/name 최신순 최대 3개)
-	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 3; // 22 (나머지 3칸은 이전/다음/취소)
+	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 3; // 17 (나머지 3칸은 이전/다음/취소)
 	const reconnectDelay = useRef(1000);
 	const gridRef = useRef({ rows: DEFAULT_ROWS, cols: DEFAULT_COLS });
 	gridRef.current = { rows, cols };
@@ -337,13 +336,12 @@ export default function App() {
 						} else if (retryCountRef.current < MAX_PARSE_RETRIES) {
 							// 자가 수정 재시도: 원문 + JSON.parse 에러를 모델에게 돌려주며 형식 재요청
 							retryCountRef.current++;
-							sessionInitRef.current = false; // 시스템 프롬프트 재부착 트리거
 							schedulerFeedbackRef.current = null; // 피드백 캐시 클리어
 							setLoading(true);
 							const errInfo = (result && "error" in result) ? result.error
 								: (fallback && "error" in fallback) ? fallback.error : "";
 							const retry = `지난 응답이 올바른 JSON 형식이 아닙니다. JSON.parse 에러: ${errInfo}\n다음 원문을 참고하여, 동일한 내용으로 올바른 JSON 버튼 그리드 하나만 다시 출력하세요. 원문 외 설명/코드펜스 금지.\n\n[잘못된 응답]\n${text.slice(0, 800)}`;
-							sendPrompt(retry, "tool"); // sendPrompt가 sessionInitRef=false 확인 → systemPrompt 재부착
+							sendPrompt(retry, "tool"); // AGENTS.md는 백엔드 세션에 이미 로드됨 — 재부착 불필요
 						} else {
 							retryCountRef.current = 0;
 							schedulerPrefixRef.current = null; // prefix 클리어
@@ -437,12 +435,9 @@ export default function App() {
 						showSessionDetail.current = false;
 					}
 					// 새로고침 복원: 스트리밍 중이면 lastPrompt로 입력창 복원
+					// lastPrompt는 서버가 userInput(순수 사용자 입력)을 저장하므로 그대로 복원.
 					if (msg.data.isStreaming === true && msg.data.lastPrompt) {
-						// systemPrompt가 앞에 붙어있으면 제거 — userInput 분리 미반영 시에도 순수 사용자 입력만 복원
-						const { rows: r, cols: c } = gridRef.current;
-						const sp = systemPrompt(r, c);
-						const lp = msg.data.lastPrompt;
-						setInput(lp.startsWith(sp) ? lp.slice(sp.length).replace(/^\n+/, "") : lp);
+						setInput(msg.data.lastPrompt);
 					}
 				}
 				if (msg.command === "schedule") {
@@ -671,7 +666,6 @@ export default function App() {
 		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
 		userSentRef.current = true; // 사용자 전송 — agent_end 시 클리어
 
-		const { rows: r, cols: c } = gridRef.current;
 		let message = userText;
 
 		// 스케줄러 피드백(에러/목록)이 대기 중이면 프롬프트 앞에 주입
@@ -680,11 +674,17 @@ export default function App() {
 			schedulerFeedbackRef.current = null;
 		}
 
-		// 시스템 지시: 세션 최초 1회만 부착 (RPC 세션은 컨텍스트 유지, 매 턴 부착은 중복)
-		if (!modelMode.current && !sessionInitRef.current) {
-			message = `${systemPrompt(r, c)}\n\n${message}`;
-			sessionInitRef.current = true;
-		}
+		// 시스템 지시(그리드/프로토콜)는 AGENTS.md(워크스페이스 CWD에 자동생성)로 백엔드가 자동 읽음.
+		// 따라서 메시지에 systemPrompt를 부착하지 않는다 — 중복 제거 + 복원 회귀 방지.
+
+		// 현재 일시 주입 — LLM은 현재 시각을 모르며, 스케줄 when 계산 등에 필요. 매 턴마다 갱신.
+		const now = new Date();
+		const dt = new Intl.DateTimeFormat("ko-KR", {
+			timeZone: "Asia/Seoul",
+			year: "numeric", month: "long", day: "numeric", weekday: "long",
+			hour: "2-digit", minute: "2-digit", hour12: false,
+		}).format(now);
+		message = `[현재 일시: ${dt} KST]\n\n${message}`;
 
 		ws.send(JSON.stringify({ type: "prompt", message, userInput: userText, route }));
 	}, [piReady]);
@@ -702,9 +702,7 @@ export default function App() {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({ type: "restart_pi" }));
-				sessionInitRef.current = false;
 				setState(emptyState(gridRef.current.rows, gridRef.current.cols));
-				clearInput();
 			}
 			return;
 		}
@@ -805,7 +803,6 @@ export default function App() {
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {
 					ws.send(JSON.stringify({ type: "restart_pi" }));
-					sessionInitRef.current = false;
 					setState(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 				}
 			}} title={`컨텍스트 ${contextPct ?? "—"}% — 새 세션 시작`}>
