@@ -58,6 +58,26 @@ turkctl start
 | `pi` | `pi --mode rpc` | 로컬 pi CLI (기본) |
 | `claude` | `claude -p stream-json` | Anthropic Messages API 호환 엔드포인트 |
 
+#### 환경변수 전체 목록
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `TURK_PORT` | `3000` | 서버 포트 |
+| `TURK_HOST` | `127.0.0.1` | 바인딩 호스트 (외부 노출 시 `0.0.0.0`) |
+| `TURK_BACKEND` | `pi` | 백엔드 선택 (`pi` \| `claude`) |
+| `TURK_MAX_SESSIONS` | `5` | 최대 세션 수 |
+| `TURK_DEBUG` | (비활성) | 진단 로그 (`1` = 활성) |
+| `TURK_PI_BIN` | `pi` | pi CLI 바이너리 경로 |
+| `TURK_PI_MODEL` | (pi 기본) | pi 백엔드 모델 |
+| `TURK_PI_ARGS` | (없음) | pi 백엔드 추가 인자 |
+| `TURK_CLAUDE_BIN` | `claude` | Claude Code CLI 바이너리 경로 |
+| `TURK_CLAUDE_MODEL` | (필수) | Claude 백엔드 모델 (`claude-*` 또는 Ollama 모델) |
+| `ANTHROPIC_BASE_URL` | `http://localhost:11434` | Anthropic API 엔드포인트 (순수 Claude: `https://api.anthropic.com`) |
+| `ANTHROPIC_AUTH_TOKEN` | `ollama` | Anthropic 인증 토큰 (Ollama: 임의값, 순수 Claude: API 키) |
+| `TURK_ENV_FILE` | (없음) | 인스턴스별 .env 파일 경로 (`--env`과 동일) |
+
+> 전체 변수와 상세 설명은 [`.env.example`](.env.example) 참고.
+
 #### Claude Code 백엔드
 
 `TURK_BACKEND=claude`는 `ANTHROPIC_BASE_URL`이 가리키는 엔드포인트로 Anthropic Messages API 요청을 보냅니다. 두 구성을 지원합니다:
