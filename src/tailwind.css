@@ -147,7 +147,7 @@ body {
 }
 
 .turk-logo-bot-spin {
-	animation: turk-logo-flip 2.6s ease-in-out infinite;
+	animation: turk-logo-bot-flip 2.6s ease-in-out infinite;
 }
 
 .turk-logo-gear-spin {
@@ -170,7 +170,7 @@ body {
 	100% { transform: rotate(360deg); }
 }
 
-@keyframes turk-logo-flip {
+@keyframes turk-logo-bot-flip {
 	0% { transform: rotate(0deg); }
 	11.5% { transform: rotate(180deg); }
 	50% { transform: rotate(180deg); }
