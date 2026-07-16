@@ -249,8 +249,8 @@ function sendPushNotification(session: Session, ev: TurkEvent): void {
 		const parsed = JSON.parse(greedy?.[0] ?? text);
 		if (parsed && parsed.silent === true) return;
 	} catch { /* JSON 아니면 계속 */ }
-	// 전체 text 전송 → sw.js가 message 추출 및 표시
-	const payload = JSON.stringify({ body: text });
+	// 전체 text 전송 + sessionId → sw.js가 IndexedDB 저장에 사용
+	const payload = JSON.stringify({ body: text, sessionId: session.agentSessionId || "" });
 	webpush.sendNotification(session.pushSubscription, payload)
 		.then(() => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 성공`))
 		.catch((err) => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 실패: ${err.message}`));

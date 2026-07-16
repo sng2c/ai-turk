@@ -6,6 +6,7 @@ import {
 	subscribePush, systemPrompt, Md,
 } from "./lib/turk";
 import type { TurkState, ToolStatus } from "./lib/turk";
+import { kvSet, kvGet, kvDel } from "./lib/storage";
 
 // 모바일(터치) 감지 — 모바일에서는 자동 포커스로 가상 키보드 자동 노출 방지
 const IS_FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(hover: hover) and (pointer: fine)")?.matches === true;
@@ -16,8 +17,11 @@ export default function App() {
 	const cols = DEFAULT_COLS;
 	const [state, setState] = useState<TurkState>(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 	const [loading, setLoading] = useState(false);
-	const clearInput = () => { setInput(""); localStorage.removeItem("turk-input"); };
-	const [input, setInput] = useState(() => localStorage.getItem("turk-input") || "");
+	const clearInput = () => { setInput(""); sessionId && kvDel(`${sessionId}:input`); };
+	const [input, setInput] = useState(() => {
+		// 초기값은 빈 문자열 — 세션 ID 확보 후 kvGet으로 복원
+		return "";
+	});
 
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
@@ -252,8 +256,8 @@ export default function App() {
 							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 							return;
 						}
-						// 브라우저 localStorage에 마지막 응답 저장 (sessionId 기준)
-						if (sessionId) localStorage.setItem("ai-turk:last-response:" + TURK_USER_KEY, JSON.stringify({ sessionId, text }));
+						// IndexedDB에 마지막 응답 저장
+						if (sessionId) kvSet(`${sessionId}:last-response`, text);
 						// 화면 표시
 						if (Array.isArray(parsed.schedules)) {
 							const { schedules, ...stateWithoutSchedules } = parsed;
@@ -288,8 +292,8 @@ export default function App() {
 								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 								return;
 							}
-							// 브라우저 localStorage에 마지막 응답 저장 (sessionId 기준)
-							if (sessionId) localStorage.setItem("ai-turk:last-response:" + TURK_USER_KEY, JSON.stringify({ sessionId, text }));
+							// IndexedDB에 마지막 응답 저장
+							if (sessionId) kvSet(`${sessionId}:last-response`, text);
 							if (Array.isArray(parsed.schedules)) {
 								const { schedules, ...stateWithoutSchedules } = parsed;
 								if (schedulerPrefixRef.current) {
@@ -364,21 +368,22 @@ export default function App() {
 					if (pendingModelUpdateRef.current) { pendingModelUpdateRef.current = false; setModelChanging(false); } // 모델 변경 완료 — 지원 레벨/컨텍스트 갱신됨
 					if (msg.data.sessionId) {
 						setSessionId(msg.data.sessionId);
-						// localStorage에서 마지막 응답 복원 — sessionId 일치 시만
-						try {
-							const saved = localStorage.getItem("ai-turk:last-response:" + TURK_USER_KEY);
-							if (saved) {
-									const { sessionId: sid, text } = JSON.parse(saved);
-								if (sid === msg.data.sessionId && text) {
-									const result = parseTurkJSON(text);
+						// IndexedDB에서 마지막 응답 + 입력 복원
+						(async () => {
+							try {
+								const [saved, savedInput] = await Promise.all([
+									kvGet(`${msg.data.sessionId}:last-response`),
+									kvGet(`${msg.data.sessionId}:input`),
+								]);
+								if (saved) {
+									const result = parseTurkJSON(saved);
 									if (result && "parsed" in result && result.parsed.silent !== true) setState(result.parsed);
-								} else {
-									localStorage.removeItem("ai-turk:last-response:" + TURK_USER_KEY);
 								}
+								if (savedInput) setInput(savedInput);
+							} catch {
+								await kvDel(`${msg.data.sessionId}:last-response`);
 							}
-						} catch {
-							localStorage.removeItem("ai-turk:last-response:" + TURK_USER_KEY);
-						}
+						})();
 					}
 					setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
@@ -829,7 +834,7 @@ export default function App() {
 					enterKeyHint="send"
 					inputMode="text"
 					value={input}
-					onChange={(e) => { setInput(e.target.value); localStorage.setItem("turk-input", e.target.value); }}
+					onChange={(e) => { setInput(e.target.value); sessionId && kvSet(`${sessionId}:input`, e.target.value); }}
 					placeholder={piReady ? "명령어 입력..." : "세션 초기화 중..."}
 					disabled={loading || !piReady}
 					autoFocus={false}
