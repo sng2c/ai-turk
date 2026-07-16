@@ -811,8 +811,9 @@ export default function App() {
 							style={modelMode.current ? (() => {
 								// 모델 선택 화면: 모델명이 길면 폰트 자동 축소 (기준 8칸, 최소 0.8em)
 								const w = [...label].reduce((a, c) => a + (/[^\x00-\x7F]/.test(c) ? 2 : 1), 0);
-								if (w <= 8) return undefined;
-								return { fontSize: `max(0.7em, ${(8 / w).toFixed(3)}em)` };
+								const delay = `${Math.floor(Number(idx) / cols) * 60}ms`;
+								if (w <= 8) return { animationDelay: delay };
+								return { fontSize: `max(0.7em, ${(8 / w).toFixed(3)}em)`, animationDelay: delay };
 							})() : { animationDelay: `${Math.floor(Number(idx) / cols) * 60}ms` }}
 						>
 							{label}
