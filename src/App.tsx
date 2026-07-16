@@ -15,7 +15,7 @@ const IS_FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(h
 export default function App() {
 	const rows = DEFAULT_ROWS;
 	const cols = DEFAULT_COLS;
-	const [state, setState] = useState<TurkState>(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
+	const [state, setState] = useState<TurkState>({ message: "", buttons: Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""])) });
 	const [loading, setLoading] = useState(false);
 	const clearInput = () => { setInput(""); sessionId && kvDel(`${sessionId}:input`); };
 	const [input, setInput] = useState(() => {
@@ -378,6 +378,8 @@ export default function App() {
 								if (saved) {
 									const result = parseTurkJSON(saved);
 									if (result && "parsed" in result && result.parsed.silent !== true) setState(result.parsed);
+								} else {
+									setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 								}
 								if (savedInput) setInput(savedInput);
 							} catch {
