@@ -15,10 +15,15 @@ const IS_FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(h
 export default function App() {
 	const rows = DEFAULT_ROWS;
 	const cols = DEFAULT_COLS;
-	const [state, _setState] = useState<TurkState>({ message: "", buttons: Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""])) });
+	const [state, setRawState] = useState<TurkState>({ message: "", buttons: Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""])) });
 	const gridVerRef = useRef(0);
+	const msgVerRef = useRef(0);
 	const setState = useCallback((next: TurkState | ((prev: TurkState) => TurkState)) => {
-		_setState(next);
+		setRawState((prev: TurkState) => {
+			const newState = typeof next === "function" ? next(prev) : next;
+			if (newState.message !== prev.message) msgVerRef.current = msgVerRef.current ? 0 : 1;
+			return newState;
+		});
 		gridVerRef.current = gridVerRef.current ? 0 : 1;
 	}, []);
 	const [loading, setLoading] = useState(false);
@@ -788,7 +793,7 @@ export default function App() {
 				)}
 				<div
 					ref={messageRef}
-					key={state.message.slice(0, 32)}
+					key={msgVerRef.current}
 					className={`turk-message${loading ? " turk-message-loading" : ""}`}
 					onScroll={updateScrollArrows}
 				>
