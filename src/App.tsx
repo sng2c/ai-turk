@@ -129,6 +129,8 @@ export default function App() {
 			setConnected(false);
 			setPiReady(false);
 			if (shouldReconnect.current) {
+				// 백그라운드에서는 재연결 시도 중단 — 포그라운드 복귀 시 visibilitychange가 재연결
+				if (document.hidden) return;
 				console.debug(`[WS] 종료 code=${ev.code} — ${reconnectDelay.current}ms 후 재연결`);
 				reconnectTimer.current = setTimeout(connect, reconnectDelay.current);
 				reconnectDelay.current = Math.min(reconnectDelay.current * 2, 10000);
@@ -154,6 +156,19 @@ export default function App() {
 			clearTimeout(reconnectTimer.current);
 			wsRef.current?.close();
 		};
+	}, [connect]);
+
+	// 백그라운드 중단 → 포그라운드 복귀 시 WS 재연결 (즉시)
+	useEffect(() => {
+		const onVisible = () => {
+			if (document.hidden) return;
+			if (wsRef.current?.readyState === WebSocket.OPEN) return;
+			clearTimeout(reconnectTimer.current);
+			reconnectDelay.current = 1000;
+			connect();
+		};
+		document.addEventListener("visibilitychange", onVisible);
+		return () => document.removeEventListener("visibilitychange", onVisible);
 	}, [connect]);
 
 	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
