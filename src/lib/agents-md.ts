@@ -2,8 +2,8 @@
 // Node(서버)·브라우저 양쪽에서 안전하게 import 가능 (node:fs, react-markdown 무의존).
 // 이 파일이 유일한 진원 — server.ts·vite.config.ts·src/App.tsx 모두 여기를 참조한다.
 
-export const DEFAULT_ROWS = 5;
-export const DEFAULT_COLS = 4;
+export const DEFAULT_ROWS = 4;
+export const DEFAULT_COLS = 3;
 
 // 자동생성 판별용 마커/헤더 — ensureAgentsMd(서버 측)가 마이그레이션 여부를 결정할 때 사용.
 export const AGENTS_MD_AUTOGEN_MARKER = "<!-- ai-turk:autogen";
