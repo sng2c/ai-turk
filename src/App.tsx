@@ -494,16 +494,15 @@ export default function App() {
 						const kb = `${b.provider}/${b.name || b.id}`;
 						return ka < kb ? -1 : ka > kb ? 1 : 0;
 					});
-					// 최근 선택 모델 로드 (비동기)
+					// 최근 선택 모델 로드 후 렌더 (비동기)
 					kvGet("recentModels").then((s) => {
 						try { recentModelsRef.current = s ? JSON.parse(s) : []; } catch { recentModelsRef.current = []; }
+						// 현재 모델이 위치한 페이지로 이동
+						const curIdx = availableModels.current.findIndex((m: any) =>
+							`${m.provider}/${m.name || m.id}` === currentModelRef.current);
+						modelPage.current = curIdx >= 0 ? Math.floor(curIdx / MODELS_PER_PAGE) : 0;
 						renderModelGrid();
 					});
-					// 현재 모델이 위치한 페이지로 이동
-					const curIdx = availableModels.current.findIndex((m: any) =>
-						`${m.provider}/${m.name || m.id}` === currentModelRef.current);
-					modelPage.current = curIdx >= 0 ? Math.floor(curIdx / MODELS_PER_PAGE) : 0;
-					renderModelGrid();
 				}
 				break;
 
@@ -643,11 +642,11 @@ export default function App() {
 			buttons[String(i)] = key;
 			// 현재 모델은 primary 강조, 최근 선택 모델은 secondary 강조
 			if (key === currentModelRef.current) {
-				colors[String(i)] = "primary";
-				textColors[String(i)] = "white";
+				colors[String(i)] = "success";
+				textColors[String(i)] = "black";
 			} else if (recentModelsRef.current.includes(key)) {
-				colors[String(i)] = "secondary";
-				textColors[String(i)] = "white";
+				colors[String(i)] = "primary";
+				textColors[String(i)] = "black";
 			}
 		});
 		for (let i = pageModels.length; i < MODELS_PER_PAGE; i++) {
@@ -660,7 +659,10 @@ export default function App() {
 		colors[String(MODELS_PER_PAGE + 2)] = "destructive";
 		textColors[String(MODELS_PER_PAGE + 2)] = "white";
 		modelMode.current = true;
-		setState({ message: `현재 모델: ${currentModelRef.current || "—"}\n페이지 ${page + 1}/${totalPages} — 모델을 선택하세요.`, buttons, colors, textColors });
+		const recent = recentModelsRef.current.length > 0
+			? `\n\n**최근 선택**\n${recentModelsRef.current.map((m, i) => `${i + 1}. \`${m}\``).join("\n")}`
+			: "";
+		setState({ message: `## 모델 선택\n\n**현재 모델:** \`${currentModelRef.current || "—"}\`\n\n페이지 ${page + 1}/${totalPages} — 모델을 선택하세요.${recent}`, buttons, colors, textColors });
 	};
 
 	// ── 프롬프트 전송 ───────────────────────────────────────────────────
