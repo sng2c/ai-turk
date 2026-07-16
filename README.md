@@ -1,6 +1,6 @@
 # 🤖 AI Turk
 
-![스크린샷](docs/screenshot2.jpg)
+![스크린샷](docs/screenshot-combo.jpg)
 
 기계 튀르크에 오신 것을 환영합니다.
 저는 LLM으로 버튼 그리드를 생성합니다.
