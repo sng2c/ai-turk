@@ -147,14 +147,14 @@ body {
 }
 
 .turk-logo-bot-spin {
-	animation: turk-logo-bot-spin 2.6s ease-in-out infinite;
+	animation: anim-turk-logo-bot-spin 2.6s ease-in-out infinite;
 }
 
 .turk-logo-gear-spin {
-	animation: turk-logo-gear-spin 3.6s linear infinite;
+	animation: anim-turk-logo-gear-spin 3.6s linear infinite;
 }
 
-@keyframes turk-logo-gear-spin {
+@keyframes anim-turk-logo-gear-spin {
 	0% { transform: rotate(0deg); }
 	8.33% { transform: rotate(60deg); }
 	16.67% { transform: rotate(60deg); }
@@ -170,7 +170,7 @@ body {
 	100% { transform: rotate(360deg); }
 }
 
-@keyframes turk-logo-bot-spin {
+@keyframes anim-turk-logo-bot-spin {
 	0% { transform: rotate(0deg); }
 	11.5% { transform: rotate(180deg); }
 	50% { transform: rotate(180deg); }
