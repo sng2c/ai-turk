@@ -15,7 +15,12 @@ const IS_FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(h
 export default function App() {
 	const rows = DEFAULT_ROWS;
 	const cols = DEFAULT_COLS;
-	const [state, setState] = useState<TurkState>({ message: "", buttons: Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""])) });
+	const [state, _setState] = useState<TurkState>({ message: "", buttons: Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""])) });
+	const gridVerRef = useRef(0);
+	const setState = useCallback((next: TurkState | ((prev: TurkState) => TurkState)) => {
+		_setState(next);
+		gridVerRef.current = gridVerRef.current ? 0 : 1;
+	}, []);
 	const [loading, setLoading] = useState(false);
 	const clearInput = () => { setInput(""); sessionId && kvDel(`${sessionId}:input`); };
 	const [input, setInput] = useState(() => {
@@ -783,6 +788,7 @@ export default function App() {
 				)}
 				<div
 					ref={messageRef}
+					key={state.message.slice(0, 32)}
 					className={`turk-message${loading ? " turk-message-loading" : ""}`}
 					onScroll={updateScrollArrows}
 				>
@@ -798,7 +804,7 @@ export default function App() {
 				{gridRows.flat().map(([idx, label]) =>
 					label ? (
 						<button
-							key={idx}
+							key={`${idx}:${gridVerRef.current}`}
 							className={`turk-grid-btn${state.colors?.[idx] ? ` turk-bg-${state.colors[idx]}` : ""}${state.textColors?.[idx] ? ` turk-fg-${state.textColors[idx]}` : state.colors?.[idx] ? ` turk-fg-${["secondary", "muted", "accent", "destructive"].includes(state.colors[idx]) ? "white" : "black"}` : ""}`}
 							disabled={loading || !piReady}
 							onClick={() => handleSend(label)}
@@ -807,12 +813,12 @@ export default function App() {
 								const w = [...label].reduce((a, c) => a + (/[^\x00-\x7F]/.test(c) ? 2 : 1), 0);
 								if (w <= 8) return undefined;
 								return { fontSize: `max(0.7em, ${(8 / w).toFixed(3)}em)` };
-							})() : undefined}
+							})() : { animationDelay: `${Math.floor(Number(idx) / cols) * 60}ms` }}
 						>
 							{label}
 						</button>
 					) : (
-						<button key={idx} className="turk-grid-btn turk-grid-btn-empty" tabIndex={-1} aria-hidden="true" />
+						<button key={`${idx}:e:${gridVerRef.current}`} className="turk-grid-btn turk-grid-btn-empty" tabIndex={-1} aria-hidden="true" style={{ animationDelay: `${Math.floor(Number(idx) / cols) * 60}ms` }} />
 					)
 				)}
 			</div>
