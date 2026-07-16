@@ -332,7 +332,23 @@ body {
 	min-height: 0;
 }
 
+@keyframes turk-msg-pop {
+	0% {
+		opacity: 0;
+		transform: scale(0.95);
+	}
+	60% {
+		opacity: 1;
+		transform: scale(1.02);
+	}
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
 .turk-message {
+	animation: turk-msg-pop 0.25s ease-out backwards;
 	border-radius: var(--radius-md);
 	background: var(--card);
 	border: 0.143rem solid var(--foreground);
@@ -424,7 +440,7 @@ body {
 	position: absolute;
 	inset: 0;
 	background: var(--background);
-	opacity: 0.55; /* 더 어둡게 */
+	opacity: 0.3; /* 밝게 */
 	pointer-events: none;
 	z-index: 40;
 	transition: opacity 0.2s;
@@ -520,6 +536,42 @@ body {
 	align-content: start; /* 위 정렬, 아래 여백 */
 }
 
+@keyframes turk-btn-enter {
+	0% {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+	70% {
+		opacity: 1;
+		transform: scale(1.08);
+	}
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+@keyframes turk-btn-enter-empty {
+	0% {
+		transform: scale(0.6);
+	}
+	70% {
+		transform: scale(1.08);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+
+@keyframes turk-btn-click {
+	0% {
+		transform: scale(1.12);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+
 .turk-grid-btn {
 	border-radius: var(--radius-md);
 	display: flex;
@@ -547,14 +599,15 @@ body {
 	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
 	text-align: center;
+	animation: turk-btn-enter 0.25s ease-out backwards;
 }
 
 .turk-grid-btn:hover:not(:disabled) {
 	background: var(--accent);
 }
 
-.turk-grid-btn:active:not(:disabled) {
-	transform: translateY(0.214rem);
+.turk-grid-btn:active {
+	animation: turk-btn-click 0.15s ease-out;
 }
 
 .turk-grid-btn:disabled {
@@ -562,10 +615,9 @@ body {
 }
 
 .turk-grid-btn.turk-grid-btn-empty {
-	opacity: 0.15;
+	opacity: 0.3;
 	cursor: default;
-	background: var(--muted);
-	pointer-events: none;
+	animation-name: turk-btn-enter-empty;
 }
 
 /* 버튼 배경색 */
