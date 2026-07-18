@@ -67,7 +67,7 @@ self.addEventListener("push", (event) => {
 				// 보이는(visible) 클라이언트가 있으면 포그라운드 — 알림 안 뜸
 				const visible = clientList.some((c) => c.visibilityState === "visible");
 				if (visible) return;
-				return self.registration.showNotification("AI-Turk", { body: notificationBody, icon: "/favicon.svg", tag: "ai-turk", renotify: true });
+				return self.registration.showNotification("AI-Turk", { body: notificationBody, icon: "/push-icon.png", badge: "/push-badge.png", tag: "ai-turk", renotify: true });
 			}),
 		])
 	);
