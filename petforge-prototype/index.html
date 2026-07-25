@@ -130,6 +130,22 @@
     .pass-progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); width: 0%; transition: width .3s; }
     .tier-btn { background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 6px 10px; border-radius: 8px; font-size: 11px; cursor: pointer; }
     .tier-btn.active { background: var(--accent); color: #0a0808; }
+    .relic-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; cursor: pointer; padding: 8px; border-radius: 10px; transition: background .2s; }
+    .relic-row:hover { background: #1e1916; }
+    .relic-row.equipped { border: 1px solid var(--accent); background: #1c1706; }
+    .relic-icon { width: 40px; height: 40px; border-radius: 10px; background: #0e0b09; display: flex; align-items: center; justify-content: center; font-size: 20px; border: 1px solid #403830; }
+    .relic-info { flex: 1; }
+    .relic-name { font-size: 13px; font-weight: 700; }
+    .relic-desc { font-size: 11px; color: var(--dim); }
+    .relic-slot { display: flex; gap: 8px; justify-content: center; margin: 12px 0; }
+    .slot-box {
+      width: 64px; height: 64px; border-radius: 12px; background: #0e0b09;
+      border: 2px dashed #403830; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-size: 11px; color: var(--dim);
+    }
+    .slot-box.filled { border: 2px solid var(--accent); background: #1c1706; color: var(--text); }
+    .slot-box .emoji { font-size: 24px; }
+    .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 240px; overflow-y: auto; padding-right: 4px; }
   </style>
 </head>
 <body>
@@ -172,6 +188,18 @@
 
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h2 style="margin:0; font-size:18px;">🔮 유물 슬롯</h2>
+      <span style="font-size:11px; color:var(--dim);">보스 처치/행성 점령 획득</span>
+    </div>
+    <div class="relic-slot" id="relicSlots">
+      <div class="slot-box" id="rSlot0" onclick="openRelicModal(0)">+<br>슬롯1</div>
+      <div class="slot-box" id="rSlot1" onclick="openRelicModal(1)">+<br>슬롯2</div>
+      <div class="slot-box" id="rSlot2" onclick="openRelicModal(2)">+<br>슬롯3</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
       <h2 style="margin:0; font-size:18px;">🎫 배틀패스</h2>
       <div>
         <button class="tier-btn active" id="freeTab" onclick="switchPass('free')">무료</button>
@@ -196,6 +224,14 @@
       </div>
       <div id="rouletteResult">...</div>
       <button class="btn close-btn" onclick="closeRoulette()">확인</button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="relicModal">
+    <div class="modal">
+      <h2 id="relicModalTitle">🔮 유물 장착</h2>
+      <div class="modal-grid" id="relicList"></div>
+      <button class="btn close-btn" onclick="closeRelicModal()">닫기</button>
     </div>
   </div>
 

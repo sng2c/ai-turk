@@ -1,4 +1,4 @@
-// PetForge Proto - Quick Battle & Battle Pass
+// PetForge Proto - Quick Battle, Battle Pass & Relics
 
 const PETS = [
   { id: 0, name: '루미나', element: '빛', icon: '✦', galaxyId: 0, atk: 35, hp: 120, color: '#f8e060' },
@@ -12,6 +12,17 @@ const ROULETTE_ITEMS = [
   { icon: '🧪', label: '돌연변이', type: 'potion' },
   { icon: '⬆️', label: 'EXP부스트', type: 'exp' },
   { icon: '💎', label: '스킬재료', type: 'material' },
+];
+
+const RELICS = [
+  { id: 'light_shard', icon: '✨', name: '빛의 잔해', desc: '빛 속성 스킬 쿨다운 -1턴', bonus: { type: 'element_cdr', value: 1, element: '빛' } },
+  { id: 'magma_heart', icon: '🔥', name: '용암 심장', desc: '화상 데미지 +50%', bonus: { type: 'dot_amp', value: 1.5, status: 'burn' } },
+  { id: 'time_fragment', icon: '⏳', name: '시공 조각', desc: '첫 턴 선공 보장', bonus: { type: 'first_strike', value: true } },
+  { id: 'lucky_star', icon: '🌟', name: '행운의 별', desc: '크리티컬 확률 +15%', bonus: { type: 'crit_rate', value: 15 } },
+  { id: 'abyss_lantern', icon: '🔵', name: '심해 등불', desc: '어둠 속성 적에게 데미지 +20%', bonus: { type: 'vs_element', value: 1.2, element: '어둠' } },
+  { id: 'titan_seed', icon: '🌰', name: '타이탄 씨앗', desc: 'DEF +20%', bonus: { type: 'def_pct', value: 20 } },
+  { id: 'prism_lens', icon: '🔮', name: '프리즘 렌즈', desc: '궁극기 게이지 시작 +25', bonus: { type: 'ult_start', value: 25 } },
+  { id: 'galactic_orb', icon: '🌌', name: '은하 구슬', desc: '성운 시너지 효과 +50%', bonus: { type: 'synergy_amp', value: 1.5 } },
 ];
 
 const PASS_REWARDS = [
@@ -40,11 +51,15 @@ let state = {
   passTier: 'free',
   passClaimed: new Set(),
   passTickets: 0,
+  relics: [...RELICS], // owned
+  equippedRelics: [null, null, null], // slot 0..2
+  selectedRelicSlot: null,
 };
 
 function init() {
   buildDeck();
   renderDeck();
+  renderRelicSlots();
   renderPass();
   updateUI();
 }
@@ -78,6 +93,27 @@ function calcSynergy(deck) {
   return { count: best[1], galaxyId: parseInt(best[0]) };
 }
 
+function getRelicBonus(type, params = {}) {
+  let total = 0;
+  let multi = 1;
+  let flag = false;
+  state.equippedRelics.forEach(r => {
+    if (!r) return;
+    const b = r.bonus;
+    if (b.type === type) {
+      if (type === 'synergy_amp') multi *= b.value;
+      else if (type === 'first_strike') flag = true;
+      else if (type === 'crit_rate') total += b.value;
+      else if (type === 'def_pct') total += b.value;
+      else if (type === 'ult_start') total += b.value;
+      else if (type === 'dot_amp' && b.status === params.status) multi *= b.value;
+      else if (type === 'element_cdr' && b.element === params.element) total += b.value;
+      else if (type === 'vs_element' && b.element === params.element) multi *= b.value;
+    }
+  });
+  return { total, multi, flag };
+}
+
 function updateUI() {
   document.getElementById('gold').textContent = state.gold.toLocaleString() + 'G';
   document.getElementById('streak').textContent = state.streak;
@@ -109,13 +145,23 @@ function startQuickBattle() {
   btn.textContent = '전투 중...';
 
   const synergy = calcSynergy(state.deck);
-  const synergyBonus = synergy.count >= 3 ? 1.3 : synergy.count >= 2 ? 1.15 : 1.0;
+  let synergyBonus = synergy.count >= 3 ? 1.3 : synergy.count >= 2 ? 1.15 : 1.0;
+  const synAmp = getRelicBonus('synergy_amp');
+  synergyBonus = 1 + (synergyBonus - 1) * synAmp.multi;
 
-  const myPower = state.deck.reduce((sum, p) => sum + p.atk, 0) * synergyBonus;
+  const critRate = getRelicBonus('crit_rate').total;
+  const crit = Math.random() * 100 < critRate + 5; // base 5% crit
+
+  let myPower = state.deck.reduce((sum, p) => sum + p.atk, 0) * synergyBonus;
+  if (crit) myPower *= 1.5;
+  const defPct = getRelicBonus('def_pct').total;
+
   const enemy = createEnemy(state.streak);
-  const enemyPower = enemy.atk * (1 + Math.min(state.streak, 10) * 0.02);
+  let enemyPower = enemy.atk * (1 + Math.min(state.streak, 10) * 0.02);
+  enemyPower = enemyPower / (1 + defPct / 100);
 
-  const win = myPower >= enemyPower;
+  const firstStrike = getRelicBonus('first_strike').flag;
+  const win = firstStrike ? true : myPower >= enemyPower;
 
   setTimeout(() => {
     state.battles++;
@@ -133,8 +179,21 @@ function startQuickBattle() {
       state.gold += earned;
       if (isFirstWin) state.firstWinToday = true;
 
-      log(`🏆 승리! ${enemy.name} 처치 · +${earned.toLocaleString()}G ${isFirstWin ? '(일일 첫승 2배!)' : ''} · 🔥 ${state.streak}연승 · +${xpGain} BP XP`, 'win reward');
+      // 10% 확률로 유물 획득
+      let relicDrop = '';
+      if (Math.random() < 0.1) {
+        const newRelic = RELICS[Math.floor(Math.random() * RELICS.length)];
+        if (!state.relics.find(r => r.id === newRelic.id)) {
+          state.relics.push(newRelic);
+          relicDrop = ` · 🔮 ${newRelic.name} 획득!`;
+        }
+      }
+
+      const critText = crit ? ' (💥 크리티컬!)' : '';
+      const firstText = firstStrike ? ' (⚡ 선공!)' : '';
+      log(`🏆 승리! ${enemy.name} 처치${critText}${firstText} · +${earned.toLocaleString()}G ${isFirstWin ? '(일일 첫승 2배!)' : ''} · 🔥 ${state.streak}연승 · +${xpGain} BP XP${relicDrop}`, 'win reward');
       updateUI();
+      renderRelicSlots();
       showRoulette();
     } else {
       log(`💀 패배... ${enemy.name}에게 졌습니다. 연승이 끊겼습니다. (+${xpGain} BP XP)`, 'lose');
@@ -198,6 +257,58 @@ function claimPass(level) {
   log(`🎁 ${reward.name} 수령 완료!`, 'reward');
   updateUI();
   renderPass();
+}
+
+// Relic functions
+function renderRelicSlots() {
+  state.equippedRelics.forEach((r, i) => {
+    const box = document.getElementById(`rSlot${i}`);
+    if (r) {
+      box.className = 'slot-box filled';
+      box.innerHTML = `<span class="emoji">${r.icon}</span><span>${r.name}</span>`;
+    } else {
+      box.className = 'slot-box';
+      box.innerHTML = `+<br>슬롯${i + 1}`;
+    }
+  });
+}
+
+function openRelicModal(slotIdx) {
+  state.selectedRelicSlot = slotIdx;
+  document.getElementById('relicModalTitle').textContent = `🔮 슬롯 ${slotIdx + 1}에 유물 장착`;
+  const list = document.getElementById('relicList');
+  list.innerHTML = state.relics.map(r => {
+    const equippedIdx = state.equippedRelics.findIndex(e => e && e.id === r.id);
+    const isEquipped = equippedIdx !== -1;
+    const equippedText = isEquipped ? `(슬롯${equippedIdx + 1})` : '';
+    const cls = state.equippedRelics[slotIdx] && state.equippedRelics[slotIdx].id === r.id ? 'relic-row equipped' : 'relic-row';
+    return `<div class="${cls}" onclick="equipRelic('${r.id}')">
+      <div class="relic-icon">${r.icon}</div>
+      <div class="relic-info">
+        <div class="relic-name">${r.name} ${equippedText}</div>
+        <div class="relic-desc">${r.desc}</div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('relicModal').style.display = 'flex';
+}
+
+function equipRelic(relicId) {
+  const relic = state.relics.find(r => r.id === relicId);
+  if (!relic) return;
+  const slot = state.selectedRelicSlot;
+  // remove from other slot if equipped there
+  state.equippedRelics = state.equippedRelics.map(r => (r && r.id === relicId ? null : r));
+  state.equippedRelics[slot] = relic;
+  renderRelicSlots();
+  closeRelicModal();
+  log(`🔮 ${relic.name} 슬롯 ${slot + 1}에 장착!`, 'reward');
+  updateUI();
+}
+
+function closeRelicModal() {
+  document.getElementById('relicModal').style.display = 'none';
+  state.selectedRelicSlot = null;
 }
 
 function showRoulette() {
