@@ -120,6 +120,16 @@
     .slot.win { border-color: var(--accent); box-shadow: 0 0 16px var(--accent); transform: scale(1.1); }
     .slot-label { font-size: 10px; color: var(--dim); margin-top: 4px; }
     .close-btn { margin-top: 16px; background: var(--dim); color: #0a0808; }
+    .pass-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+    .pass-icon { width: 32px; text-align: center; font-size: 18px; }
+    .pass-name { flex: 1; font-size: 12px; }
+    .pass-tag { font-size: 10px; padding: 2px 6px; border-radius: 6px; background: #403830; color: var(--dim); }
+    .pass-tag.paid { background: linear-gradient(90deg, var(--accent), var(--accent2)); color: #0a0808; }
+    .pass-claimed { text-decoration: line-through; opacity: 0.5; }
+    .pass-progress { height: 8px; background: #302820; border-radius: 4px; overflow: hidden; margin: 10px 0; }
+    .pass-progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); width: 0%; transition: width .3s; }
+    .tier-btn { background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 6px 10px; border-radius: 8px; font-size: 11px; cursor: pointer; }
+    .tier-btn.active { background: var(--accent); color: #0a0808; }
   </style>
 </head>
 <body>
@@ -158,6 +168,22 @@
     <div class="log" id="log">
       <div>덱이 자동 구성되었습니다. 빠른 배틀을 시작하세요!</div>
     </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h2 style="margin:0; font-size:18px;">🎫 배틀패스</h2>
+      <div>
+        <button class="tier-btn active" id="freeTab" onclick="switchPass('free')">무료</button>
+        <button class="tier-btn" id="paidTab" onclick="switchPass('paid')">유료</button>
+      </div>
+    </div>
+    <div class="stat-row">
+      <span>현재 레벨</span>
+      <span class="stat-value" id="passLevel">1</span>
+    </div>
+    <div class="pass-progress"><div class="pass-progress-fill" id="passFill"></div></div>
+    <div id="passRewards"></div>
   </div>
 
   <div class="modal-overlay" id="rouletteModal">
