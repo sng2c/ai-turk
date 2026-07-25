@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PetForge Proto - 빠른 배틀 & 연승</title>
+  <style>
+    :root {
+      --bg: #0a0808;
+      --panel: #16120f;
+      --accent: #f0b040;
+      --accent2: #f06020;
+      --text: #f0ece4;
+      --dim: #908880;
+      --danger: #ff4040;
+      --ok: #40d080;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Rajdhani', 'Noto Sans KR', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid #302820;
+      border-radius: 16px;
+      padding: 20px;
+      width: 100%;
+      max-width: 420px;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 24px;
+      text-align: center;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { color: var(--dim); text-align: center; margin-bottom: 16px; font-size: 13px; }
+    .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+    .stat-value { color: var(--accent); font-weight: 700; }
+    .pets { display: flex; gap: 8px; justify-content: center; margin: 12px 0; }
+    .pet {
+      width: 80px; height: 80px;
+      border-radius: 14px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border: 2px solid #403830;
+      background: linear-gradient(135deg, #1c1706, #2a2210);
+      font-size: 32px;
+      position: relative;
+    }
+    .pet .name { font-size: 11px; color: var(--dim); margin-top: 4px; }
+    .pet .element { font-size: 10px; color: var(--accent); }
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      color: #0a0808;
+      font-weight: 900;
+      font-size: 16px;
+      cursor: pointer;
+      margin-top: 12px;
+      transition: transform .1s, box-shadow .2s;
+    }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 0 20px var(--accent2); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+    .streak-bar {
+      display: flex; gap: 6px; justify-content: center; margin: 12px 0;
+    }
+    .streak-dot {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #302820;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      transition: all .3s;
+    }
+    .streak-dot.active {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      box-shadow: 0 0 12px var(--accent2);
+      color: #0a0808;
+    }
+    .log {
+      background: #0e0b09;
+      border-radius: 10px;
+      padding: 12px;
+      max-height: 160px;
+      overflow-y: auto;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .log .win { color: var(--ok); }
+    .log .lose { color: var(--danger); }
+    .log .reward { color: var(--accent); }
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: none; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    .modal { background: var(--panel); border-radius: 20px; padding: 24px; max-width: 360px; width: 90%; text-align: center; border: 1px solid #403830; }
+    .roulette { display: flex; justify-content: center; gap: 12px; margin: 20px 0; }
+    .slot {
+      width: 70px; height: 70px; border-radius: 12px;
+      background: #0e0b09; border: 2px solid #403830;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-size: 24px;
+      transition: transform .2s;
+    }
+    .slot.win { border-color: var(--accent); box-shadow: 0 0 16px var(--accent); transform: scale(1.1); }
+    .slot-label { font-size: 10px; color: var(--dim); margin-top: 4px; }
+    .close-btn { margin-top: 16px; background: var(--dim); color: #0a0808; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>⚡ 빠른 배틀 프로토</h1>
+    <div class="subtitle">30초 핵심 루프 · 즉시 보상 · 연승 폭발</div>
+
+    <div class="stat-row">
+      <span>보유 골드</span>
+      <span class="stat-value" id="gold">1200G</span>
+    </div>
+    <div class="stat-row">
+      <span>연승</span>
+      <span class="stat-value" id="streak">0</span>
+    </div>
+    <div class="stat-row">
+      <span>배틀속도</span>
+      <span class="stat-value" id="speed">1.0x</span>
+    </div>
+
+    <div class="pets" id="deck">
+      <!-- generated -->
+    </div>
+
+    <div class="streak-bar" id="streakBar">
+      <div class="streak-dot" id="sd0">3</div>
+      <div class="streak-dot" id="sd1">5</div>
+      <div class="streak-dot" id="sd2">10</div>
+    </div>
+
+    <button class="btn" id="battleBtn" onclick="startQuickBattle()">⚔️ 빠른 배틀 시작</button>
+  </div>
+
+  <div class="card">
+    <div class="subtitle">전투 로그</div>
+    <div class="log" id="log">
+      <div>덱이 자동 구성되었습니다. 빠른 배틀을 시작하세요!</div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="rouletteModal">
+    <div class="modal">
+      <h2>🎰 승리 룰렛</h2>
+      <div class="roulette" id="roulette">
+        <div class="slot" id="slot0">❓<div class="slot-label"></div></div>
+        <div class="slot" id="slot1">❓<div class="slot-label"></div></div>
+        <div class="slot" id="slot2">❓<div class="slot-label"></div></div>
+      </div>
+      <div id="rouletteResult">...</div>
+      <button class="btn close-btn" onclick="closeRoulette()">확인</button>
+    </div>
+  </div>
+
+  <script src="proto.js"></script>
+</body>
+</html>
