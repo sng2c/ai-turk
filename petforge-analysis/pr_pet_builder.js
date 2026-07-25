@@ -1,0 +1,1 @@
+{return{id:R0++,name:eS(),gene:e,exp:0,level:1,...t}}
