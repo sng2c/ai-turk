@@ -1,4 +1,4 @@
-// PetForge Proto - Quick Battle & Streak
+// PetForge Proto - Quick Battle & Battle Pass
 
 const PETS = [
   { id: 0, name: '루미나', element: '빛', icon: '✦', galaxyId: 0, atk: 35, hp: 120, color: '#f8e060' },
@@ -7,18 +7,24 @@ const PETS = [
   { id: 3, name: '이그니스', element: '불', icon: '🔥', galaxyId: 3, atk: 45, hp: 110, color: '#f05020' },
 ];
 
-const ELEMENT_MULT = {
-  '빛': { '어둠': 1.5, '번개': 0.6 },
-  '땅': { '번개': 1.5, '물': 0.6 },
-  '물': { '불': 1.5, '자연': 0.6 },
-  '불': { '자연': 1.5, '물': 0.6 },
-};
-
 const ROULETTE_ITEMS = [
   { icon: '💰', label: '골드x1.5', type: 'gold_mult' },
   { icon: '🧪', label: '돌연변이', type: 'potion' },
   { icon: '⬆️', label: 'EXP부스트', type: 'exp' },
   { icon: '💎', label: '스킬재료', type: 'material' },
+];
+
+const PASS_REWARDS = [
+  { level: 1,  free: { icon: '💰', name: '골드 200', reward: () => state.gold += 200 },
+              paid: { icon: '💎', name: '스킬 재료 x3', reward: () => {} } },
+  { level: 2,  free: { icon: '⬆️', name: 'EXP 부스트 10분', reward: () => {} },
+              paid: { icon: '🧪', name: '돌연변이 포션 x2', reward: () => {} } },
+  { level: 3,  free: { icon: '🎟️', name: '룰렛 티켓', reward: () => state.passTickets = (state.passTickets || 0) + 1 },
+              paid: { icon: '👕', name: '한정 스킨', reward: () => {} } },
+  { level: 4,  free: { icon: '💰', name: '골드 500', reward: () => state.gold += 500 },
+              paid: { icon: '💰', name: '골드 1500', reward: () => state.gold += 1500 } },
+  { level: 5,  free: { icon: '🏆', name: '배틀패스 엠블럼', reward: () => {} },
+              paid: { icon: '🌟', name: 'UR 뽑기권', reward: () => {} } },
 ];
 
 let state = {
@@ -29,16 +35,21 @@ let state = {
   firstWinToday: false,
   wins: 0,
   battles: 0,
+  passXp: 0,
+  passLevel: 1,
+  passTier: 'free',
+  passClaimed: new Set(),
+  passTickets: 0,
 };
 
 function init() {
   buildDeck();
   renderDeck();
+  renderPass();
   updateUI();
 }
 
 function buildDeck() {
-  // 우선순위: 고 atk + 성운 시너리 가능한 조합
   const sorted = [...PETS].sort((a, b) => b.atk - a.atk);
   const top = sorted[0];
   const sameGalaxy = sorted.filter(p => p.galaxyId === top.galaxyId && p.id !== top.id);
@@ -77,6 +88,11 @@ function updateUI() {
   if (state.streak >= 3) dots[0].classList.add('active');
   if (state.streak >= 5) dots[1].classList.add('active');
   if (state.streak >= 10) dots[2].classList.add('active');
+
+  document.getElementById('passLevel').textContent = state.passLevel;
+  const xpNeed = state.passLevel * 100;
+  const pct = Math.min(100, Math.floor((state.passXp / xpNeed) * 100));
+  document.getElementById('passFill').style.width = pct + '%';
 }
 
 function log(msg, cls = '') {
@@ -103,22 +119,25 @@ function startQuickBattle() {
 
   setTimeout(() => {
     state.battles++;
+    const xpGain = 20 + (win ? 30 : 10) + state.streak * 2;
+    gainPassXp(xpGain);
+
     if (win) {
       state.streak++;
       state.wins++;
       const baseGold = 80;
-      const streakBonus = Math.min(state.streak, 10) * 0.1; // max 100%
+      const streakBonus = Math.min(state.streak, 10) * 0.1;
       const isFirstWin = !state.firstWinToday;
       const firstWinMult = isFirstWin ? 2 : 1;
       const earned = Math.round(baseGold * (1 + streakBonus) * firstWinMult);
       state.gold += earned;
       if (isFirstWin) state.firstWinToday = true;
 
-      log(`🏆 승리! ${enemy.name} 처치 · +${earned.toLocaleString()}G ${isFirstWin ? '(일일 첫승 2배!)' : ''} · 🔥 ${state.streak}연승`, 'win reward');
+      log(`🏆 승리! ${enemy.name} 처치 · +${earned.toLocaleString()}G ${isFirstWin ? '(일일 첫승 2배!)' : ''} · 🔥 ${state.streak}연승 · +${xpGain} BP XP`, 'win reward');
       updateUI();
       showRoulette();
     } else {
-      log(`💀 패배... ${enemy.name}에게 졌습니다. 연승이 끊겼습니다.`, 'lose');
+      log(`💀 패배... ${enemy.name}에게 졌습니다. 연승이 끊겼습니다. (+${xpGain} BP XP)`, 'lose');
       state.streak = 0;
       updateUI();
     }
@@ -135,13 +154,58 @@ function createEnemy(streak) {
   return { name, atk };
 }
 
+function gainPassXp(amount) {
+  state.passXp += amount;
+  while (state.passXp >= state.passLevel * 100 && state.passLevel < PASS_REWARDS.length) {
+    state.passXp -= state.passLevel * 100;
+    state.passLevel++;
+    log(`🎫 배틀패스 Lv.${state.passLevel} 달성! 보상을 수령하세요.`, 'reward');
+  }
+  renderPass();
+}
+
+function switchPass(tier) {
+  state.passTier = tier;
+  document.getElementById('freeTab').classList.toggle('active', tier === 'free');
+  document.getElementById('paidTab').classList.toggle('active', tier === 'paid');
+  renderPass();
+}
+
+function renderPass() {
+  const el = document.getElementById('passRewards');
+  el.innerHTML = PASS_REWARDS.map(r => {
+    const reward = state.passTier === 'free' ? r.free : r.paid;
+    const key = `${state.passTier}-${r.level}`;
+    const claimed = state.passClaimed.has(key);
+    const available = state.passLevel >= r.level;
+    const lockIcon = available ? '' : '🔒 ';
+    const cls = `pass-row ${claimed ? 'pass-claimed' : ''}`;
+    return `<div class="${cls}">
+      <span class="pass-icon">${lockIcon}${reward.icon}</span>
+      <span class="pass-name">Lv.${r.level} ${reward.name}</span>
+      <span class="pass-tag ${state.passTier === 'paid' ? 'paid' : ''}">${state.passTier === 'free' ? 'FREE' : 'PAID'}</span>
+      ${available && !claimed ? `<button class="tier-btn" onclick="claimPass(${r.level})">수령</button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function claimPass(level) {
+  const key = `${state.passTier}-${level}`;
+  if (state.passClaimed.has(key) || state.passLevel < level) return;
+  state.passClaimed.add(key);
+  const reward = state.passTier === 'free' ? PASS_REWARDS.find(r => r.level === level).free : PASS_REWARDS.find(r => r.level === level).paid;
+  reward.reward();
+  log(`🎁 ${reward.name} 수령 완료!`, 'reward');
+  updateUI();
+  renderPass();
+}
+
 function showRoulette() {
   const modal = document.getElementById('rouletteModal');
   const slots = [0, 1, 2].map(i => document.getElementById(`slot${i}`));
   const resultEl = document.getElementById('rouletteResult');
   modal.style.display = 'flex';
 
-  // reset
   slots.forEach(s => { s.classList.remove('win'); s.innerHTML = '❓<div class="slot-label"></div>'; });
   resultEl.textContent = '룰렛 돌리는 중...';
 
