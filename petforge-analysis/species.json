@@ -1,0 +1,74 @@
+[
+  {
+    "id": 0,
+    "gen": 0,
+    "pure": true,
+    "grade": "normal",
+    "name": "루미나",
+    "eng": "Lumina",
+    "element": "빛",
+    "icon": "✦",
+    "hue": [
+      42,
+      78
+    ],
+    "sat": 65,
+    "lit": 65,
+    "accent": "#f8e060",
+    "accentB": "#c8a010"
+  },
+  {
+    "id": 1,
+    "gen": 0,
+    "pure": true,
+    "grade": "normal",
+    "name": "테라스",
+    "eng": "Terras",
+    "element": "땅",
+    "icon": "◆",
+    "hue": [
+      18,
+      46
+    ],
+    "sat": 55,
+    "lit": 55,
+    "accent": "#d08030",
+    "accentB": "#804010"
+  },
+  {
+    "id": 2,
+    "gen": 0,
+    "pure": true,
+    "grade": "normal",
+    "name": "아쿠아",
+    "eng": "Aqua",
+    "element": "물",
+    "icon": "◈",
+    "hue": [
+      192,
+      238
+    ],
+    "sat": 70,
+    "lit": 58,
+    "accent": "#40c8f0",
+    "accentB": "#1080c0"
+  },
+  {
+    "id": 3,
+    "gen": 0,
+    "pure": true,
+    "grade": "normal",
+    "name": "이그니스",
+    "eng": "Ignis",
+    "element": "불",
+    "icon": "▲",
+    "hue": [
+      0,
+      28
+    ],
+    "sat": 85,
+    "lit": 52,
+    "accent": "#f05020",
+    "accentB": "#a01808"
+  }
+]

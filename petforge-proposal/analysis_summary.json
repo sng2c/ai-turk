@@ -1,0 +1,121 @@
+{
+  "url": "https://petforge-full.vercel.app/",
+  "genre": "펫 수집 · 교배 · 턴제 배틀 · 행성 정복",
+  "current_core_loops": [
+    {
+      "loop": "수집",
+      "desc": "4종 기본종족 + 교배로 20+ 혼혈종족 수집. 희귀도 N/R/SR/SSR/UR"
+    },
+    {
+      "loop": "교배",
+      "desc": "두 펫 선택 → 세대/등급/능력치/기술 승계. 교배 횟수 제한, 돌연변이 포션"
+    },
+    {
+      "loop": "육성",
+      "desc": "레벨업(경험치), 스킬 강화(Lv3까지), 성격, 등급 보너스, 개성 수집"
+    },
+    {
+      "loop": "배틀",
+      "desc": "턴제, 3마리 덱, 속성 상성, 상태이상, 필살기 게이지, 연승 보너스"
+    },
+    {
+      "loop": "은하계",
+      "desc": "4대 성운 24행성 점령. 난이도별 보상, 보스전, 수확"
+    },
+    {
+      "loop": "마켓",
+      "desc": "펫/아이템 거래, 상점, 처분"
+    },
+    {
+      "loop": "퀘스트",
+      "desc": "일일/도감/업적/통계"
+    }
+  ],
+  "config": {
+    "startGold": 1200,
+    "startPetCount": 5,
+    "breedCost": 50,
+    "breedCostCross": 100,
+    "maxBreedCount": 5,
+    "mutationRate": 1.2,
+    "crossMutationRate": 3,
+    "marketPrices": [
+      80,
+      200,
+      500,
+      1200,
+      3000
+    ],
+    "rarityWeights": [
+      40,
+      30,
+      20,
+      8,
+      2
+    ],
+    "marketRefreshCost": 0,
+    "disposalRefundRate": 0.3,
+    "marketListingFee": 0.05,
+    "battleGoldBase": 80,
+    "battleExpBase": 30,
+    "bossGoldMultiplier": 5,
+    "streakBonusMax": 100,
+    "battleCooldown": 0,
+    "planetHarvestCap": 24,
+    "conquestGoldBonus": 1,
+    "rarityDropRates": [
+      60,
+      25,
+      10,
+      4,
+      1
+    ],
+    "genStatBonus": 5,
+    "genSkillBonus": 15,
+    "seasonName": "Season 1",
+    "rankingMetric": "wins",
+    "announcement": "",
+    "maintenanceMode": false
+  },
+  "species_count": 4,
+  "monetization_hooks": [
+    {
+      "name": "뽑기/가챠",
+      "current": "rarityDropRates [60,25,10,4,1] 직접 구매"
+    },
+    {
+      "name": "교배 아이템",
+      "current": "돌연변이 포션, 이벤트 패스"
+    },
+    {
+      "name": "스킬 강화",
+      "current": "스킬 Lv3까지 업그레이드(소모 재료)"
+    },
+    {
+      "name": "NFT",
+      "current": "NFT 민팅 준비중 UI"
+    },
+    {
+      "name": "광고",
+      "current": "미확인(자리 있음)"
+    }
+  ],
+  "addictiveness_gaps": [
+    "시간제 한도 부족: 행성 수확 24시간 캡만 있음, 즉각적 보상 폭발이 적음",
+    "소셜/경쟁 약함: 랭킹 기준 wins만, PvP 없음, 길드/친구 없음",
+    "로그라이크 요소 없음: 매번 동일한 배틀, 랜덤 시드/시너지/유물 없음",
+    "짧은 세션 유도 부족: 1회 배틀 후 이탈 가능성, 다음 목표가 모호",
+    "시각/피드백: 스킬 이펙트/히트스톱/카메라 쉐이크 제한적",
+    "프로그레션 평탄: 세대 육성 곡선이 단조로움, 후반 돌파구 부족",
+    "스토리/세계관: 홈/가이드 외엔 임팩트 부족"
+  ],
+  "proposed_directions": [
+    "A. 초단기 보상 폭발 (Core Loop 30초)",
+    "B. 로그라이크 메타 진화 (Synergy + Relic)",
+    "C. 소셜 PvP & 리그/토너먼트",
+    "D. 시간제 콘텐츠 & FOMO",
+    "E. 수집 완성 욕구 (도감, 세트, 업적)",
+    "F. 스토리/세계관 몰입 (행성 스토리, 보스 컷신)",
+    "G. 모네타이제이션 강화 (배틀패스, 스킨, 광고)"
+  ]
+}
