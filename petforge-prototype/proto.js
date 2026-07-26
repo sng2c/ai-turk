@@ -76,15 +76,20 @@ let state = {
   seedRules: [],
   seedBoss: null,
   seedCleared: false,
+  arenaScore: 1000,
+  arenaHistory: [],
+  defenseDeck: [],
 };
 
 function init() {
   buildDeck();
+  state.defenseDeck = [...state.deck];
   renderDeck();
   renderRelicSlots();
   renderPass();
   generateWeeklySeed();
   renderSeedDungeon();
+  renderArena();
   updateUI();
   setInterval(updateSeedTimer, 60000);
 }
@@ -154,6 +159,10 @@ function updateUI() {
   const xpNeed = state.passLevel * 100;
   const pct = Math.min(100, Math.floor((state.passXp / xpNeed) * 100));
   document.getElementById('passFill').style.width = pct + '%';
+
+  document.getElementById('arenaScore').textContent = state.arenaScore;
+  document.getElementById('arenaTier').textContent = getArenaTier(state.arenaScore).name;
+  document.getElementById('defenseTag').textContent = `방어 덱: ${state.defenseDeck.map(p => p.icon).join('')}`;
 
   updateSeedTimer();
 }
@@ -500,6 +509,163 @@ function runSeedDungeon() {
 
 function closeRoulette() {
   document.getElementById('rouletteModal').style.display = 'none';
+}
+
+// PvP Arena functions
+const ARENA_TIERS = [
+  { name: '브론즈', min: 0 },
+  { name: '실버', min: 1100 },
+  { name: '골드', min: 1300 },
+  { name: '플래티넘', min: 1500 },
+  { name: '다이아몬드', min: 1700 },
+  { name: '마스터', min: 1900 },
+];
+
+function getArenaTier(score) {
+  for (let i = ARENA_TIERS.length - 1; i >= 0; i--) {
+    if (score >= ARENA_TIERS[i].min) return ARENA_TIERS[i];
+  }
+  return ARENA_TIERS[0];
+}
+
+function generateArenaOpponents() {
+  const names = ['스타포지', '네뷸러', '펫마스터', '은하냥', '코스모스', '루나틱', '볼트', '아쿠아맨'];
+  const ops = [];
+  for (let i = 0; i < 5; i++) {
+    const score = Math.max(800, state.arenaScore + Math.floor(Math.random() * 400) - 150);
+    const deck = [];
+    for (let j = 0; j < 3; j++) {
+      deck.push(PETS[Math.floor(Math.random() * PETS.length)]);
+    }
+    ops.push({
+      id: i,
+      name: names[Math.floor(Math.random() * names.length)] + (i + 1),
+      score,
+      deck,
+    });
+  }
+  return ops.sort((a, b) => a.score - b.score);
+}
+
+function renderArena() {
+  const list = document.getElementById('arenaList');
+  const ops = generateArenaOpponents();
+  list.innerHTML = ops.map((op, idx) => {
+    const tier = getArenaTier(op.score);
+    return `<div class="arena-row">
+      <span class="arena-rank">${idx + 1}</span>
+      <div class="arena-deck">
+        ${op.deck.map(p => `<div class="pet-mini" style="border-color:${p.color};">${p.icon}</div>`).join('')}
+      </div>
+      <div class="arena-score">
+        <div>${op.name}</div>
+        <div>${tier.name} · ${op.score}점</div>
+      </div>
+      <button class="arena-btn" onclick="challengePvp(${op.id}, '${op.name}', ${op.score})">도전</button>
+    </div>`;
+  }).join('');
+}
+
+function challengePvp(opId, opName, opScore) {
+  const modal = document.getElementById('pvpModal');
+  const content = document.getElementById('pvpContent');
+  const result = document.getElementById('pvpResult');
+  modal.style.display = 'flex';
+  result.textContent = '전투 시뮬레이션 중...';
+
+  // Find opponent deck from last generated list by re-generating or storing. Simpler: store in DOM not possible. Regenerate.
+  const ops = generateArenaOpponents();
+  const op = ops.find(o => o.name === opName);
+  if (!op) return;
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div>나의 덱<br/>${state.deck.map(p => p.icon).join(' ')}</div>
+      <div style="font-size:20px;">VS</div>
+      <div>${op.name}<br/>${op.deck.map(p => p.icon).join(' ')}</div>
+    </div>
+  `;
+
+  setTimeout(() => {
+    const myPower = calcBattlePower(state.deck, state.equippedRelics);
+    const opPower = calcBattlePower(op.deck, [null, null, null]);
+    const win = myPower >= opPower;
+    const scoreDelta = win ? Math.max(15, Math.floor((opScore - state.arenaScore) / 20) + 20) : -Math.max(10, Math.floor((state.arenaScore - opScore) / 30) + 10);
+
+    state.arenaScore = Math.max(0, state.arenaScore + scoreDelta);
+    const gold = win ? 100 : 20;
+    state.gold += gold;
+    state.arenaHistory.unshift({ name: op.name, win, scoreDelta });
+    if (state.arenaHistory.length > 5) state.arenaHistory.pop();
+
+    result.innerHTML = win
+      ? `<div class="win">🏆 승리!</div><div>${opName}撃파 · 점수 ${scoreDelta > 0 ? '+' : ''}${scoreDelta} · +${gold}G</div>`
+      : `<div class="lose">💀 패배...</div><div>${opName}에게 졌습니다 · 점수 ${scoreDelta} · +${gold}G</div>`;
+
+    if (win) {
+      gainPassXp(40);
+      log(`⚔️ PvP 승리! ${opName}撃파 · 점수 ${scoreDelta > 0 ? '+' : ''}${scoreDelta} · 티어: ${getArenaTier(state.arenaScore).name}`, 'win reward');
+    } else {
+      log(`⚔️ PvP 패배... ${opName}에게 졌습니다. 점수 ${scoreDelta}`, 'lose');
+    }
+
+    renderArenaHistory();
+    renderArena();
+    updateUI();
+  }, 1000);
+}
+
+function calcBattlePower(deck, relics) {
+  const synergy = calcSynergy(deck);
+  let synergyBonus = synergy.count >= 3 ? 1.3 : synergy.count >= 2 ? 1.15 : 1.0;
+  const synAmp = { multi: 1 }; // no relics for opponents
+  if (relics) {
+    relics.forEach(r => {
+      if (r && r.bonus.type === 'synergy_amp') synAmp.multi *= r.bonus.value;
+    });
+  }
+  synergyBonus = 1 + (synergyBonus - 1) * synAmp.multi;
+
+  const baseCrit = 5;
+  let critRate = baseCrit;
+  if (relics) {
+    relics.forEach(r => {
+      if (r && r.bonus.type === 'crit_rate') critRate += r.bonus.value;
+    });
+  }
+  const crit = Math.random() * 100 < critRate;
+
+  let power = deck.reduce((sum, p) => sum + p.atk, 0) * synergyBonus;
+  if (crit) power *= 1.5;
+
+  let defPct = 0;
+  if (relics) {
+    relics.forEach(r => {
+      if (r && r.bonus.type === 'def_pct') defPct += r.bonus.value;
+    });
+  }
+  power = power * (1 + defPct / 100);
+
+  const firstStrike = relics && relics.some(r => r && r.bonus.type === 'first_strike');
+  if (firstStrike) power *= 1.2;
+
+  return power;
+}
+
+function renderArenaHistory() {
+  const el = document.getElementById('arenaHistory');
+  if (state.arenaHistory.length === 0) {
+    el.textContent = '최근 전적이 여기에 표시됩니다';
+    return;
+  }
+  el.innerHTML = state.arenaHistory.map(h => {
+    const color = h.win ? 'var(--ok)' : 'var(--danger)';
+    return `<span style="color:${color}">${h.win ? '승' : '패'} ${h.name} (${h.scoreDelta > 0 ? '+' : ''}${h.scoreDelta})</span>`;
+  }).join(' · ');
+}
+
+function closePvpModal() {
+  document.getElementById('pvpModal').style.display = 'none';
 }
 
 init();
