@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>💱 외환 대시보드</title>
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --panel: #141923;
+      --panel2: #1a2030;
+      --accent: #00d4aa;
+      --accent2: #0099ff;
+      --text: #e8eef5;
+      --dim: #8896a8;
+      --up: #00d4aa;
+      --down: #ff5566;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: 'Rajdhani', 'Noto Sans KR', system-ui, sans-serif;
+      padding: 20px;
+    }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+    h1 { margin: 0; font-size: 22px; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    select, button { background: var(--panel2); color: var(--text); border: 1px solid #2a3344; border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    .btn-primary { background: linear-gradient(90deg, var(--accent), var(--accent2)); color: #0b0e14; border: none; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .card { background: var(--panel); border: 1px solid #20293a; border-radius: 14px; padding: 16px; transition: transform .15s, box-shadow .2s; }
+    .card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+    .pair { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .pair-name { font-size: 13px; color: var(--dim); font-weight: 700; letter-spacing: 0.5px; }
+    .pair-flag { font-size: 18px; }
+    .rate { font-size: 24px; font-weight: 900; margin-bottom: 4px; }
+    .change { font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+    .change.up { color: var(--up); }
+    .change.down { color: var(--down); }
+    .spark { height: 40px; margin-top: 8px; }
+    .panel { background: var(--panel); border: 1px solid #20293a; border-radius: 14px; padding: 16px; margin-bottom: 20px; }
+    .chart-wrap { position: relative; height: 320px; }
+    .stats { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--dim); }
+    .stats span { color: var(--text); font-weight: 700; }
+    .loading { text-align: center; padding: 40px; color: var(--dim); }
+    .refresh-info { font-size: 11px; color: var(--dim); }
+    .pair-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .alert-row { display: flex; justify-content: space-between; align-items: center; padding: 8px; background: var(--panel2); border-radius: 8px; margin: 6px 0; font-size: 12px; }
+    .alert-row input { width: 90px; background: #0b0e14; border: 1px solid #2a3344; color: var(--text); border-radius: 6px; padding: 4px 6px; }
+    .tab-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tab { padding: 8px 16px; background: var(--panel2); border: 1px solid #2a3344; border-radius: 8px; cursor: pointer; font-size: 13px; }
+    .tab.active { background: var(--accent); color: #0b0e14; border-color: var(--accent); font-weight: 700; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>💱 외환 대시보드</h1>
+    <div class="controls">
+      <select id="baseSelect" onchange="changeBase()">
+        <option value="USD">USD (미국 달러)</option>
+        <option value="KRW">KRW (원화)</option>
+        <option value="EUR">EUR (유로)</option>
+        <option value="JPY">JPY (엔화)</option>
+        <option value="CNY">CNY (위안)</option>
+        <option value="GBP">GBP (파운드)</option>
+      </select>
+      <select id="rangeSelect" onchange="loadData()">
+        <option value="7">7일</option>
+        <option value="30" selected>30일</option>
+        <option value="90">90일</option>
+        <option value="180">180일</option>
+      </select>
+      <button class="btn-primary" onclick="loadData()">🔄 새로고침</button>
+      <span class="refresh-info" id="refreshInfo">-</span>
+    </div>
+  </div>
+
+  <div class="tab-row">
+    <div class="tab active" onclick="switchTab('overview')">📊 개요</div>
+    <div class="tab" onclick="switchTab('chart')">📈 차트</div>
+    <div class="tab" onclick="switchTab('alerts')">🔔 알림</div>
+  </div>
+
+  <div id="overviewTab">
+    <div class="pair-card-grid" id="rateGrid">
+      <div class="loading">데이터 로딩 중...</div>
+    </div>
+  </div>
+
+  <div id="chartTab" class="hidden">
+    <div class="panel">
+      <div class="controls" style="margin-bottom:12px;">
+        <select id="chartPairSelect"></select>
+      </div>
+      <div class="chart-wrap"><canvas id="mainChart"></canvas></div>
+      <div class="stats" id="chartStats"></div>
+    </div>
+  </div>
+
+  <div id="alertsTab" class="hidden">
+    <div class="panel">
+      <h3 style="margin:0 0 8px; font-size:16px;">🔔 환율 알림 설정</h3>
+      <div style="font-size:12px; color:var(--dim); margin-bottom:12px;">특정 환율이 임계값을 넘으면 (브라우저 내) 강조 표시됩니다.</div>
+      <div id="alertList"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
