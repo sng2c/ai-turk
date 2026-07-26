@@ -238,7 +238,8 @@ function startQuickBattle() {
 
       const critText = crit ? ' (💥 크리티컬!)' : '';
       const firstText = firstStrike ? ' (⚡ 선공!)' : '';
-      log(`🏆 승리! ${enemy.name} 처치${critText}${firstText} · +${earned.toLocaleString()}G ${isFirstWin ? '(일일 첫승 2배!)' : ''} · 🔥 ${state.streak}연승 · +${xpGain} BP XP${relicDrop}`, 'win reward');
+      const dexText = Object.keys(dexBonus).some(k => dexBonus[k]) ? ' (📖 도감 버프!)' : '';
+      log(`🏆 승리! ${enemy.name} 처치${critText}${firstText}${dexText} · +${earned.toLocaleString()}G ${isFirstWin ? '(일일 첫승 2배!)' : ''} · 🔥 ${state.streak}연승 · +${xpGain} BP XP${relicDrop}`, 'win reward');
       updateUI();
       renderRelicSlots();
       showRoulette();
@@ -473,14 +474,16 @@ function runSeedDungeon() {
   const synAmp = getRelicBonus('synergy_amp');
   synergyBonus = 1 + (synergyBonus - 1) * synAmp.multi;
 
+  const seedDexBonus = getDexBonus();
   const baseCrit = critFest ? 35 : 5;
-  const critRate = baseCrit + getRelicBonus('crit_rate').total;
+  const critRate = baseCrit + getRelicBonus('crit_rate').total + (seedDexBonus.critRate || 0);
   const crit = Math.random() * 100 < critRate;
 
-  let myPower = state.deck.reduce((sum, p) => sum + p.atk, 0) * synergyBonus;
+  const seedDexAtkMult = 1 + (seedDexBonus.atk || 0) / 100;
+  let myPower = state.deck.reduce((sum, p) => sum + p.atk, 0) * synergyBonus * seedDexAtkMult;
   if (crit) myPower *= 1.5;
 
-  const defPct = getRelicBonus('def_pct').total;
+  const defPct = getRelicBonus('def_pct').total + (seedDexBonus.def || 0);
   let enemyPower = (120 * state.seedBoss.atkMult * enemyHpMult) / (1 + defPct / 100);
 
   const firstStrike = getRelicBonus('first_strike').flag;
@@ -658,7 +661,7 @@ function challengePvp(opId, opName, opScore) {
   `;
 
   setTimeout(() => {
-    const myPower = calcBattlePower(state.deck, state.equippedRelics);
+    const myPower = calcBattlePower(state.deck, state.equippedRelics, true);
     const opPower = calcBattlePower(op.deck, [null, null, null]);
     const win = myPower >= opPower;
     const scoreDelta = win ? Math.max(15, Math.floor((opScore - state.arenaScore) / 20) + 20) : -Math.max(10, Math.floor((state.arenaScore - opScore) / 30) + 10);
@@ -686,7 +689,7 @@ function challengePvp(opId, opName, opScore) {
   }, 1000);
 }
 
-function calcBattlePower(deck, relics) {
+function calcBattlePower(deck, relics, applyDex = false) {
   const synergy = calcSynergy(deck);
   let synergyBonus = synergy.count >= 3 ? 1.3 : synergy.count >= 2 ? 1.15 : 1.0;
   const synAmp = { multi: 1 }; // no relics for opponents
@@ -704,9 +707,12 @@ function calcBattlePower(deck, relics) {
       if (r && r.bonus.type === 'crit_rate') critRate += r.bonus.value;
     });
   }
+  const dexBonus = applyDex ? getDexBonus() : {};
+  critRate += (dexBonus.critRate || 0);
   const crit = Math.random() * 100 < critRate;
 
-  let power = deck.reduce((sum, p) => sum + p.atk, 0) * synergyBonus;
+  const dexAtkMult = 1 + (dexBonus.atk || 0) / 100;
+  let power = deck.reduce((sum, p) => sum + p.atk, 0) * synergyBonus * dexAtkMult;
   if (crit) power *= 1.5;
 
   let defPct = 0;
@@ -715,6 +721,7 @@ function calcBattlePower(deck, relics) {
       if (r && r.bonus.type === 'def_pct') defPct += r.bonus.value;
     });
   }
+  defPct += (dexBonus.def || 0);
   power = power * (1 + defPct / 100);
 
   const firstStrike = relics && relics.some(r => r && r.bonus.type === 'first_strike');
