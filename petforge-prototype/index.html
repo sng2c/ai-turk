@@ -146,6 +146,11 @@
     .slot-box.filled { border: 2px solid var(--accent); background: #1c1706; color: var(--text); }
     .slot-box .emoji { font-size: 24px; }
     .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 240px; overflow-y: auto; padding-right: 4px; }
+    .seed-rule { display: inline-block; background: #1c1706; border: 1px solid #403830; border-radius: 8px; padding: 4px 8px; font-size: 11px; color: var(--accent); margin: 2px; }
+    .seed-rule.bad { color: var(--danger); border-color: var(--danger); }
+    .seed-reward { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 12px; }
+    .seed-reward .rank { width: 24px; text-align: center; font-weight: 900; color: var(--accent); }
+    .dungeon-boss { font-size: 18px; color: var(--danger); font-weight: 900; text-align: center; margin: 10px 0; }
   </style>
 </head>
 <body>
@@ -196,6 +201,17 @@
       <div class="slot-box" id="rSlot1" onclick="openRelicModal(1)">+<br>슬롯2</div>
       <div class="slot-box" id="rSlot2" onclick="openRelicModal(2)">+<br>슬롯3</div>
     </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h2 style="margin:0; font-size:18px;">🌌 주간 시드 던전</h2>
+      <span style="font-size:11px; color:var(--dim);" id="seedTimer">남은: --</span>
+    </div>
+    <div id="seedRules"></div>
+    <div id="seedRewards"></div>
+    <div class="dungeon-boss" id="seedBoss">👑 시드 보스: ???</div>
+    <button class="btn" id="seedBtn" onclick="runSeedDungeon()">🌠 시드 던전 도전</button>
   </div>
 
   <div class="card">

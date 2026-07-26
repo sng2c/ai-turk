@@ -25,6 +25,24 @@ const RELICS = [
   { id: 'galactic_orb', icon: '🌌', name: '은하 구슬', desc: '성운 시너지 효과 +50%', bonus: { type: 'synergy_amp', value: 1.5 } },
 ];
 
+const SEED_RULES = [
+  { id: 'only_fire', name: '🔥 화염 속성만', desc: '화염 속성 펫만 출전 가능', check: (deck) => deck.every(p => p.element === '불'), bad: true },
+  { id: 'only_water', name: '💧 물 속성만', desc: '물 속성 펫만 출전 가능', check: (deck) => deck.every(p => p.element === '물'), bad: true },
+  { id: 'ult_half', name: '⚡ 궁극기 SP 절반', desc: '궁극기 SP 비용 50% 감소', check: () => true },
+  { id: 'enemy_hp_2x', name: '👾 적 HP 2배', desc: '적 전체 HP 두 배', check: () => true, bad: true },
+  { id: 'reward_3x', name: '💰 보상 3배', desc: '골드/EXP 보상 3배', check: () => true },
+  { id: 'no_heal', name: '🚫 회복 금지', desc: '치유 스킬 사용 불가', check: () => true, bad: true },
+  { id: 'crit_fest', name: '💥 크리 +30%', desc: '모든 펫 크리티컬 확률 +30%', check: () => true },
+  { id: 'speed_run', name: '🏃 스피드런', desc: '5턴 안에 보스 처치 시 추가 보상', check: () => true },
+];
+
+const SEED_BOSSES = [
+  { name: '성운 거대 골렘', icon: '🗿', hpMult: 3, atkMult: 1.4 },
+  { name: '혼돈의 별핵', icon: '☄️', hpMult: 2.5, atkMult: 1.8 },
+  { name: '심해 우주선', icon: '🛸', hpMult: 2, atkMult: 2.0 },
+  { name: '태양 폭군', icon: '🌞', hpMult: 3.5, atkMult: 1.5 },
+];
+
 const PASS_REWARDS = [
   { level: 1,  free: { icon: '💰', name: '골드 200', reward: () => state.gold += 200 },
               paid: { icon: '💎', name: '스킬 재료 x3', reward: () => {} } },
@@ -54,6 +72,10 @@ let state = {
   relics: [...RELICS], // owned
   equippedRelics: [null, null, null], // slot 0..2
   selectedRelicSlot: null,
+  seedWeek: 0,
+  seedRules: [],
+  seedBoss: null,
+  seedCleared: false,
 };
 
 function init() {
@@ -61,7 +83,10 @@ function init() {
   renderDeck();
   renderRelicSlots();
   renderPass();
+  generateWeeklySeed();
+  renderSeedDungeon();
   updateUI();
+  setInterval(updateSeedTimer, 60000);
 }
 
 function buildDeck() {
@@ -129,6 +154,8 @@ function updateUI() {
   const xpNeed = state.passLevel * 100;
   const pct = Math.min(100, Math.floor((state.passXp / xpNeed) * 100));
   document.getElementById('passFill').style.width = pct + '%';
+
+  updateSeedTimer();
 }
 
 function log(msg, cls = '') {
@@ -347,6 +374,128 @@ function showRoulette() {
       updateUI();
     }
   }, 100);
+}
+
+// Weekly Seed Dungeon functions
+function generateWeeklySeed() {
+  // deterministic pseudo-random based on current week
+  const now = new Date();
+  const week = Math.floor(now.getTime() / (7 * 24 * 60 * 60 * 1000));
+  state.seedWeek = week;
+  state.seedCleared = false;
+
+  const seededRandom = (n) => {
+    const x = Math.sin(week * 997 + n * 31) * 10000;
+    return x - Math.floor(x);
+  };
+
+  const shuffled = [...SEED_RULES].sort((a, b) => seededRandom(a.id.charCodeAt(0)) - seededRandom(b.id.charCodeAt(0)));
+  state.seedRules = shuffled.slice(0, 3);
+  state.seedBoss = SEED_BOSSES[Math.floor(seededRandom(99) * SEED_BOSSES.length)];
+}
+
+function renderSeedDungeon() {
+  const rulesEl = document.getElementById('seedRules');
+  const rewardsEl = document.getElementById('seedRewards');
+  const bossEl = document.getElementById('seedBoss');
+
+  rulesEl.innerHTML = state.seedRules.map(r =>
+    `<span class="seed-rule ${r.bad ? 'bad' : ''}">${r.name}</span>`
+  ).join('');
+
+  bossEl.innerHTML = `👑 시드 보스: ${state.seedBoss.icon} ${state.seedBoss.name}`;
+
+  const reward3x = state.seedRules.some(r => r.id === 'reward_3x');
+  const mult = reward3x ? 3 : 1;
+  rewardsEl.innerHTML = `
+    <div class="seed-reward"><span class="rank">1위</span><span>유물 + 골드 ${(500 * mult).toLocaleString()}G</span></div>
+    <div class="seed-reward"><span class="rank">S</span><span>골드 ${(300 * mult).toLocaleString()}G + 스킬재료</span></div>
+    <div class="seed-reward"><span class="rank">A</span><span>골드 ${(150 * mult).toLocaleString()}G</span></div>
+  `;
+
+  document.getElementById('seedBtn').disabled = state.seedCleared;
+  document.getElementById('seedBtn').textContent = state.seedCleared ? '✅ 이번 주 클리어 완료' : '🌠 시드 던전 도전';
+}
+
+function updateSeedTimer() {
+  const now = new Date();
+  const nextMonday = new Date(now);
+  nextMonday.setDate(now.getDate() + ((8 - now.getDay()) % 7));
+  nextMonday.setHours(0, 0, 0, 0);
+  if (nextMonday <= now) nextMonday.setDate(nextMonday.getDate() + 7);
+  const diff = Math.max(0, nextMonday - now);
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const el = document.getElementById('seedTimer');
+  if (el) el.textContent = `다음 시드: ${h}시간 ${m}분`;
+}
+
+function runSeedDungeon() {
+  const btn = document.getElementById('seedBtn');
+  btn.disabled = true;
+  btn.textContent = '도전 중...';
+
+  // Check rule compliance
+  const failedRule = state.seedRules.find(r => !r.check(state.deck));
+  if (failedRule) {
+    log(`🚫 시드 규칙 위반: ${failedRule.desc}`, 'lose');
+    btn.disabled = false;
+    btn.textContent = '🌠 시드 던전 도전';
+    return;
+  }
+
+  const reward3x = state.seedRules.some(r => r.id === 'reward_3x');
+  const enemyHpMult = state.seedBoss.hpMult * (state.seedRules.some(r => r.id === 'enemy_hp_2x') ? 2 : 1);
+  const critFest = state.seedRules.some(r => r.id === 'crit_fest');
+
+  const synergy = calcSynergy(state.deck);
+  let synergyBonus = synergy.count >= 3 ? 1.3 : synergy.count >= 2 ? 1.15 : 1.0;
+  const synAmp = getRelicBonus('synergy_amp');
+  synergyBonus = 1 + (synergyBonus - 1) * synAmp.multi;
+
+  const baseCrit = critFest ? 35 : 5;
+  const critRate = baseCrit + getRelicBonus('crit_rate').total;
+  const crit = Math.random() * 100 < critRate;
+
+  let myPower = state.deck.reduce((sum, p) => sum + p.atk, 0) * synergyBonus;
+  if (crit) myPower *= 1.5;
+
+  const defPct = getRelicBonus('def_pct').total;
+  let enemyPower = (120 * state.seedBoss.atkMult * enemyHpMult) / (1 + defPct / 100);
+
+  const firstStrike = getRelicBonus('first_strike').flag;
+  const win = firstStrike ? true : myPower >= enemyPower;
+
+  setTimeout(() => {
+    if (win) {
+      state.seedCleared = true;
+      const mult = reward3x ? 3 : 1;
+      const gold = 300 * mult;
+      state.gold += gold;
+
+      // ranking grade by clear speed/turns (simplified)
+      const rank = state.seedRules.some(r => r.id === 'speed_run') ? 'S' : 'A';
+      let relicDrop = '';
+      if (Math.random() < 0.25 || rank === 'S') {
+        const newRelic = RELICS[Math.floor(Math.random() * RELICS.length)];
+        if (!state.relics.find(r => r.id === newRelic.id)) {
+          state.relics.push(newRelic);
+          relicDrop = ` · 🔮 ${newRelic.name} 획득!`;
+        }
+      }
+
+      log(`🌌 시드 던전 클리어! [${rank}] ${state.seedBoss.name} 처치 · +${gold.toLocaleString()}G${relicDrop}`, 'win reward');
+      gainPassXp(80 * mult);
+      renderSeedDungeon();
+      renderRelicSlots();
+      updateUI();
+    } else {
+      log(`💀 시드 던전 실패... ${state.seedBoss.name}이(가) 강력합니다.`, 'lose');
+    }
+
+    btn.disabled = false;
+    btn.textContent = state.seedCleared ? '✅ 이번 주 클리어 완료' : '🌠 시드 던전 도전';
+  }, 1500);
 }
 
 function closeRoulette() {
