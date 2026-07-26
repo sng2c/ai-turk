@@ -170,6 +170,22 @@
     .dex-pet.owned { opacity: 1; border-color: var(--accent); box-shadow: 0 0 6px var(--accent); }
     .dex-tag { font-size: 10px; padding: 2px 6px; border-radius: 6px; background: var(--ok); color: #0a0808; }
     .dex-tag.pending { background: #403830; color: var(--dim); }
+    .story-card { background: #0e0b09; border: 1px solid #403830; border-radius: 12px; padding: 12px; margin: 8px 0; }
+    .story-title { font-size: 14px; font-weight: 900; color: var(--accent); margin-bottom: 6px; }
+    .story-text { font-size: 12px; color: var(--dim); line-height: 1.6; }
+    .cutscene-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.95);
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 200;
+      padding: 24px;
+      text-align: center;
+    }
+    .cutscene-boss { font-size: 80px; margin-bottom: 16px; animation: pulse 1.5s infinite; }
+    .cutscene-title { font-size: 24px; font-weight: 900; color: var(--accent); margin-bottom: 8px; }
+    .cutscene-sub { font-size: 14px; color: var(--dim); margin-bottom: 24px; }
+    .cutscene-quote { font-size: 16px; color: var(--text); font-style: italic; max-width: 360px; margin-bottom: 32px; line-height: 1.6; }
+    @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); opacity: 0.8; } }
   </style>
 </head>
 <body>
@@ -294,6 +310,30 @@
       </div>
       <div id="rouletteResult">...</div>
       <button class="btn close-btn" onclick="closeRoulette()">확인</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h2 style="margin:0; font-size:18px;">📜 스토리 & 세계관</h2>
+      <span style="font-size:11px; color:var(--dim);" id="storyProgress">0 / 5 해금</span>
+    </div>
+    <div id="storyList"></div>
+  </div>
+
+  <div class="cutscene-overlay" id="cutsceneModal">
+    <div class="cutscene-boss" id="cutsceneIcon">👑</div>
+    <div class="cutscene-title" id="cutsceneTitle"></div>
+    <div class="cutscene-sub" id="cutsceneSub"></div>
+    <div class="cutscene-quote" id="cutsceneQuote"></div>
+    <button class="btn" onclick="closeCutscene()">전투 시작</button>
+  </div>
+
+  <div class="modal-overlay" id="storyModal">
+    <div class="modal">
+      <h2 id="storyModalTitle">📜 스토리</h2>
+      <div id="storyModalContent" style="text-align:left; font-size:13px; line-height:1.6;"></div>
+      <button class="btn close-btn" onclick="closeStoryModal()">닫기</button>
     </div>
   </div>
 

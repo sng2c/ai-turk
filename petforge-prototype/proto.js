@@ -37,10 +37,25 @@ const SEED_RULES = [
 ];
 
 const SEED_BOSSES = [
-  { name: '성운 거대 골렘', icon: '🗿', hpMult: 3, atkMult: 1.4 },
-  { name: '혼돈의 별핵', icon: '☄️', hpMult: 2.5, atkMult: 1.8 },
-  { name: '심해 우주선', icon: '🛸', hpMult: 2, atkMult: 2.0 },
-  { name: '태양 폭군', icon: '🌞', hpMult: 3.5, atkMult: 1.5 },
+  { name: '성운 거대 골렘', icon: '🗿', hpMult: 3, atkMult: 1.4, title: '별의 파수꾼', quote: '빛나는 돌멩이들이여... 이 곳을 지나갈 수는 없다.' },
+  { name: '혼돈의 별핵', icon: '☄️', hpMult: 2.5, atkMult: 1.8, title: '질서를 거스르는 자', quote: '나는 태초의 혼돈. 질서는 곧 붕괴할 것이다.' },
+  { name: '심해 우주선', icon: '🛸', hpMult: 2, atkMult: 2.0, title: '잠든 심해의 거대 존재', quote: '깊은 어둠 속에서... 우리는 늘 깨어있었다.' },
+  { name: '태양 폭군', icon: '🌞', hpMult: 3.5, atkMult: 1.5, title: '불타는 폭군', quote: '내 빛 앞에서 모두 재가 되리라!' },
+];
+
+const STORY_CARDS = [
+  { id: 'intro', name: '서막: PetForge', icon: '🌌', condition: () => true,
+    text: '먼 은하계의 끝, 4대 성운이 충돌하며 태어난 생명체들. 그들은 서로를 알아보지 못하고, 끝없는 전투를 시작했다. 당신은 이 우주의 교배사. 전설의 종족을 완성하고 은하계의 질서를 되찾아라.' },
+  { id: 'streak5', name: '5연승의 전설', icon: '🔥', condition: () => state.streak >= 5,
+    text: '5연승을 달성한 당신의 이름이 은하계 전역에 퍼지기 시작했다. 작은 교배사가 영웅으로 각성하는 순간이다.' },
+  { id: 'seed_first', name: '시드 던전의 비밀', icon: '🌠', condition: () => state.seedCleared,
+    text: '시드 던전의 보스를 처치하고 고대 유물을 손에 넣었다. 이 유물들은 단순한 도구가 아니다. 그것은 잃어버린 문명의 기억이다.' },
+  { id: 'pvp_first', name: '아레나의 입문자', icon: '⚔️', condition: () => state.arenaHistory.length > 0,
+    text: 'PvP 아레나에서 첫 전투를 치렀다. 실제 상대와 맞붙는 긴장감은 AI와는 차원이 다르다. 이제 진정한 전사의 길이 열렸다.' },
+  { id: 'dex_base4', name: '태초의 4종족', icon: '✦', condition: () => state.dexClaimed.has('base4'),
+    text: '빛, 땅, 물, 불. 4개의 기원이 하나로 모였다. 세상의 균형은 이 네 힘이 조화를 이룰 때 비로소 회복된다.' },
+  { id: 'ancient_relic', name: '고대 유물의 부활', icon: '🔮', condition: () => state.equippedRelics.some(r => r && r.id === 'galactic_orb'),
+    text: '은하 구슬이 빛을 발한다. 이 유물을 장착한 자는 성운의 흐름을 읽을 수 있게 된다. 당신은 이제 우주의 섭리에 접근했다.' },
 ];
 
 const PASS_REWARDS = [
@@ -88,6 +103,7 @@ let state = {
   defenseDeck: [],
   ownedPets: [0, 1, 2, 3], // pet IDs owned for dex
   dexClaimed: new Set(),
+  seenCutscenes: new Set(),
 };
 
 function init() {
@@ -100,6 +116,7 @@ function init() {
   renderSeedDungeon();
   renderArena();
   renderDex();
+  renderStory();
   updateUI();
   setInterval(updateSeedTimer, 60000);
 }
@@ -176,6 +193,7 @@ function updateUI() {
 
   updateSeedTimer();
   renderDex();
+  renderStory();
 }
 
 function log(msg, cls = '') {
@@ -209,6 +227,11 @@ function startQuickBattle() {
 
   const firstStrike = getRelicBonus('first_strike').flag;
   const win = firstStrike ? true : myPower >= enemyPower;
+
+  // First battle ever cutscene
+  if (state.battles === 0) {
+    showCutscene({ name: '첫 전투', icon: '⚔️', title: '교배사의 첫걸음', quote: '첫 번째 전투. 네 마리 종족 중 누가 은하계를 정복할까?' });
+  }
 
   setTimeout(() => {
     state.battles++;
@@ -489,6 +512,11 @@ function runSeedDungeon() {
   const firstStrike = getRelicBonus('first_strike').flag;
   const win = firstStrike ? true : myPower >= enemyPower;
 
+  // Show boss cutscene on first encounter
+  if (!state.seenCutscenes.has(state.seedBoss.name)) {
+    setTimeout(() => showCutscene(state.seedBoss), 0);
+  }
+
   setTimeout(() => {
     if (win) {
       state.seedCleared = true;
@@ -523,6 +551,48 @@ function runSeedDungeon() {
 
 function closeRoulette() {
   document.getElementById('rouletteModal').style.display = 'none';
+}
+
+// Story & Cutscene functions
+function renderStory() {
+  const el = document.getElementById('storyList');
+  if (!el) return;
+  const unlocked = STORY_CARDS.filter(s => s.condition());
+  document.getElementById('storyProgress').textContent = `${unlocked.length} / ${STORY_CARDS.length} 해금`;
+
+  el.innerHTML = STORY_CARDS.map(s => {
+    const isUnlocked = s.condition();
+    return `<div class="story-card" style="opacity:${isUnlocked ? 1 : 0.5}" onclick="${isUnlocked ? `openStory('${s.id}')` : ''}">
+      <div class="story-title">${isUnlocked ? s.icon : '🔒'} ${s.name}</div>
+      <div class="story-text">${isUnlocked ? s.text.slice(0, 40) + '...' : '조건 미달성: 계속 플레이하세요'}</div>
+    </div>`;
+  }).join('');
+}
+
+function openStory(id) {
+  const s = STORY_CARDS.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('storyModalTitle').textContent = `${s.icon} ${s.name}`;
+  document.getElementById('storyModalContent').textContent = s.text;
+  document.getElementById('storyModal').style.display = 'flex';
+}
+
+function closeStoryModal() {
+  document.getElementById('storyModal').style.display = 'none';
+}
+
+function showCutscene(boss) {
+  if (state.seenCutscenes.has(boss.name)) return;
+  state.seenCutscenes.add(boss.name);
+  document.getElementById('cutsceneIcon').textContent = boss.icon;
+  document.getElementById('cutsceneTitle').textContent = boss.title || '👑 최종 보스';
+  document.getElementById('cutsceneSub').textContent = `${boss.name} 등장`;
+  document.getElementById('cutsceneQuote').textContent = `"${boss.quote || '자... 전투를 시작하지.'}"`;
+  document.getElementById('cutsceneModal').style.display = 'flex';
+}
+
+function closeCutscene() {
+  document.getElementById('cutsceneModal').style.display = 'none';
 }
 
 // Dex Set functions
