@@ -56,6 +56,13 @@ const PASS_REWARDS = [
               paid: { icon: '🌟', name: 'UR 뽑기권', reward: () => {} } },
 ];
 
+const DEX_SETS = [
+  { id: 'base4', name: '태초의 4종족', desc: '기본 종족 4종 수집', pets: [0, 1, 2, 3], bonus: { hp: 3 } },
+  { id: 'g1_fire_light', name: 'G1 혼혈: 태양의 후예', desc: '루미나 + 이그니스 계열', pets: [0, 3, 6], bonus: { atk: 3 } },
+  { id: 'g1_earth_water', name: 'G1 혼혈: 대지의 심연', desc: '테라스 + 아쿠아 계열', pets: [1, 2, 7], bonus: { def: 3 } },
+  { id: 'g2_prism', name: 'G2 수정 군주', desc: '빛 × 땅 × 물', pets: [10, 11, 12], bonus: { critRate: 3 } },
+];
+
 let state = {
   gold: 1200,
   streak: 0,
@@ -79,6 +86,8 @@ let state = {
   arenaScore: 1000,
   arenaHistory: [],
   defenseDeck: [],
+  ownedPets: [0, 1, 2, 3], // pet IDs owned for dex
+  dexClaimed: new Set(),
 };
 
 function init() {
@@ -90,6 +99,7 @@ function init() {
   generateWeeklySeed();
   renderSeedDungeon();
   renderArena();
+  renderDex();
   updateUI();
   setInterval(updateSeedTimer, 60000);
 }
@@ -165,6 +175,7 @@ function updateUI() {
   document.getElementById('defenseTag').textContent = `방어 덱: ${state.defenseDeck.map(p => p.icon).join('')}`;
 
   updateSeedTimer();
+  renderDex();
 }
 
 function log(msg, cls = '') {
@@ -509,6 +520,66 @@ function runSeedDungeon() {
 
 function closeRoulette() {
   document.getElementById('rouletteModal').style.display = 'none';
+}
+
+// Dex Set functions
+function getDexBonus() {
+  const bonus = { hp: 0, atk: 0, def: 0, critRate: 0 };
+  DEX_SETS.forEach(set => {
+    const owned = set.pets.every(id => state.ownedPets.includes(id));
+    if (owned && state.dexClaimed.has(set.id)) {
+      Object.entries(set.bonus).forEach(([k, v]) => bonus[k] += v);
+    }
+  });
+  return bonus;
+}
+
+function renderDex() {
+  const el = document.getElementById('dexList');
+  if (!el) return;
+  const bonus = getDexBonus();
+  const completed = DEX_SETS.filter(s => {
+    const owned = s.pets.every(id => state.ownedPets.includes(id));
+    return owned && state.dexClaimed.has(s.id);
+  }).length;
+  document.getElementById('dexTotal').textContent = `${completed} / ${DEX_SETS.length} 세트 완성`;
+
+  el.innerHTML = DEX_SETS.map(set => {
+    const ownedIds = set.pets.map(id => state.ownedPets.includes(id));
+    const allOwned = ownedIds.every(Boolean);
+    const claimed = state.dexClaimed.has(set.id);
+    const progress = `${ownedIds.filter(Boolean).length} / ${set.pets.length}`;
+    const bonusText = Object.entries(set.bonus).map(([k, v]) => `전체 ${k.toUpperCase()} +${v}%`).join(', ');
+
+    return `<div class="dex-row">
+      <div class="dex-set">
+        <div class="dex-name">${set.name}</div>
+        <div class="dex-bonus">${bonusText}</div>
+        <div class="dex-progress">${progress}</div>
+      </div>
+      <div class="dex-pets">
+        ${set.pets.map((id, i) => {
+          const p = PETS.find(x => x.id === id);
+          return `<div class="dex-pet ${ownedIds[i] ? 'owned' : ''}">${p ? p.icon : '?'}</div>`;
+        }).join('')}
+      </div>
+      ${allOwned && !claimed ? `<button class="tier-btn" onclick="claimDex('${set.id}')">활성화</button>` : ''}
+      ${claimed ? `<span class="dex-tag">적용중</span>` : ''}
+      ${!allOwned ? `<span class="dex-tag pending">미완성</span>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function claimDex(setId) {
+  const set = DEX_SETS.find(s => s.id === setId);
+  if (!set) return;
+  const allOwned = set.pets.every(id => state.ownedPets.includes(id));
+  if (!allOwned || state.dexClaimed.has(setId)) return;
+  state.dexClaimed.add(setId);
+  const bonusText = Object.entries(set.bonus).map(([k, v]) => `${k.toUpperCase()} +${v}%`).join(', ');
+  log(`📖 도감 세트 완성! ${set.name} · ${bonusText} 영구 적용`, 'reward');
+  renderDex();
+  updateUI();
 }
 
 // PvP Arena functions
