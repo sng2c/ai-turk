@@ -164,9 +164,14 @@ function uuidv4Fallback(): string {
 	});
 }
 
-// ── 유저 구분키 — 브라우저(localStorage) 고유 ID. 사생활 탭 = 다른 키 = 다른 세션.
+// ── 유저 구분키 — URL hash 우선(링크 공유 오버라이드), 없으면 브라우저(localStorage) 고유 ID.
+//    hash 있으면 → 그 키로 세션 오버라이드 (공유 링크 수신자 = 발신자 세션 참여; localStorage 미건드림)
+//    hash 없으면 → localStorage 키를 URL hash에 적용 후 그 키로 세션 초기화
 export const TURK_USER_KEY: string = (() => {
+	const hashKey = location.hash.replace(/^#/, "").trim();
+	if (hashKey) return hashKey; // 링크 공유 오버라이드
 	let k = localStorage.getItem("turk-user-key");
 	if (!k) { k = crypto.randomUUID?.() ?? uuidv4Fallback(); localStorage.setItem("turk-user-key", k); }
+	try { history.replaceState(null, "", `#${k}`); } catch {} // 브라우저 키 → URL hash 동기화 (히스토리 항목/스크롤 미발생)
 	return k;
 })();
