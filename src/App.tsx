@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
-	TURK_USER_KEY,
+	TURK_USER_KEY, resolveUserKey,
 	emptyState, errState, extractAssistantText, parseTurkJSON,
 	subscribePush, Md,
 } from "./lib/turk";
@@ -97,6 +97,10 @@ export default function App() {
 		setCanScrollUp(el.scrollTop > 2);
 		setCanScrollDown(el.scrollTop + el.clientHeight < el.scrollHeight - 2);
 	}, []);
+	// 런타임 hash 전환 대응 — userKey state(표시/리렌더) + ref(stable connect 콜백 내 최신값 참조)
+	const [userKey, setUserKey] = useState(TURK_USER_KEY);
+	const userKeyRef = useRef(userKey);
+	userKeyRef.current = userKey; // 매 렌더링 동기화 (hashchange 핸들러에서 즉시 직접 갱신도 병행)
 	const wsRef = useRef<WebSocket | null>(null);
 	const inputRef = useRef<HTMLInputElement>(null);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -118,7 +122,7 @@ export default function App() {
 
 	// ── WebSocket 연결 ──────────────────────────────────────────────────
 	const connect = useCallback(() => {
-		const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws?u=${TURK_USER_KEY}`;
+		const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws?u=${userKeyRef.current}`;
 		const ws = new WebSocket(wsUrl);
 		wsRef.current = ws;
 		shouldReconnect.current = true;
@@ -169,6 +173,35 @@ export default function App() {
 		};
 		document.addEventListener("visibilitychange", onVisible);
 		return () => document.removeEventListener("visibilitychange", onVisible);
+	}, [connect]);
+
+	// ── URL hash 런타임 변경 → 세션 전환 (링크 공유/복귀) ─────────────────
+	// hashchange(주소창 편집·공유 링크 이동·뒤로가기) 시 userKey 재계산 → 변경되면 기존 WS 종료(자동재연결 억제) 후 새 userKey로 재접속.
+	useEffect(() => {
+		const onHashChange = () => {
+			const next = resolveUserKey();
+			if (next === userKeyRef.current) return; // 동일 키 → 무시
+			// userKey 즉시 갱신 — ref는 connect가 즉시 볼 수 있게, state는 리렌더/표시 갱신용
+			userKeyRef.current = next;
+			setUserKey(next);
+			// 세션 관련 상태 초기화 — 새 get_state 복원 전까지 dim
+			setSessionId("");
+			setRestored(false);
+			setPiReady(false);
+			setLoading(false);
+			retryCountRef.current = 0;
+			streamingTextRef.current = "";
+			setState({ message: "", buttons: {} });
+			// 기존 WS 종료 — onclose 자동 재연결 억제 후 새 userKey로 수동 재접속
+			shouldReconnect.current = false;
+			clearTimeout(reconnectTimer.current);
+			wsRef.current?.close();
+			shouldReconnect.current = true;
+			reconnectDelay.current = 1000;
+			connect();
+		};
+		window.addEventListener("hashchange", onHashChange);
+		return () => window.removeEventListener("hashchange", onHashChange);
 	}, [connect]);
 
 	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
@@ -813,8 +846,8 @@ export default function App() {
 			</header>
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
-				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${TURK_USER_KEY} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "\"NeoDunggeunmo\", monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
-					{TURK_USER_KEY.slice(-6)}|{sessionId ? sessionId.slice(-6) : "—"}
+				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${userKey} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "\"NeoDunggeunmo\", monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
+					{userKey.slice(-6)}|{sessionId ? sessionId.slice(-6) : "—"}
 				</div>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
 				{canScrollUp && (
