@@ -11,11 +11,16 @@ cd "$TURK_DIR"
 ENV_FILE=""
 ENV_FLAG=""
 CMD=""
+PROD=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --env|-e)
       shift
       ENV_FLAG="$1"
+      shift
+      ;;
+    --prod|-p)
+      PROD=1
       shift
       ;;
     *)
@@ -86,8 +91,10 @@ AI Turk 제어 도구
 
 명령:
   start     개발 서버 시작 (npm run dev, 백그라운드)
+  start --prod  프로덕션 서버 시작 (tsx server.ts, dist/ 정적 서빙)
   stop      서버 및 pi 프로세스 종료 (해당 포트만)
   restart   서버 재시작
+  restart --prod  프로덕션 서버 재시작
   status    실행 상태 확인
   logs      최근 로그 출력 (tail -f)
   build     프로덕션 빌드
@@ -97,9 +104,11 @@ AI Turk 제어 도구
   help      이 도움말
 
 예시:
-  turkctl start                         # .env 사용 (기본)
+  turkctl start                         # .env 사용 (기본, dev)
+  turkctl start --prod                  # 프로덕션 (정적 dist/ + WS)
   TURK_ENV_FILE=.env.8003 turkctl start  # 환경변수로 .env.8003 지정
   turkctl --env .env.8003 start          # 플래그로 .env.8003 지정
+  turkctl --env .env.8004 start --prod  # 8004 인스턴스 프로덕션
   turkctl --env .env.8004 restart        # 8004 인스턴스 재시작
   turkctl status
   turkctl logs
@@ -150,7 +159,11 @@ cmd_start() {
     echo "✅ 이미 실행 중: http://$TURK_HOST:$TURK_PORT (env: $ENV_FILE)"
     return 0
   fi
-  echo "▶ 서버 시작 중... (포트 $TURK_PORT, env: $ENV_FILE)"
+  if [ "$PROD" -eq 1 ]; then
+    cmd_start_prod
+    return $?
+  fi
+  echo "▶ 서버 시작 중... (포트 $TURK_PORT, env: $ENV_FILE, dev)"
   cd "$TURK_DIR"
   kill_port
   sleep 1
@@ -160,7 +173,34 @@ cmd_start() {
   echo $! > "$PID_FILE"
   sleep 5
   if is_running; then
-    echo "✅ 서버 실행됨: http://$TURK_HOST:$TURK_PORT"
+    echo "✅ 서버 실행됨: http://$TURK_HOST:$TURK_PORT (dev)"
+    echo "   WebSocket: ws://$TURK_HOST:$TURK_PORT/ws"
+    echo "   로그: $LOG_FILE"
+  else
+    echo "❌ 시작 실패 — 로그 확인: turkctl logs"
+    tail -5 "$LOG_FILE" 2>/dev/null
+    return 1
+  fi
+}
+
+# 프로덕션 모드: dist/ 정적 서빙 + WS + 백엔드 (tsx server.ts)
+cmd_start_prod() {
+  echo "▶ 서버 시작 중... (포트 $TURK_PORT, env: $ENV_FILE, prod)"
+  cd "$TURK_DIR"
+  kill_port
+  sleep 1
+  load_env
+  # dist/ 없으면 빌드
+  if [ ! -d "$TURK_DIR/dist" ] || [ ! -f "$TURK_DIR/dist/index.html" ]; then
+    echo "   dist/ 없음 — 빌드 수행..."
+    npm run build >/dev/null 2>&1 || { echo "❌ 빌드 실패"; return 1; }
+  fi
+  rotate_log
+  nohup npx tsx "$TURK_DIR/server.ts" > "$LOG_FILE" 2>&1 &
+  echo $! > "$PID_FILE"
+  sleep 3
+  if is_running; then
+    echo "✅ 서버 실행됨: http://$TURK_HOST:$TURK_PORT (prod/static)"
     echo "   WebSocket: ws://$TURK_HOST:$TURK_PORT/ws"
     echo "   로그: $LOG_FILE"
   else
