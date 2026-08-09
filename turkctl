@@ -133,6 +133,18 @@ kill_port() {
   fi
 }
 
+# 로그 로테이션: 이전 로그를 타임스탬프 백업으로 보존 (최근 5개 유지)
+rotate_log() {
+  [ -f "$LOG_FILE" ] || return 0
+  local ts backup
+  ts=$(date +%Y%m%d-%H%M%S)
+  backup="$LOG_FILE.$ts"
+  mv -f "$LOG_FILE" "$backup" 2>/dev/null || return 0
+  echo "   이전 로그 백업: $backup"
+  # 최근 5개만 유지, 오래된 백업 정리
+  ls -1t "$LOG_FILE".* 2>/dev/null | tail -n +6 | xargs -r rm -f
+}
+
 cmd_start() {
   if is_running; then
     echo "✅ 이미 실행 중: http://$TURK_HOST:$TURK_PORT (env: $ENV_FILE)"
@@ -143,6 +155,7 @@ cmd_start() {
   kill_port
   sleep 1
   load_env
+  rotate_log
   nohup node "$TURK_DIR/node_modules/vite/bin/vite.js" > "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   sleep 5
@@ -226,10 +239,11 @@ cmd_ws() {
   cd "$TURK_DIR"
   npx tsx -e '
 import WebSocket from "ws";
-const ws = new WebSocket("ws://$TURK_HOST:'"$TURK_PORT"'/ws");
+const ws = new WebSocket("ws://'"$TURK_HOST"':'"$TURK_PORT"'/ws?u=turkctl-probe");
 ws.on("open", () => { console.log("✅ WS 연결됨"); ws.send(JSON.stringify({ type: "get_state" })); });
 ws.on("message", (raw) => {
   const msg = JSON.parse(raw.toString());
+  if (msg.type === "session_error") { console.error("❌ 세션 오류:", msg.error); process.exit(1); }
   if (msg.type === "pi_ready") console.log("✅ pi 준비됨");
   if (msg.type === "response" && msg.command === "get_state") {
     console.log("세션:", msg.data?.sessionId ?? "—");
@@ -250,7 +264,7 @@ cmd_session() {
   cd "$TURK_DIR"
   npx tsx -e '
 import WebSocket from "ws";
-const ws = new WebSocket("ws://$TURK_HOST:'"$TURK_PORT"'/ws");
+const ws = new WebSocket("ws://'"$TURK_HOST"':'"$TURK_PORT"'/ws?u=turkctl-probe");
 ws.on("open", () => ws.send(JSON.stringify({ type: "get_state" })));
 ws.on("message", (raw) => {
   const msg = JSON.parse(raw.toString());
