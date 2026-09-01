@@ -453,7 +453,14 @@ export default function App() {
 									kvGet(`${msg.data.sessionId}:last-response`),
 									kvGet(`${msg.data.sessionId}:input`),
 								]);
-								if (saved) {
+								// 서버 캐시 응답 우선 — 백그라운드/재연결 중 놓친 agent_end 복원 (IndexedDB 저장은 수신 시에만 갱신 → 유실 시 구버전)
+								const lr = (msg.data as any).lastResponse;
+								const lrText = lr && Array.isArray(lr.messages) ? extractAssistantText(lr.messages) : "";
+								const lrRes = lrText ? parseTurkJSON(lrText) : null;
+								if (lrRes && "parsed" in lrRes && lrRes.parsed.silent !== true) {
+									commit(lrRes.parsed);
+									setLoading(false);
+								} else if (saved) {
 									const result = parseTurkJSON(saved);
 									if (result && "parsed" in result && result.parsed.silent !== true) commit(result.parsed);
 								} else {
@@ -467,6 +474,7 @@ export default function App() {
 					}
 					setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
+					else setLoading(false); // 놓친 agent_end(백그라운드 유실)로 인한 로딩 스틱 해제
 					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null) : (m.reasoning ? ["off", "high"] : ["off"]); }
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);
