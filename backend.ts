@@ -52,6 +52,7 @@ class JsonlBackend implements Backend {
 	protected decoder = new StringDecoder("utf8");
 	protected buffer = "";
 	protected cb: ((ev: TurkEvent) => void) | null = null;
+	protected stopping = false; // stop() 호출 여부 — exit 이벤트 브로드캐스트 억제용
 	protected readonly log: (msg: string) => void;
 	protected opts: BackendOptions;
 
@@ -68,7 +69,7 @@ class JsonlBackend implements Backend {
 	send(_cmd: Record<string, unknown>): void { throw new Error("send() not implemented"); }
 
 	stop(): void {
-		if (this.proc) { this.proc.kill("SIGTERM"); this.proc = null; }
+		if (this.proc) { this.stopping = true; this.proc.kill("SIGTERM"); this.proc = null; }
 	}
 
 	/** stdout 청크 → 줄 단위 JSONL → emit(변환된 이벤트). */
@@ -104,6 +105,10 @@ class JsonlBackend implements Backend {
 		proc.on("exit", (code) => {
 			this.log(`[Turk] ${label} 종료 (코드: ${code})`);
 			this.proc = null;
+			// 의도적 종료(restart_pi)는 pi_exit 브로드캐스트 생략 —
+			// 신규 백엔드 pi_ready 직후 늦게 도착하는 exit 이벤트가 클라이언트를
+			// pi_starting(노랑)에 고정하는 레이스 방지
+			if (this.stopping) return;
 			this.emit({ type: "pi_exit", code });
 		});
 		proc.on("error", (err) => {
