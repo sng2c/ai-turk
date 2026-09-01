@@ -73,6 +73,7 @@ interface Session {
 	pushSubscription: any; // 마지막 구독 (1인 — 세션당 1개)
 	ws: Set<WebSocket>; // 같은 유저 다중 탭 — 동일 세션 broadcast
 	lastPrompt: string | null; // 마지막 프롬프트 (새로고침 복원용)
+	lastResponse: any | null; // 마지막 agent_end 이벤트 캐시 — WS 미연결(백그라운드) 유실분 복원용 (마지막 1건)
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
 	lastActivity: number; // 마지막 활동 타임스탬프 (LRU 정리용)
 	currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
@@ -117,12 +118,13 @@ function startBackend(session: Session): void {
 			session.isStreaming = false;
 			if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] agent_end 도착 — drainQueue 호출`);
 			session.lastPrompt = null;
+			session.lastResponse = ev; // WS 미연결 동안 유실 대비 — get_state 복원용 캐시
 			session.scheduler.drainQueue();
 			if (session.pushSubscription) sendPushNotification(session, ev);
 		}
 		// get_state 응답 보강: lastPrompt + isStreaming 주입
 		if (ev.type === "response" && ev.command === "get_state") {
-			(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute };
+			(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse };
 		}
 		broadcast(session, ev);
 	});
@@ -245,6 +247,7 @@ function createSession(userKey: string): Session {
 		pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원 (재시작 후 재구독 불필요)
 		ws: new Set(),
 		lastPrompt: null,
+		lastResponse: null,
 		isStreaming: false,
 		lastActivity: Date.now(),
 		currentRoute: "user",
@@ -356,6 +359,7 @@ wss.on("connection", (ws, req) => {
 					session.backendReady = false;
 					session.agentSessionId = null;
 				session.lastPrompt = null; // 새 세션 — 저장된 ID 클리어 → 백엔드 --no-session(새 세션) → ready 후 get_state로 새 ID 갱신
+				session.lastResponse = null; // 새 세션 — 응답 캐시 클리어
 					console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 					setTimeout(() => startBackend(session), 500);
 				} else if (msg.type === "schedule") {
