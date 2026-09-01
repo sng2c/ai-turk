@@ -27,6 +27,27 @@ export default function App() {
 		});
 		gridVerRef.current = gridVerRef.current ? 0 : 1;
 	}, []);
+
+	// 대사 히스토리 — 최종 확정 화면의 페이지 스택 (메모리 전용, 새로고침 시 소실, 최대 50)
+	const historyRef = useRef<TurkState[]>([]);
+	const histIdxRef = useRef(-1); // 현재 보고 있는 페이지 인덱스 (최신 = length-1)
+	// 최종 화면 커밋 — setState + 히스토리 push. 과도 뷰(모델 선택/세션 상세)는 이것을 쓰지 않음
+	const commit = useCallback((next: TurkState) => {
+		setState(next);
+		const h = historyRef.current;
+		h.push(next);
+		if (h.length > 50) h.shift();
+		histIdxRef.current = h.length - 1;
+	}, [setState]);
+	// 히스토리 페이지 이동 (+1 다음 / -1 이전) — 뷰 전환만 (커밋 아님)
+	const goHistory = useCallback((delta: number) => {
+		const h = historyRef.current;
+		if (!h.length) return;
+		const next = Math.min(h.length - 1, Math.max(0, histIdxRef.current + delta));
+		if (next === histIdxRef.current) return;
+		histIdxRef.current = next;
+		setState(h[next]);
+	}, [setState]);
 	const [loading, setLoading] = useState(false);
 	const clearInput = () => { setInput(""); sessionId && kvDel(`${sessionId}:input`); };
 	const [input, setInput] = useState(() => {
@@ -323,13 +344,13 @@ export default function App() {
 								stateWithoutSchedules.message = schedulerPrefixRef.current + (stateWithoutSchedules.message || "");
 								schedulerPrefixRef.current = null;
 							}
-							setState(stateWithoutSchedules);
+							commit(stateWithoutSchedules);
 						} else {
 							if (schedulerPrefixRef.current) {
 								parsed.message = schedulerPrefixRef.current + (parsed.message || "");
 								schedulerPrefixRef.current = null;
 							}
-							setState(parsed);
+							commit(parsed);
 						}
 					} else {
 						// 스트리밍본으로 한 번 더 시도 (messages가 잘렸을 수 있음)
@@ -358,13 +379,13 @@ export default function App() {
 									stateWithoutSchedules.message = schedulerPrefixRef.current + (stateWithoutSchedules.message || "");
 									schedulerPrefixRef.current = null;
 								}
-								setState(stateWithoutSchedules);
+								commit(stateWithoutSchedules);
 							} else {
 								if (schedulerPrefixRef.current) {
 									parsed.message = schedulerPrefixRef.current + (parsed.message || "");
 									schedulerPrefixRef.current = null;
 								}
-								setState(parsed);
+								commit(parsed);
 							}
 						} else if (retryCountRef.current < MAX_PARSE_RETRIES) {
 							// 자가 수정 재시도: 원문 + JSON.parse 에러를 모델에게 돌려주며 형식 재요청
@@ -380,13 +401,13 @@ export default function App() {
 							schedulerPrefixRef.current = null; // prefix 클리어
 							const errInfo = (result && "error" in result) ? result.error
 								: (fallback && "error" in fallback) ? fallback.error : "알 수 없는 오류";
-							setState(errState(`[파싱실패] ${errInfo}\n${text.slice(0, 150)}`, gridRef.current.rows, gridRef.current.cols));
+							commit(errState(`[파싱실패] ${errInfo}\n${text.slice(0, 150)}`, gridRef.current.rows, gridRef.current.cols));
 						}
 					}
 				} else if (!loading) {
 					// 응답 텍스트 자체가 없는 경우 (도구만 사용 등)
 					schedulerPrefixRef.current = null; // prefix 클리어
-					setState(errState("응답이 비어 있습니다. 다시 시도해주세요.", gridRef.current.rows, gridRef.current.cols));
+					commit(errState("응답이 비어 있습니다. 다시 시도해주세요.", gridRef.current.rows, gridRef.current.cols));
 				}
 				break;
 			}
@@ -434,7 +455,7 @@ export default function App() {
 								]);
 								if (saved) {
 									const result = parseTurkJSON(saved);
-									if (result && "parsed" in result && result.parsed.silent !== true) setState(result.parsed);
+									if (result && "parsed" in result && result.parsed.silent !== true) commit(result.parsed);
 								} else {
 									setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 								}
@@ -735,10 +756,13 @@ export default function App() {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({ type: "restart_pi" }));
+				historyRef.current = []; histIdxRef.current = -1; // 새 세션 — 히스토리 클리어
 				setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 			}
 			return;
 		}
+		if (text === "/prev") { goHistory(-1); return; }
+		if (text === "/next") { goHistory(1); return; }
 		if (text === "/model") {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
@@ -836,6 +860,7 @@ export default function App() {
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {
 					ws.send(JSON.stringify({ type: "restart_pi" }));
+					historyRef.current = []; histIdxRef.current = -1; // 새 세션 — 히스토리 클리어
 					setState(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 				}
 			}} title={`컨텍스트 ${contextPct ?? "—"}% — 새 세션 시작`}>
@@ -850,6 +875,13 @@ export default function App() {
 					{userKey.slice(-6)}|{sessionId ? sessionId.slice(-6) : "—"}
 				</div>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
+				{historyRef.current.length > 1 && !loading && (
+					<div style={{ position: "absolute", top: "0.3rem", left: "0.4rem", display: "flex", gap: "0.4rem", alignItems: "center", fontSize: "10px", opacity: 0.55, zIndex: 5, userSelect: "none" }}>
+						<button onClick={() => goHistory(-1)} disabled={histIdxRef.current <= 0} title="지난 화면 (/prev)" style={{ background: "none", border: "none", color: "var(--foreground)", fontFamily: "inherit", fontSize: "10px", padding: 0, cursor: histIdxRef.current > 0 ? "pointer" : "default", opacity: histIdxRef.current > 0 ? 1 : 0.4 }}>◀</button>
+						<span style={{ fontFamily: "\"NeoDunggeunmo\", monospace" }}>{histIdxRef.current + 1}/{historyRef.current.length}</span>
+						<button onClick={() => goHistory(1)} disabled={histIdxRef.current >= historyRef.current.length - 1} title="최신 화면 (/next)" style={{ background: "none", border: "none", color: "var(--foreground)", fontFamily: "inherit", fontSize: "10px", padding: 0, cursor: histIdxRef.current < historyRef.current.length - 1 ? "pointer" : "default" }}>▶</button>
+					</div>
+				)}
 				{canScrollUp && (
 					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로"><ChevronUp className="turk-ico" /></button>
 				)}
