@@ -76,6 +76,7 @@ interface Session {
 	lastResponse: any | null; // 마지막 agent_end 이벤트 캐시 — WS 미연결(백그라운드) 유실분 복원용 (마지막 1건)
 	lastTurnFailed: boolean; // 응답 실패 명시 정의 — 마지막 agent_end.error 여부. get_state로 UI 전달
 	lastPrompt: string | null; // 처리중 사용자 프롬프트 — 재연결 시 "뭘 기다리는지" 입력창 표시용 (isStreaming과 짝)
+	lastResponsePrompt: string | null; // lastResponse가 대답하는 프롬프트 — 응답 상단 짝표시용
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
 	lastActivity: number; // 마지막 활동 타임스탬프 (LRU 정리용)
 	currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
@@ -123,7 +124,7 @@ function startBackend(session: Session): void {
 			const aborted = Array.isArray((ev as any).messages) && (ev as any).messages.some((m: any) => m.role === "assistant" && m.stopReason === "aborted");
 			session.lastTurnFailed = !!(ev as any).error;
 			// 취소(aborted)는 성공도 실패도 아님 — lastResponse 캐시 제외. 에코는 해제(클린 스톱)
-			if (!session.lastTurnFailed && !aborted) session.lastResponse = ev;
+			if (!session.lastTurnFailed && !aborted) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; } // 응답↔프롬프트 짝
 			if (!session.lastTurnFailed) session.lastPrompt = null;
 			// 실패: lastPrompt 유지 — get_state가 재시도 에코로 전달 (실패 화면과 짝)
 			session.scheduler.drainQueue();
@@ -131,7 +132,7 @@ function startBackend(session: Session): void {
 		}
 		// get_state 응답 보강: isStreaming 등 주입
 		if (ev.type === "response" && ev.command === "get_state") {
-			(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastTurnFailed: session.lastTurnFailed };
+			(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt, lastTurnFailed: session.lastTurnFailed };
 		}
 		broadcast(session, ev);
 	});
@@ -254,6 +255,7 @@ function createSession(userKey: string): Session {
 		lastResponse: null,
 		lastTurnFailed: false,
 		lastPrompt: null,
+		lastResponsePrompt: null,
 		isStreaming: false,
 		lastActivity: Date.now(),
 		currentRoute: "user",
@@ -367,6 +369,7 @@ wss.on("connection", (ws, req) => {
 				session.lastResponse = null; // 새 세션 — 응답 캐시 클리어
 				session.lastTurnFailed = false; // 새 세션 — 실패 플래그 클리어
 				session.lastPrompt = null; // 새 세션 — 처리중 표시 클리어
+				session.lastResponsePrompt = null; // 새 세션 — 짝 정보 클리어
 					console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 					setTimeout(() => startBackend(session), 500);
 				} else if (msg.type === "schedule") {

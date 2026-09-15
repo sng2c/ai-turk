@@ -41,6 +41,7 @@ export interface TurkState {
 	schedules?: any[]; // LLM 응답의 schedules 배열 (일회성 명령 — state에 저장하지 않고 즉시 서버로 전송)
 	silent?: boolean; // true면 사용자에게 미표시 + 캐싱 안 함 (schedules는 처리)
 	repeat?: boolean; // 스케줄 반복 여부 — false면 자동 제거, true/생략 시 유지
+	answerTo?: string; // UI 주입 — 이 응답이 대답하는 입력(모델 출력 아님). 응답 상단 짝표시
 }
 
 export interface ToolStatus {
