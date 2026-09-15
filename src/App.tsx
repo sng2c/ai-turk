@@ -130,8 +130,9 @@ export default function App() {
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const shouldReconnect = useRef(true);
 	const showSessionDetail = useRef(false);
-	const modelMode = useRef(false);
-	const ctxMode = useRef(false); // 컨텍스트 칩 메뉴 모드 (새 세션/컴팩트 선택)
+	// 배타적 메뉴 모드 — 한 번에 하나의 메뉴만 열림 (none | model | ctx).
+	// prevStateRef는 최초 진입 시 1회 저장, 메뉴 간 전환 시 유지 → 취소는 항상 원래 화면 복원
+	const menuMode = useRef<"none" | "model" | "ctx">("none");
 	// 모델 선택 진입 전 UI 상태(이전 메시지/버튼) 저장용
 	const prevStateRef = useRef<TurkState | null>(null);
 	const availableModels = useRef<any[]>([]);
@@ -764,7 +765,7 @@ export default function App() {
 		buttons[String(MODELS_PER_PAGE + 2)] = "취소";
 		colors[String(MODELS_PER_PAGE + 2)] = "destructive";
 		textColors[String(MODELS_PER_PAGE + 2)] = "white";
-		modelMode.current = true;
+		menuMode.current = "model";
 		const recent = recentModelsRef.current.length > 0
 			? `\n\n**최근 선택**\n${recentModelsRef.current.map((m, i) => `${i + 1}. \`${m}\``).join("\n")}`
 			: "";
@@ -835,9 +836,9 @@ export default function App() {
 			}
 			return;
 		}
-		if (ctxMode.current) {
+		if (menuMode.current === "ctx") {
 			// 컨텍스트 메뉴 — 어떤 선택이든 메뉴 종료 후 처리
-			ctxMode.current = false;
+			menuMode.current = "none";
 			if (text === "취소") {
 				setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
 				prevStateRef.current = null;
@@ -863,9 +864,9 @@ export default function App() {
 			}
 			// 그 외 텍스트 — 메뉴 닫히고 일반 프롬프트로 통과
 		}
-		if (modelMode.current) {
+		if (menuMode.current === "model") {
 			if (text === "취소") {
-				modelMode.current = false;
+				menuMode.current = "none";
 				setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
 				prevStateRef.current = null;
 				return;
@@ -896,7 +897,7 @@ export default function App() {
 				const key = `${model.provider}/${model.name || model.id}`;
 				recentModelsRef.current = [key, ...recentModelsRef.current.filter(k => k !== key)].slice(0, 3);
 				kvSet("recentModels", JSON.stringify(recentModelsRef.current));
-				modelMode.current = false;
+				menuMode.current = "none";
 				setState(prevStateRef.current ?? emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 				prevStateRef.current = null;
 			}
@@ -936,40 +937,31 @@ export default function App() {
 				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<button className="turk-model-btn" onClick={() => {
-					if (modelMode.current) {
-						modelMode.current = false;
+					if (menuMode.current === "model") {
+						// 토글 닫기
+						menuMode.current = "none";
 						setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
 						prevStateRef.current = null;
 						return;
 					}
-					if (ctxMode.current) {
-						// 컨텍스트 메뉴 → 모델 전환: 컨텍스트 메뉴 먼저 복원 (prevState 오염 방지)
-						ctxMode.current = false;
-						setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
-						// prevStateRef 유지 — 모델 메뉴 취소 시 실제 이전 화면 복원
-					}
+					// 배타적 전환 — 다른 메뉴(ctx)가 열려 있어도 prevState는 이미 원래 화면(유지), 직접 교체
+					if (menuMode.current === "none") prevStateRef.current = state;
+					menuMode.current = "model";
 					const ws = wsRef.current;
 					if (ws?.readyState === WebSocket.OPEN) {
-						if (!ctxMode.current) prevStateRef.current = state; // 컨텍스트 전환 시엔 기존 저장 유지
 						ws.send(JSON.stringify({ type: "get_available_models" }));
 					}
 				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: (supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 || thinkingLevel === "off") ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 ? "NONE" : thinkingLevel.toUpperCase()}</button> <button className="turk-new-btn" onClick={() => {
-				if (ctxMode.current) {
-					// 토글 — 다시 누르면 닫힘 (모델 선택 버튼과 동일)
-					ctxMode.current = false;
+				if (menuMode.current === "ctx") {
+					// 토글 닫기
+					menuMode.current = "none";
 					setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
 					prevStateRef.current = null;
 					return;
 				}
-				if (modelMode.current) {
-					// 모델 메뉴 → 컨텍스트 전환: 모델 메뉴 먼저 복원 (prevState 오염 방지)
-					modelMode.current = false;
-					setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
-					// prevStateRef 유지 — 컨텍스트 메뉴 취소 시 실제 이전 화면 복원
-				} else {
-					prevStateRef.current = state;
-				}
-				ctxMode.current = true;
+				// 배타적 전환 — 모델 메뉴가 열려 있어도 prevState는 이미 원래 화면(유지)
+				if (menuMode.current === "none") prevStateRef.current = state;
+				menuMode.current = "ctx";
 				const pct = contextPct != null ? `${Math.round(contextPct)}%` : "—";
 				// 모델 선택 메뉴와 동일 레이아웃: 액션 칸 + 마지막 칸 취소(destructive)
 				const btns: Record<string, string> = Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""]));
@@ -1026,7 +1018,7 @@ export default function App() {
 							className={`turk-grid-btn${state.colors?.[idx] ? ` turk-bg-${state.colors[idx]}` : ""}${state.textColors?.[idx] ? ` turk-fg-${state.textColors[idx]}` : state.colors?.[idx] ? ` turk-fg-${["secondary", "muted", "accent", "destructive"].includes(state.colors[idx]) ? "white" : "black"}` : ""}`}
 							disabled={loading || !piReady}
 							onClick={() => handleSend(label)}
-							style={modelMode.current ? (() => {
+							style={menuMode.current === "model" ? (() => {
 								// 모델 선택 화면: 모델명이 길면 폰트 자동 축소 (기준 8칸, 최소 0.8em)
 								const w = [...label].reduce((a, c) => a + (/[^\x00-\x7F]/.test(c) ? 2 : 1), 0);
 								const delay = `${Math.floor(Number(idx) / cols) * 60}ms`;
