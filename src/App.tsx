@@ -948,6 +948,13 @@ export default function App() {
 						ws.send(JSON.stringify({ type: "get_available_models" }));
 					}
 				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: (supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 || thinkingLevel === "off") ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 ? "NONE" : thinkingLevel.toUpperCase()}</button> <button className="turk-new-btn" onClick={() => {
+				if (ctxMode.current) {
+					// 토글 — 다시 누르면 닫힘 (모델 선택 버튼과 동일)
+					ctxMode.current = false;
+					setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
+					prevStateRef.current = null;
+					return;
+				}
 				prevStateRef.current = state;
 				ctxMode.current = true;
 				const pct = contextPct != null ? `${Math.round(contextPct)}%` : "—";
