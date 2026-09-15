@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, SendHorizontal } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey,
@@ -935,7 +935,7 @@ export default function App() {
 					onScroll={updateScrollArrows}
 				>
 					{state.answerTo && (
-						<div title={state.answerTo} style={{ fontSize: "12px", fontFamily: '"NeoDunggeunmo", monospace', color: "var(--muted-foreground)", opacity: 0.75, marginBottom: "0.35rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>↳ {state.answerTo}</div>
+						<div title={state.answerTo} style={{ fontSize: "12px", fontFamily: '"NeoDunggeunmo", monospace', color: "var(--muted-foreground)", opacity: 0.75, marginBottom: "0.35rem", display: "flex", alignItems: "center", gap: "0.25rem" }}><SendHorizontal className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} /><span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span></div>
 					)}
 					{loading && toolStatus ? (
 						<span className="turk-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</span>
