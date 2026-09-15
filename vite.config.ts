@@ -281,13 +281,13 @@ function savePushSubscription(userKey: string, sub: any): void {
 		return createSession(userKey);
 	}
 
-	const customCommands = ["restart_pi", "schedule", "push_subscribe", "read_buffer"];
+	const customCommands = ["restart_pi", "schedule", "push_subscribe", "read_buffer", "attach"];
 
 	return {
 		name: "turk-rpc",
 		configureServer(server) {
 			// noServer 모드: Vite HMR 역그레이드 핸들러와 충돌 방지
-			const wss = new WebSocketServer({ noServer: true });
+			const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 }); // 첨부 base64 프레임 수용
 			server.httpServer!.on("upgrade", (req, socket, head) => {
 				const url = new URL(req.url || "", "http://localhost");
 				if (url.pathname === "/ws") {
@@ -352,6 +352,26 @@ function savePushSubscription(userKey: string, sub: any): void {
 								const missed = session.outBuf.filter((e) => e.ts > since);
 								if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Buffer] read_buffer: since=${since} → ${missed.length}건`);
 								ws.send(JSON.stringify({ type: "response", command: "read_buffer", success: true, data: { missed } }));
+							} else if (msg.type === "attach") {
+								// 파일 업로드 → 세션 워크스페이스 uploads/ 저장 — 에이전트가 자기 read 도구로 읽음
+								const MAX_ATTACH = 8 * 1024 * 1024;
+								const data = typeof msg.data === "string" ? msg.data : "";
+								const name = String(msg.name ?? "file").split(/[\\/]/).pop()!.replace(/[\x00-\x1f]/g, "").trim().slice(0, 100) || "file";
+								if (!data || data.length > MAX_ATTACH * 1.4) {
+									ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: "파일 크기 초과 — 최대 8MB" }));
+								} else {
+									try {
+										const dir = join(envPaths("ai-turk").data, userKey, "workspace", "uploads");
+										mkdirSync(dir, { recursive: true });
+										const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+										const rel = `uploads/${ts}-${name}`;
+										writeFileSync(join(envPaths("ai-turk").data, userKey, "workspace", rel), Buffer.from(data, "base64"));
+										console.log(`[${userKey.slice(0, 8)}] [Attach] 저장: ${rel}`);
+										ws.send(JSON.stringify({ type: "response", command: "attach", success: true, data: { path: rel, name } }));
+									} catch (err) {
+										ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: err instanceof Error ? err.message : String(err) }));
+									}
+								}
 							}
 						} else {
 							sendToBackend(session, msg);
