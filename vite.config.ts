@@ -42,6 +42,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		ws: Set<WebSocket>;
 		lastPrompt: string | null;
 		lastResponse: any | null; // 마지막 agent_end 캐시 — 재연결 시 get_state 복원용 (prod server.ts와 동일)
+		lastTurnFailed: boolean; // 응답 실패 명시 정의 — 마지막 agent_end.error 여부. get_state로 UI 전달
 		isStreaming: boolean;
 		lastActivity: number;
 		currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
@@ -148,7 +149,9 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			if (ev.type === "agent_end") {
 				session.isStreaming = false;
 				session.lastPrompt = null;
-				session.lastResponse = ev; // WS 미연결 동안 유실 대비 — get_state 복원용 캐시 (prod와 동일)
+				// 응답 실패 명시 정의 — agent_end.error → 실패 플래그. lastResponse는 성공분만 캐시
+				session.lastTurnFailed = !!(ev as any).error;
+				if (!session.lastTurnFailed) session.lastResponse = ev; // WS 미연결 동안 유실 대비 — get_state 복원용 캐시 (prod와 동일)
 				// LLM 응답 전체 로깅 (디버그) — push 파싱 원인 확정용
 				if (DEBUG) {
 					const msgs = (ev as any).messages;
@@ -158,7 +161,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				if (session.pushSubscription) sendPushNotification(session, ev);
 			}
 			if (ev.type === "response" && ev.command === "get_state") {
-				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse };
+				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastTurnFailed: session.lastTurnFailed };
 			}
 			broadcast(session, ev);
 		});
@@ -222,6 +225,7 @@ function savePushSubscription(userKey: string, sub: any): void {
 			ws: new Set(),
 			lastPrompt: null,
 			lastResponse: null,
+			lastTurnFailed: false,
 			isStreaming: false,
 			lastActivity: Date.now(),
 			currentRoute: "user",
@@ -314,6 +318,7 @@ function savePushSubscription(userKey: string, sub: any): void {
 								session.agentSessionId = null;
 				session.lastPrompt = null; // 새 세션 — 클리어 → 백엔드 새 세션 → ready 후 get_state로 새 ID 갱신
 				session.lastResponse = null; // 새 세션 — 응답 캐시 클리어
+				session.lastTurnFailed = false; // 새 세션 — 실패 플래그 클리어
 								console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 								setTimeout(() => startBackend(session), 500);
 							} else if (msg.type === "schedule") {
