@@ -935,7 +935,7 @@ export default function App() {
 					onScroll={updateScrollArrows}
 				>
 					{state.answerTo && (
-						<div title={state.answerTo} style={{ fontSize: "10px", fontFamily: '"NeoDunggeunmo", monospace', color: "var(--muted-foreground)", opacity: 0.75, marginBottom: "0.35rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>↳ {state.answerTo}</div>
+						<div title={state.answerTo} style={{ fontSize: "12px", fontFamily: '"NeoDunggeunmo", monospace', color: "var(--muted-foreground)", opacity: 0.75, marginBottom: "0.35rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>↳ {state.answerTo}</div>
 					)}
 					{loading && toolStatus ? (
 						<span className="turk-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</span>
