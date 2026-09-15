@@ -203,14 +203,20 @@ export default function App() {
 		};
 	}, [connect]);
 
-	// 백그라운드 중단 → 포그라운드 복귀 시 WS 재연결 (즉시)
+	// 백그라운드 진입 시 WS를 능동 종료, 포그라운드 복귀 시 항상 신규 연결 + 상태 동기화.
+	// (좀비 소켓 — readyState OPEN이지만 TCP 사실상 단절 — 오판을 근본 제거. 복귀 = 새로고침과 동일 경로)
 	useEffect(() => {
 		const onVisible = () => {
-			if (document.hidden) return;
-			if (wsRef.current?.readyState === WebSocket.OPEN) return;
+			if (document.hidden) {
+				clearTimeout(reconnectTimer.current);
+				wsRef.current?.close(); // onclose가 hidden이라 자동 재연결하지 않음
+				return;
+			}
 			clearTimeout(reconnectTimer.current);
 			reconnectDelay.current = 1000;
-			connect();
+			const old = wsRef.current;
+			if (old) { old.onclose = null; old.onmessage = null; old.onerror = null; old.close(); }
+			connect(); // pi_ready → get_state(작동중 동기화) + read_buffer(유실분 재생)
 		};
 		document.addEventListener("visibilitychange", onVisible);
 		return () => document.removeEventListener("visibilitychange", onVisible);
