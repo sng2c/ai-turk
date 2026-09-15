@@ -28,26 +28,8 @@ export default function App() {
 		gridVerRef.current = gridVerRef.current ? 0 : 1;
 	}, []);
 
-	// 대사 히스토리 — 최종 확정 화면의 페이지 스택 (메모리 전용, 새로고침 시 소실, 최대 50)
-	const historyRef = useRef<TurkState[]>([]);
-	const histIdxRef = useRef(-1); // 현재 보고 있는 페이지 인덱스 (최신 = length-1)
-	// 최종 화면 커밋 — setState + 히스토리 push. 과도 뷰(모델 선택/세션 상세)는 이것을 쓰지 않음
-	const commit = useCallback((next: TurkState) => {
-		setState(next);
-		const h = historyRef.current;
-		h.push(next);
-		if (h.length > 50) h.shift();
-		histIdxRef.current = h.length - 1;
-	}, [setState]);
-	// 히스토리 페이지 이동 (+1 다음 / -1 이전) — 뷰 전환만 (커밋 아님)
-	const goHistory = useCallback((delta: number) => {
-		const h = historyRef.current;
-		if (!h.length) return;
-		const next = Math.min(h.length - 1, Math.max(0, histIdxRef.current + delta));
-		if (next === histIdxRef.current) return;
-		histIdxRef.current = next;
-		setState(h[next]);
-	}, [setState]);
+	// 최종 화면 커밋 — 과도 뷰(모델 선택/세션 상세)는 이것을 쓰지 않음 (히스토리 기능 제거 — setState 별칭)
+	const commit = useCallback((next: TurkState) => setState(next), [setState]);
 	const [loading, setLoading] = useState(false);
 	const clearInput = () => setInput("");
 	const [input, setInput] = useState(() => {
@@ -823,13 +805,11 @@ export default function App() {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({ type: "restart_pi" }));
-				historyRef.current = []; histIdxRef.current = -1; // 새 세션 — 히스토리 클리어
+
 				setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 			}
 			return;
 		}
-		if (text === "/prev") { goHistory(-1); return; }
-		if (text === "/next") { goHistory(1); return; }
 		if (text === "/model") {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
@@ -927,7 +907,7 @@ export default function App() {
 				const ws = wsRef.current;
 				if (ws?.readyState === WebSocket.OPEN) {
 					ws.send(JSON.stringify({ type: "restart_pi" }));
-					historyRef.current = []; histIdxRef.current = -1; // 새 세션 — 히스토리 클리어
+
 					setState(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
 				}
 			}} title={`컨텍스트 ${contextPct ?? "—"}% — 새 세션 시작`}>
@@ -942,13 +922,6 @@ export default function App() {
 					{userKey.slice(-6)}|{sessionId ? sessionId.slice(-6) : "—"}
 				</div>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
-				{historyRef.current.length > 1 && !loading && (
-					<div style={{ position: "absolute", top: "0.3rem", left: "0.4rem", display: "flex", gap: "0.4rem", alignItems: "center", fontSize: "10px", opacity: 0.55, zIndex: 5, userSelect: "none" }}>
-						<button onClick={() => goHistory(-1)} disabled={histIdxRef.current <= 0} title="지난 화면 (/prev)" style={{ background: "none", border: "none", color: "var(--foreground)", fontFamily: "inherit", fontSize: "10px", padding: 0, cursor: histIdxRef.current > 0 ? "pointer" : "default", opacity: histIdxRef.current > 0 ? 1 : 0.4 }}>◀</button>
-						<span style={{ fontFamily: "\"NeoDunggeunmo\", monospace" }}>{histIdxRef.current + 1}/{historyRef.current.length}</span>
-						<button onClick={() => goHistory(1)} disabled={histIdxRef.current >= historyRef.current.length - 1} title="최신 화면 (/next)" style={{ background: "none", border: "none", color: "var(--foreground)", fontFamily: "inherit", fontSize: "10px", padding: 0, cursor: histIdxRef.current < historyRef.current.length - 1 ? "pointer" : "default" }}>▶</button>
-					</div>
-				)}
 				{canScrollUp && (
 					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로"><ChevronUp className="turk-ico" /></button>
 				)}
