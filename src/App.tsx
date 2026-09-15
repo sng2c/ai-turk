@@ -942,9 +942,15 @@ export default function App() {
 						prevStateRef.current = null;
 						return;
 					}
+					if (ctxMode.current) {
+						// 컨텍스트 메뉴 → 모델 전환: 컨텍스트 메뉴 먼저 복원 (prevState 오염 방지)
+						ctxMode.current = false;
+						setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
+						// prevStateRef 유지 — 모델 메뉴 취소 시 실제 이전 화면 복원
+					}
 					const ws = wsRef.current;
 					if (ws?.readyState === WebSocket.OPEN) {
-						prevStateRef.current = state;
+						if (!ctxMode.current) prevStateRef.current = state; // 컨텍스트 전환 시엔 기존 저장 유지
 						ws.send(JSON.stringify({ type: "get_available_models" }));
 					}
 				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: (supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 || thinkingLevel === "off") ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 ? "NONE" : thinkingLevel.toUpperCase()}</button> <button className="turk-new-btn" onClick={() => {
@@ -955,7 +961,14 @@ export default function App() {
 					prevStateRef.current = null;
 					return;
 				}
-				prevStateRef.current = state;
+				if (modelMode.current) {
+					// 모델 메뉴 → 컨텍스트 전환: 모델 메뉴 먼저 복원 (prevState 오염 방지)
+					modelMode.current = false;
+					setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
+					// prevStateRef 유지 — 컨텍스트 메뉴 취소 시 실제 이전 화면 복원
+				} else {
+					prevStateRef.current = state;
+				}
 				ctxMode.current = true;
 				const pct = contextPct != null ? `${Math.round(contextPct)}%` : "—";
 				// 모델 선택 메뉴와 동일 레이아웃: 액션 칸 + 마지막 칸 취소(destructive)
