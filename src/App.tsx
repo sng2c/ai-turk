@@ -86,9 +86,18 @@ export default function App() {
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
-	const [, setThinkingText] = useState("");
+	const [thinkingText, setThinkingText] = useState(""); // 상태 레이어 — 씽킹/컴팩트 등 트랜지언트 출력 (메인 출력과 분리)
 	const [showThinking, setShowThinking] = useState(false);
-	const [, setThinkingExpanded] = useState(false);
+	const [thinkingExpanded, setThinkingExpanded] = useState(false);
+	const stripSeqRef = useRef(0); // 스트립 시퀀스 — 자동소멸 타이머 가드
+	const stripRef = useRef<HTMLDivElement>(null);
+	// 상태 스트립 setter — autoMs 지정 시 그 시퀀스가 최신일 때만 자동 소멸
+	const setStrip = (t: string | ((p: string) => string), autoMs?: number) => {
+		const seq = ++stripSeqRef.current;
+		setThinkingText(t);
+		if (autoMs) setTimeout(() => { if (stripSeqRef.current === seq) setThinkingText(""); }, autoMs);
+	};
+	useEffect(() => { if (stripRef.current) stripRef.current.scrollTop = stripRef.current.scrollHeight; }, [thinkingText]);
 	const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null);
 	const [keyboardUp, setKeyboardUp] = useState(false);
 	const [kbHeight, setKbHeight] = useState(0);
@@ -452,7 +461,7 @@ export default function App() {
 				if (delta.type === "thinking_start") {
 					setShowThinking(true);
 				} else if (delta.type === "thinking_delta") {
-					setThinkingText((prev) => prev + (delta.delta || ""));
+					setStrip((prev) => prev + (delta.delta || "")); // 상태 스트립에 스트리밍 (seq 갱신 — 보류 중 자동소멸 무효화)
 				} else if (delta.type === "text_delta") {
 					streamingTextRef.current += (delta.delta || "");
 					setStreamingText((prev) => prev + (delta.delta || ""));
@@ -474,7 +483,7 @@ export default function App() {
 			case "response":
 				if (msg.command === "compact" && !msg.success) {
 					setLoading(false); // 안전 해제 — compaction_end 누락 대비
-					setState({ message: `⚠️ 컴팩트 실패: ${String(msg.error).slice(0, 200)}`, buttons: {} });
+					setStrip(`⚠️ 컴팩트 실패: ${String(msg.error).slice(0, 200)}`, 5000); // 상태 스트립 — 메인 출력 보존
 				}
 				if (msg.command === "attach") {
 					// 업로드 완료 → 칩 추가 (경로는 서버가 부여)
@@ -510,7 +519,7 @@ export default function App() {
 					setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
 					else setLoading(false); // 놓친 agent_end(백그라운드 유실)로 인한 로딩 스틱 해제
-					if ((msg.data as any).isCompacting === true) setLoading(true); // 컴팩트 진행 중 복원 — compaction_end까지 dim 유지
+					if ((msg.data as any).isCompacting === true) { setLoading(true); setStrip("🧹 컴팩트 진행 중..."); } // 복원 — dim+스트립 (compaction_end까지)
 					// 처리중 프롬프트 표시 — 재연결/새로고침 후에도 "뭘 기다리는지"를 입력창에 (서버 제공, streaming 중만)
 					if (msg.data.isStreaming && typeof msg.data.lastPrompt === "string" && msg.data.lastPrompt) { setInput(msg.data.lastPrompt); userSentRef.current = true; }
 					// 실패 재시도 에코 — lastTurnFailed 시 마지막 프롬프트 복원. 유저가 이미 새로 타이핑 중이면 보호
@@ -604,7 +613,7 @@ export default function App() {
 			case "compaction_start":
 				// 수동 컴팩트만 표시 (threshold/overflow 자동 컴팩트는 조용히)
 				if ((msg as any).reason === "manual") {
-					setState((s) => ({ ...s, message: "🧹 컴팩트 진행 중..." }));
+					setStrip("🧹 컴팩트 진행 중..."); // 상태 스트립 — 메인 출력 불변
 					if (!loading) setLoading(true); // dim — 컴팩트 동안 동시 전송 차단
 				}
 				break;
@@ -613,10 +622,10 @@ export default function App() {
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" })); // 갱신 폴링
 				if ((msg as any).reason !== "manual") break; // 자동 컴팩트 — 화면 변경 없음
 				setLoading(false); // 수동 컴팩트 dim 해제
-				if ((msg as any).aborted) { setState({ message: "🧹 컴팩트 취소됨", buttons: {} }); break; }
 				const r = (msg as any).result;
 				const fmtTok = (n?: number) => n == null ? "?" : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
-				setState({ message: `✅ 컴팩트 완료 (${fmtTok(r?.tokensBefore)} → ${fmtTok(r?.estimatedTokensAfter)} tokens)`, buttons: {} });
+				// 상태 스트립 표시 (5초 후 자동 소멸) — 메인 출력은 컴팩트 선택 시 prevState로 복원됨
+				setStrip((msg as any).aborted ? "🧹 컴팩트 취소됨" : `✅ 컴팩트 완료 (${fmtTok(r?.tokensBefore)} → ${fmtTok(r?.estimatedTokensAfter)} tokens)`, 5000);
 				break;
 			}
 			case "scheduler_trigger":
@@ -864,7 +873,10 @@ export default function App() {
 				if (loading) { setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
 				if (ws?.readyState === WebSocket.OPEN) {
 					ws.send(JSON.stringify({ type: "compact" }));
-					setState({ message: "🧹 컴팩트 진행 중...", buttons: {} });
+					setStrip("🧹 컴팩트 진행 중..."); // 상태 레이어
+					setLoading(true); // dim 즉시 — compaction_start 이벤트 전 구간 커버
+					setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols)); // 메인 = 출력 즉시 복원
+					prevStateRef.current = null;
 				}
 				return;
 			}
@@ -980,6 +992,13 @@ export default function App() {
 						) : <span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: "0%" }} /><span className="turk-ctx-pct">—</span></span></span>}
 				</button></span>
 			</header>
+
+			{thinkingText && (
+				<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
+					<span className="turk-thinking-label">{showThinking ? "🤔 사고중..." : "ℹ️ 상태"}</span>
+					<div className="turk-thinking-text" ref={stripRef}>{thinkingText.slice(-2000)}</div>
+				</div>
+			)}
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
 				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${userKey} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "\"NeoDunggeunmo\", monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
