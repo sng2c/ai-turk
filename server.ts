@@ -343,8 +343,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 });
 
 // ── WebSocket 서버 ──────────────────────────────────────────────────────
-const wss = new WebSocketServer({ server, path: "/ws" });
-const customCommands = ["restart_pi", "schedule", "push_subscribe", "read_buffer"];
+const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 16 * 1024 * 1024 }); // 첨부 base64 프레임 수용
+const customCommands = ["restart_pi", "schedule", "push_subscribe", "read_buffer", "attach"];
 
 wss.on("connection", (ws, req) => {
 	const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -404,6 +404,26 @@ wss.on("connection", (ws, req) => {
 					const missed = session.outBuf.filter((e) => e.ts > since);
 					if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Buffer] read_buffer: since=${since} → ${missed.length}건`);
 					ws.send(JSON.stringify({ type: "response", command: "read_buffer", success: true, data: { missed } }));
+				} else if (msg.type === "attach") {
+					// 파일 업로드 → 세션 워크스페이스 uploads/ 저장 — 에이전트가 자기 read 도구로 읽음
+					const MAX_ATTACH = 8 * 1024 * 1024;
+					const data = typeof msg.data === "string" ? msg.data : "";
+					const name = String(msg.name ?? "file").split(/[\\/]/).pop()!.replace(/[\x00-\x1f]/g, "").trim().slice(0, 100) || "file";
+					if (!data || data.length > MAX_ATTACH * 1.4) {
+						ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: "파일 크기 초과 — 최대 8MB" }));
+					} else {
+						try {
+							const dir = join(envPaths("ai-turk").data, userKey, "workspace", "uploads");
+							mkdirSync(dir, { recursive: true });
+							const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+							const rel = `uploads/${ts}-${name}`;
+							writeFileSync(join(envPaths("ai-turk").data, userKey, "workspace", rel), Buffer.from(data, "base64"));
+							console.log(`[${userKey.slice(0, 8)}] [Attach] 저장: ${rel}`);
+							ws.send(JSON.stringify({ type: "response", command: "attach", success: true, data: { path: rel, name } }));
+						} catch (err) {
+							ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: err instanceof Error ? err.message : String(err) }));
+						}
+					}
 				}
 			} else {
 				sendToBackend(session, msg);

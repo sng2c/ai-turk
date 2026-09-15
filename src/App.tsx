@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey,
@@ -54,6 +54,26 @@ export default function App() {
 		// 초기값은 빈 문자열 — 세션 ID 확보 후 kvGet으로 복원
 		return "";
 	});
+
+	// ── 파일 첨부 — 서버가 워크스페이스 uploads/에 저장, 프롬프트에 경로 주입 (에이전트 read 도구로 읽음) ──
+	const [attachments, setAttachments] = useState<{ name: string; path: string }[]>([]);
+	const attachRef = useRef(attachments);
+	attachRef.current = attachments;
+	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	const handleFiles = (files: FileList | null) => {
+		if (!files?.length) return;
+		const ws = wsRef.current;
+		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
+		for (const f of [...files].slice(0, 5)) {
+			if (f.size > 8 * 1024 * 1024) { alert(`파일이 너무 큽니다: ${f.name} (최대 8MB)`); continue; }
+			const reader = new FileReader();
+			reader.onload = () => {
+				const data = String(reader.result).split(",")[1] ?? "";
+				ws.send(JSON.stringify({ type: "attach", name: f.name, data, mimeType: f.type }));
+			};
+			reader.readAsDataURL(f);
+		}
+	};
 
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
@@ -469,6 +489,11 @@ export default function App() {
 						lastReplayTextRef.current = extractAssistantText(lastEv?.messages ?? []);
 					}
 				}
+				if (msg.command === "attach") {
+					// 업로드 완료 → 칩 추가 (경로는 서버가 부여)
+					if (msg.success && msg.data?.path) setAttachments((prev) => [...prev, { name: msg.data.name, path: msg.data.path }].slice(-5));
+					else console.warn("[Attach] 업로드 실패:", msg.error);
+				}
 				if (msg.command === "new_session" && msg.success) {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
@@ -763,6 +788,12 @@ export default function App() {
 
 		let message = userText;
 
+		// 첨부 파일 경로 주입 — 에이전트가 자기 read 도구로 읽음 (user 경로 프롬프트만)
+		const files = attachRef.current;
+		if (files.length) {
+			message = `[첨부 파일 — 아래 경로를 read 도구로 읽어 확인하세요]\n${files.map((f) => `- ${f.path}`).join("\n")}\n\n${message}`;
+		}
+
 		// 스케줄러 피드백(에러/목록)이 대기 중이면 프롬프트 앞에 주입
 		if (schedulerFeedbackRef.current) {
 			message = `${schedulerFeedbackRef.current}\n\n${message}`;
@@ -781,6 +812,7 @@ export default function App() {
 		}).format(now);
 		message = `[현재 일시: ${dt} KST]\n\n${message}`;
 
+		if (files.length) setAttachments([]); // 첨부 소비 — 전송 후 클리어
 		ws.send(JSON.stringify({ type: "prompt", message, userInput: userText, route }));
 	}, [piReady]);
 
@@ -971,7 +1003,7 @@ export default function App() {
 				className="turk-input-form" style={{ bottom: kbHeight }}
 				onSubmit={(e) => {
 					e.preventDefault();
-					if (input.trim() && !loading && piReady) handleSend(input.trim());
+					if ((input.trim() || attachments.length > 0) && !loading && piReady) handleSend(input.trim());
 				}}
 				onKeyDown={(e) => {
 					if (e.key === "Escape" && loading) {
@@ -979,6 +1011,20 @@ export default function App() {
 					}
 				}}
 			>
+				{attachments.length > 0 && (
+					<div style={{ position: "absolute", bottom: "100%", left: "0.4rem", display: "flex", gap: "0.286rem", flexWrap: "wrap", zIndex: 60 }}>
+						{attachments.map((a, i) => (
+							<span key={a.path} style={{ display: "flex", alignItems: "center", gap: "0.2rem", background: "var(--muted)", color: "var(--muted-foreground)", borderRadius: "0.3rem", padding: "0.15rem 0.4rem", fontSize: "10px", fontFamily: '"NeoDunggeunmo", monospace' }}>
+								{a.name}
+								<button type="button" title="첨부 제거" onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 0, fontSize: "11px" }}>✕</button>
+							</span>
+						))}
+					</div>
+				)}
+				<input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} />
+				<button type="button" className="turk-submit-btn" style={{ flex: "0 0 auto", padding: "0 0.6rem" }} title="파일 첨부 (최대 8MB)" disabled={loading || !piReady} onClick={() => fileInputRef.current?.click()}>
+					<Paperclip style={{ width: "1em", height: "1em" }} />
+				</button>
 				<input
 					ref={inputRef}
 					className="turk-input-field"
@@ -994,7 +1040,7 @@ export default function App() {
 				<button
 					type={loading ? "button" : "submit"}
 					className="turk-submit-btn"
-					disabled={!loading && (!input.trim() || !piReady)}
+					disabled={!loading && ((!input.trim() && attachments.length === 0) || !piReady)}
 					onClick={loading ? () => {
 						wsRef.current?.send(JSON.stringify({ type: "abort" }));
 					} : undefined}
