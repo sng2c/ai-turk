@@ -112,6 +112,8 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			session.isStreaming = true;
 			broadcast(session, { type: "agent_start", route });
 		}
+		// 취소 완결 — abort만으론 pi 자동재시도 '지연'을 못 끊음. abort_retry 병행으로 사용자 의도(완전 취소) 보장
+		if (cmd.type === "abort") session.backend?.send({ type: "abort_retry" });
 		session.backend?.send(cmd);
 	}
 
