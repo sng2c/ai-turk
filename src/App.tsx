@@ -337,6 +337,19 @@ export default function App() {
 					setState(errState(`⚠️ 응답 실패: ${String(msg.error).slice(0, 200)}`, gridRef.current.rows, gridRef.current.cols));
 					break;
 				}
+				// 취소로 종료된 턴(stopReason "aborted") — 자가수정 재요청 금지 + 부분 출력 커밋 금지.
+				// 취소 의도 우선: dim 해제, 이전 화면 유지, 입력(에코)은 남겨 수정·재전송 가능하게
+				if (Array.isArray(msg.messages) && msg.messages.some((m: any) => m.role === "assistant" && m.stopReason === "aborted")) {
+					setLoading(false);
+					setLogoMode("robot");
+					setToolStatus(null);
+					setShowThinking(false);
+					userSentRef.current = false; // 취소 턴 — 입력 클리어 생략(에코 유지), 이후 agent_end 오염 방지
+					retryCountRef.current = 0; // 자가수정 카운터 리셋 — 취소가 재시도로 이어지지 않게
+					schedulerPrefixRef.current = null;
+					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
+					break;
+				}
 				setLoading(false);
 				setLogoMode("robot");
 				// 사용자 전송 응답 종료 시 입력창 클리어 (스케줄러 응답은 유지)

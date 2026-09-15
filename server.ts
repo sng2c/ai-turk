@@ -120,8 +120,11 @@ function startBackend(session: Session): void {
 			session.isStreaming = false;
 			if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] agent_end 도착 — drainQueue 호출`);
 			// 응답 실패 명시 정의 — agent_end.error → 실패 플래그. lastResponse는 성공분만 캐시
+			const aborted = Array.isArray((ev as any).messages) && (ev as any).messages.some((m: any) => m.role === "assistant" && m.stopReason === "aborted");
 			session.lastTurnFailed = !!(ev as any).error;
-			if (!session.lastTurnFailed) { session.lastResponse = ev; session.lastPrompt = null; } // 성공: 캐시 + 에코 해제
+			// 취소(aborted)는 성공도 실패도 아님 — lastResponse 캐시 제외. 에코는 해제(클린 스톱)
+			if (!session.lastTurnFailed && !aborted) session.lastResponse = ev;
+			if (!session.lastTurnFailed) session.lastPrompt = null;
 			// 실패: lastPrompt 유지 — get_state가 재시도 에코로 전달 (실패 화면과 짝)
 			session.scheduler.drainQueue();
 			if (session.pushSubscription) sendPushNotification(session, ev);
