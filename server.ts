@@ -119,10 +119,10 @@ function startBackend(session: Session): void {
 		if (ev.type === "agent_end") {
 			session.isStreaming = false;
 			if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] agent_end 도착 — drainQueue 호출`);
-			session.lastPrompt = null; // 턴 종료 — 처리중 표시 해제
 			// 응답 실패 명시 정의 — agent_end.error → 실패 플래그. lastResponse는 성공분만 캐시
 			session.lastTurnFailed = !!(ev as any).error;
-			if (!session.lastTurnFailed) session.lastResponse = ev; // WS 미연결 동안 유실 대비 — get_state 복원용 캐시
+			if (!session.lastTurnFailed) { session.lastResponse = ev; session.lastPrompt = null; } // 성공: 캐시 + 에코 해제
+			// 실패: lastPrompt 유지 — get_state가 재시도 에코로 전달 (실패 화면과 짝)
 			session.scheduler.drainQueue();
 			if (session.pushSubscription) sendPushNotification(session, ev);
 		}
