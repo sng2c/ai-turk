@@ -657,7 +657,8 @@ export default function App() {
 			// DOM 갱신 후 화살표 여부 계산
 			requestAnimationFrame(updateScrollArrows);
 		}
-	}, [state.message, loading, updateScrollArrows]);
+		// deps에서 loading 제외 — 전송 시점(agent_start)엔 스크롤 유지, 실제 출력 변화(커밋)에만 맨 위로
+	}, [state.message, state.buttons, updateScrollArrows]);
 
 	// 가상 키보드 감지 → 버튼 영역 숨김
 	useEffect(() => {
