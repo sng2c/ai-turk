@@ -49,7 +49,7 @@ export default function App() {
 		setState(h[next]);
 	}, [setState]);
 	const [loading, setLoading] = useState(false);
-	const clearInput = () => { setInput(""); sessionId && kvDel(`${sessionId}:input`); };
+	const clearInput = () => setInput("");
 	const [input, setInput] = useState(() => {
 		// 초기값은 빈 문자열 — 세션 ID 확보 후 kvGet으로 복원
 		return "";
@@ -492,10 +492,7 @@ export default function App() {
 						// IndexedDB에서 마지막 응답 + 입력 복원
 						(async () => {
 							try {
-								const [saved, savedInput] = await Promise.all([
-									kvGet(`${msg.data.sessionId}:last-response`),
-									kvGet(`${msg.data.sessionId}:input`),
-								]);
+								const saved = await kvGet(`${msg.data.sessionId}:last-response`);
 								// 응답 실패 명시 — 마지막 턴 실패 시 구버전 커밋 대신 실패 화면 (입력 유지).
 								// 단 서버가 이미 다음 턴을 스트리밍 중이면 실패 화면 생략 (이전 턴의 실패 — dim 우선)
 								if ((msg.data as any).lastTurnFailed === true && msg.data.isStreaming !== true) {
@@ -516,7 +513,6 @@ export default function App() {
 									setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 								}
 							}
-								if (savedInput) setInput(savedInput);
 							} catch {
 								await kvDel(`${msg.data.sessionId}:last-response`);
 							}
@@ -545,11 +541,6 @@ export default function App() {
 						].join("\n");
 						setState((s) => ({ message: info, buttons: s.buttons }));
 						showSessionDetail.current = false;
-					}
-					// 새로고침 복원: 스트리밍 중이면 lastPrompt로 입력창 복원
-					// lastPrompt는 서버가 userInput(순수 사용자 입력)을 저장하므로 그대로 복원.
-					if (msg.data.isStreaming === true && msg.data.lastPrompt) {
-						setInput(msg.data.lastPrompt);
 					}
 				}
 				if (msg.command === "schedule") {
@@ -805,7 +796,7 @@ export default function App() {
 		message = `[현재 일시: ${dt} KST]\n\n${message}`;
 
 		if (files.length) setAttachments([]); // 첨부 소비 — 전송 후 클리어
-		ws.send(JSON.stringify({ type: "prompt", message, userInput: userText, route }));
+		ws.send(JSON.stringify({ type: "prompt", message, route }));
 	}, [piReady]);
 
 	const handleSend = (text: string) => {
@@ -1024,7 +1015,7 @@ export default function App() {
 					enterKeyHint="send"
 					inputMode="text"
 					value={input}
-					onChange={(e) => { setInput(e.target.value); sessionId && kvSet(`${sessionId}:input`, e.target.value); }}
+					onChange={(e) => setInput(e.target.value)}
 					placeholder={piReady ? "명령어 입력..." : "세션 초기화 중..."}
 					disabled={loading || !piReady}
 					autoFocus={false}

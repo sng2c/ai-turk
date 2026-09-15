@@ -40,7 +40,6 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		scheduler: Scheduler;
 		pushSubscription: any;
 		ws: Set<WebSocket>;
-		lastPrompt: string | null;
 		lastResponse: any | null; // 마지막 agent_end 캐시 — 재연결 시 get_state 복원용 (prod server.ts와 동일)
 		lastTurnFailed: boolean; // 응답 실패 명시 정의 — 마지막 agent_end.error 여부. get_state로 UI 전달
 		isStreaming: boolean;
@@ -100,13 +99,10 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			.catch((err) => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 실패: ${err.message}`));
 	}
 
-	// backend.send 가로채서 lastPrompt 저장 + route 추적
+	// backend.send 가로채서 route 추적
 	function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { route?: "user" | "scheduler" | "tool" }): void {
 		const route = (opts?.route ?? cmd.route ?? "user") as "user" | "scheduler" | "tool";
 		session.currentRoute = route;
-		if (cmd.type === "prompt" && typeof cmd.message === "string" && route !== "scheduler") {
-			session.lastPrompt = typeof cmd.userInput === "string" ? cmd.userInput : cmd.message;
-		}
 		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] 전송: type=${cmd.type}${route !== "user" ? ` (${route})` : ""}` + (cmd.type === "prompt" && typeof cmd.message === "string" ? ` msg=${cmd.message.slice(0, 200)}` : ""));
 		// prompt 전송 전에 합성 agent_start broadcast — 즉시 로고 전환 + dim
 		if (cmd.type === "prompt") {
@@ -148,7 +144,6 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			if (ev.type === "agent_start") { session.isStreaming = true; return; } // pi 것 스킵 — 서버가 이미 합성 전송
 			if (ev.type === "agent_end") {
 				session.isStreaming = false;
-				session.lastPrompt = null;
 				// 응답 실패 명시 정의 — agent_end.error → 실패 플래그. lastResponse는 성공분만 캐시
 				session.lastTurnFailed = !!(ev as any).error;
 				if (!session.lastTurnFailed) session.lastResponse = ev; // WS 미연결 동안 유실 대비 — get_state 복원용 캐시 (prod와 동일)
@@ -161,7 +156,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				if (session.pushSubscription) sendPushNotification(session, ev);
 			}
 			if (ev.type === "response" && ev.command === "get_state") {
-				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastTurnFailed: session.lastTurnFailed };
+				(ev as any).data = { ...(ev as any).data, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastTurnFailed: session.lastTurnFailed };
 			}
 			broadcast(session, ev);
 		});
@@ -223,7 +218,6 @@ function savePushSubscription(userKey: string, sub: any): void {
 			}),
 			pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원
 			ws: new Set(),
-			lastPrompt: null,
 			lastResponse: null,
 			lastTurnFailed: false,
 			isStreaming: false,
@@ -316,7 +310,6 @@ function savePushSubscription(userKey: string, sub: any): void {
 								if (session.backend) { session.backend.stop(); session.backend = null; }
 								session.backendReady = false;
 								session.agentSessionId = null;
-				session.lastPrompt = null; // 새 세션 — 클리어 → 백엔드 새 세션 → ready 후 get_state로 새 ID 갱신
 				session.lastResponse = null; // 새 세션 — 응답 캐시 클리어
 				session.lastTurnFailed = false; // 새 세션 — 실패 플래그 클리어
 								console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);

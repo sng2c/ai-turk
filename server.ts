@@ -73,7 +73,6 @@ interface Session {
 	scheduler: Scheduler;
 	pushSubscription: any; // 마지막 구독 (1인 — 세션당 1개)
 	ws: Set<WebSocket>; // 같은 유저 다중 탭 — 동일 세션 broadcast
-	lastPrompt: string | null; // 마지막 프롬프트 (새로고침 복원용)
 	lastResponse: any | null; // 마지막 agent_end 이벤트 캐시 — WS 미연결(백그라운드) 유실분 복원용 (마지막 1건)
 	lastTurnFailed: boolean; // 응답 실패 명시 정의 — 마지막 agent_end.error 여부. get_state로 UI 전달
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
@@ -115,20 +114,19 @@ function startBackend(session: Session): void {
 		if (ev.type === "pi_exit" || ev.type === "pi_error") session.backendReady = false;
 		// agent_start: 스트리밍 시작
 		if (ev.type === "agent_start") { session.isStreaming = true; return; } // pi 것 스킵 — 서버가 이미 합성 전송
-		// agent_end: 스트리밍 종료 + 큐 드레인 + lastPrompt 초기화 + 웹 푸시
+		// agent_end: 스트리밍 종료 + 큐 드레인 + 웹 푸시
 		if (ev.type === "agent_end") {
 			session.isStreaming = false;
 			if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] agent_end 도착 — drainQueue 호출`);
-			session.lastPrompt = null;
 			// 응답 실패 명시 정의 — agent_end.error → 실패 플래그. lastResponse는 성공분만 캐시
 			session.lastTurnFailed = !!(ev as any).error;
 			if (!session.lastTurnFailed) session.lastResponse = ev; // WS 미연결 동안 유실 대비 — get_state 복원용 캐시
 			session.scheduler.drainQueue();
 			if (session.pushSubscription) sendPushNotification(session, ev);
 		}
-		// get_state 응답 보강: lastPrompt + isStreaming 주입
+		// get_state 응답 보강: isStreaming 등 주입
 		if (ev.type === "response" && ev.command === "get_state") {
-			(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastTurnFailed: session.lastTurnFailed };
+			(ev as any).data = { ...(ev as any).data, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastTurnFailed: session.lastTurnFailed };
 		}
 		broadcast(session, ev);
 	});
@@ -144,16 +142,10 @@ function broadcast(session: Session, data: Record<string, unknown>): void {
 	}
 }
 
-// backend.send 가로채서 lastPrompt 저장 + route 추적 (서버 자체 프롬프트는 복원 제외)
+// backend.send 가로채서 route 추적
 function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { route?: "user" | "scheduler" | "tool" }): void {
 	const route = (opts?.route ?? cmd.route ?? "user") as "user" | "scheduler" | "tool";
 	session.currentRoute = route;
-	if (cmd.type === "prompt" && typeof cmd.message === "string" && route !== "scheduler") {
-		// 순수 사용자 입력만 저장 (systemPrompt 제외) — 재연결 복원용
-		session.lastPrompt = typeof cmd.userInput === "string" ? cmd.userInput : cmd.message;
-		const preview = typeof cmd.userInput === "string" ? cmd.userInput : (typeof cmd.message === "string" ? cmd.message : "");
-		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [백엔드] prompt 전송: ${preview.slice(0, 60)}`);
-	}
 	// prompt 전송 전에 합성 agent_start broadcast — 즉시 로고 전환 + dim
 	if (cmd.type === "prompt") {
 		session.isStreaming = true;
@@ -250,7 +242,6 @@ function createSession(userKey: string): Session {
 		}),
 		pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원 (재시작 후 재구독 불필요)
 		ws: new Set(),
-		lastPrompt: null,
 		lastResponse: null,
 		lastTurnFailed: false,
 		isStreaming: false,
@@ -363,7 +354,6 @@ wss.on("connection", (ws, req) => {
 					if (session.backend) { session.backend.stop(); session.backend = null; }
 					session.backendReady = false;
 					session.agentSessionId = null;
-				session.lastPrompt = null; // 새 세션 — 저장된 ID 클리어 → 백엔드 --no-session(새 세션) → ready 후 get_state로 새 ID 갱신
 				session.lastResponse = null; // 새 세션 — 응답 캐시 클리어
 				session.lastTurnFailed = false; // 새 세션 — 실패 플래그 클리어
 					console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
