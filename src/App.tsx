@@ -222,11 +222,10 @@ export default function App() {
 			retryCountRef.current = 0;
 			streamingTextRef.current = "";
 			setState({ message: "", buttons: {} });
-			// 기존 WS 종료 — onclose 자동 재연결 억제 후 새 userKey로 수동 재접속
-			shouldReconnect.current = false;
+			// 기존 WS 종료 — 핸들러 분리 후 close (onclose의 지연 자동재연결이 중복 소켓을 만들지 않게)
 			clearTimeout(reconnectTimer.current);
-			wsRef.current?.close();
-			shouldReconnect.current = true;
+			const old = wsRef.current;
+			if (old) { old.onclose = null; old.onmessage = null; old.onerror = null; old.close(); }
 			reconnectDelay.current = 1000;
 			connect();
 		};
