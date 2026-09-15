@@ -242,6 +242,15 @@ export default function App() {
 		if (restored && IS_FINE_POINTER) inputRef.current?.focus();
 	}, [restored]);
 
+	// ── 출력 버퍼 풀(pull) — 유실분은 서버 링버퍼에서 읽어옴 (시그널: buffer_signal/푸시, 최후보루: 접속 시) ──
+	const lastReplayTextRef = useRef(""); // 마지막 재생 응답 원문 — get_state lastResponse 이중 커밋 방지
+	const replayedRef = useRef(false); // 이번 접속에서 재생 발생 여부 — saved/empty 복원 생략용
+	const bufTsKey = () => `turk:lastBufTs:${userKeyRef.current}`;
+	const sendReadBuffer = () => {
+		const since = Number(localStorage.getItem(bufTsKey()) || 0);
+		wsRef.current?.send(JSON.stringify({ type: "read_buffer", since }));
+	};
+
 	// ── pi 이벤트 처리 ──────────────────────────────────────────────────
 	const handleEvent = useCallback((msg: any) => {
 		switch (msg.type) {
@@ -252,6 +261,10 @@ export default function App() {
 				if (typeof msg.vapidPublicKey === "string") subscribePush(msg.vapidPublicKey, wsRef.current);
 				// 상태 복원: get_state 응답 대기 — 복원 전까지 dim (last-assistant-text는 브라우저 localStorage)
 				setRestored(false);
+				// 출력 버퍼 동기화 — get_state보다 먼저 풀(서버 즉답 → 응답 순서 보장). 시그널/푸시 놓친 유실분 최후 복구
+				lastReplayTextRef.current = "";
+				replayedRef.current = false;
+				sendReadBuffer();
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				break;
@@ -437,7 +450,25 @@ export default function App() {
 				setToolStatus(null);
 				break;
 
+			case "buffer_signal":
+				// 서버 버퍼에 유실분 적재 — 풀로 읽어옴 (시그널은 데이터를 실지 않음)
+				sendReadBuffer();
+				break;
 			case "response":
+				if (msg.command === "read_buffer" && msg.success && Array.isArray(msg.data?.missed)) {
+					// 스트리밍 중이면 재생 연기 — ts 미갱신 → 다음 접속 시 자동 재시도
+					if (loading) break;
+					// 유실분 재생 — 기존 agent_end 파이프라인 재진입 (schedules 등록/커밋/히스토리 포함)
+					for (const entry of msg.data.missed) {
+						handleEventRef.current(entry.ev);
+						if (typeof entry.ts === "number") localStorage.setItem(bufTsKey(), String(entry.ts));
+					}
+					if (msg.data.missed.length) {
+						replayedRef.current = true;
+						const lastEv = msg.data.missed[msg.data.missed.length - 1].ev;
+						lastReplayTextRef.current = extractAssistantText(lastEv?.messages ?? []);
+					}
+				}
 				if (msg.command === "new_session" && msg.success) {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
@@ -457,13 +488,15 @@ export default function App() {
 								const lr = (msg.data as any).lastResponse;
 								const lrText = lr && Array.isArray(lr.messages) ? extractAssistantText(lr.messages) : "";
 								const lrRes = lrText ? parseTurkJSON(lrText) : null;
-								if (lrRes && "parsed" in lrRes && lrRes.parsed.silent !== true) {
+								// 버퍼 재생이 최신 권위 — 재생분과 동일한 lastResponse·구버전 IndexedDB 덮어쓰기 방지
+								const replayed = !!lrText && lrText === lastReplayTextRef.current;
+								if (lrRes && "parsed" in lrRes && lrRes.parsed.silent !== true && !replayed) {
 									commit(lrRes.parsed);
 									setLoading(false);
-								} else if (saved) {
+								} else if (saved && !replayedRef.current) {
 									const result = parseTurkJSON(saved);
 									if (result && "parsed" in result && result.parsed.silent !== true) commit(result.parsed);
-								} else {
+								} else if (!replayedRef.current) {
 									setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 								}
 								if (savedInput) setInput(savedInput);

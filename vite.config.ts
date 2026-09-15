@@ -40,6 +40,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		pushSubscription: any;
 		ws: Set<WebSocket>;
 		lastPrompt: string | null;
+		outBuf: { ts: number; ev: TurkEvent }[]; // 사용자향 출력 버퍼 — WS 유실분 접속 시 풀 재생용 (silent 제외, cap 20)
 		isStreaming: boolean;
 		lastActivity: number;
 		currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
@@ -68,6 +69,19 @@ function turkPlugin(env: Record<string, string>): Plugin {
 			}
 		}
 		return "";
+	}
+
+	// silent 응답 판별 — 출력 버퍼 제외용 (push 폐기와 동일 기준)
+	function isSilentEvent(ev: TurkEvent): boolean {
+		const messages = (ev as any).messages;
+		if (!Array.isArray(messages)) return false;
+		const text = extractTextFromMessages(messages);
+		if (!text) return false;
+		try {
+			const greedy = text.match(/\{[\s\S]*\}/);
+			const parsed = JSON.parse(greedy?.[0] ?? text);
+			return !!(parsed && parsed.silent === true);
+		} catch { return false; }
 	}
 
 	function stripMarkdownServer(text: string): string {
@@ -153,6 +167,13 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				}
 				session.scheduler.drainQueue();
 				if (session.pushSubscription) sendPushNotification(session, ev);
+				// 사용자향 출력 버퍼 적재 — WS 연결 중이면 buffer_signal(시그널)만 전송, 데이터는 클라가 풀로 읽어감
+				if (!isSilentEvent(ev)) {
+					const lastTs = session.outBuf.length ? session.outBuf[session.outBuf.length - 1].ts : 0;
+					session.outBuf.push({ ts: Math.max(Date.now(), lastTs + 1), ev }); // 단조 ts — restart_pi seq 리셋 문제 회피
+					if (session.outBuf.length > 20) session.outBuf.shift();
+					if (session.ws.size > 0) broadcast(session, { type: "buffer_signal" });
+				}
 			}
 			if (ev.type === "response" && ev.command === "get_state") {
 				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute };
@@ -218,6 +239,7 @@ function savePushSubscription(userKey: string, sub: any): void {
 			pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원
 			ws: new Set(),
 			lastPrompt: null,
+			outBuf: [],
 			isStreaming: false,
 			lastActivity: Date.now(),
 			currentRoute: "user",
@@ -259,7 +281,7 @@ function savePushSubscription(userKey: string, sub: any): void {
 		return createSession(userKey);
 	}
 
-	const customCommands = ["restart_pi", "schedule", "push_subscribe"];
+	const customCommands = ["restart_pi", "schedule", "push_subscribe", "read_buffer"];
 
 	return {
 		name: "turk-rpc",
@@ -309,6 +331,7 @@ function savePushSubscription(userKey: string, sub: any): void {
 								session.backendReady = false;
 								session.agentSessionId = null;
 				session.lastPrompt = null; // 새 세션 — 클리어 → 백엔드 새 세션 → ready 후 get_state로 새 ID 갱신
+				session.outBuf = []; // 새 세션 — 이전 세션 유실분 재생 방지
 								console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 								setTimeout(() => startBackend(session), 500);
 							} else if (msg.type === "schedule") {
@@ -323,6 +346,12 @@ function savePushSubscription(userKey: string, sub: any): void {
 								session.pushSubscription = msg.subscription;
 								savePushSubscription(userKey, msg.subscription); // 영속화
 								if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신: ${msg.subscription?.endpoint?.slice(0, 60)}`);
+							} else if (msg.type === "read_buffer") {
+								// 클라 풀 — since 이후 유실분 유니캐스트 (버퍼 유지, 탭별 커서, 멱등)
+								const since = typeof msg.since === "number" ? msg.since : 0;
+								const missed = session.outBuf.filter((e) => e.ts > since);
+								if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Buffer] read_buffer: since=${since} → ${missed.length}건`);
+								ws.send(JSON.stringify({ type: "response", command: "read_buffer", success: true, data: { missed } }));
 							}
 						} else {
 							sendToBackend(session, msg);
