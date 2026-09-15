@@ -131,6 +131,7 @@ export default function App() {
 	const shouldReconnect = useRef(true);
 	const showSessionDetail = useRef(false);
 	const modelMode = useRef(false);
+	const ctxMode = useRef(false); // 컨텍스트 칩 메뉴 모드 (새 세션/컴팩트 선택)
 	// 모델 선택 진입 전 UI 상태(이전 메시지/버튼) 저장용
 	const prevStateRef = useRef<TurkState | null>(null);
 	const availableModels = useRef<any[]>([]);
@@ -470,6 +471,9 @@ export default function App() {
 				break;
 
 			case "response":
+				if (msg.command === "compact" && !msg.success) {
+					setState({ message: `⚠️ 컴팩트 실패: ${String(msg.error).slice(0, 200)}`, buttons: {} });
+				}
 				if (msg.command === "attach") {
 					// 업로드 완료 → 칩 추가 (경로는 서버가 부여)
 					if (msg.success && msg.data?.path) setAttachments((prev) => [...prev, { name: msg.data.name, path: msg.data.path }].slice(-5));
@@ -594,6 +598,20 @@ export default function App() {
 				}
 				break;
 
+			case "compaction_start":
+				// 수동 컴팩트만 표시 (threshold/overflow 자동 컴팩트는 조용히)
+				if ((msg as any).reason === "manual") setState((s) => ({ ...s, message: "🧹 컴팩트 진행 중..." }));
+				break;
+			case "compaction_end": {
+				setContextPct(null); // 컴팩트 직후 percent=null — 다음 턴까지 "—" 표시
+				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" })); // 갱신 폴링
+				if ((msg as any).reason !== "manual") break; // 자동 컴팩트 — 화면 변경 없음
+				if ((msg as any).aborted) { setState({ message: "🧹 컴팩트 취소됨", buttons: {} }); break; }
+				const r = (msg as any).result;
+				const fmtTok = (n?: number) => n == null ? "?" : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+				setState({ message: `✅ 컴팩트 완료 (${fmtTok(r?.tokensBefore)} → ${fmtTok(r?.estimatedTokensAfter)} tokens)`, buttons: {} });
+				break;
+			}
 			case "scheduler_trigger":
 				// 백엔드 주입 직전 서버가 전송 → 다음 agent_end 응답에 prefix 부착
 				schedulerTriggerRef.current = { ids: msg.ids, whens: msg.whens };
@@ -817,6 +835,34 @@ export default function App() {
 			}
 			return;
 		}
+		if (ctxMode.current) {
+			// 컨텍스트 메뉴 — 어떤 선택이든 메뉴 종료 후 처리
+			ctxMode.current = false;
+			if (text === "취소") {
+				setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
+				prevStateRef.current = null;
+				return;
+			}
+			prevStateRef.current = null;
+			if (text === "🆕 새 세션") {
+				const ws = wsRef.current;
+				if (ws?.readyState === WebSocket.OPEN) {
+					ws.send(JSON.stringify({ type: "restart_pi" }));
+					setState(emptyState(gridRef.current.rows, gridRef.current.cols));
+				}
+				return;
+			}
+			if (text === "🧹 컴팩트") {
+				const ws = wsRef.current;
+				if (loading) { setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
+				if (ws?.readyState === WebSocket.OPEN) {
+					ws.send(JSON.stringify({ type: "compact" }));
+					setState({ message: "🧹 컴팩트 진행 중...", buttons: {} });
+				}
+				return;
+			}
+			// 그 외 텍스트 — 메뉴 닫히고 일반 프롬프트로 통과
+		}
 		if (modelMode.current) {
 			if (text === "취소") {
 				modelMode.current = false;
@@ -902,14 +948,13 @@ export default function App() {
 						ws.send(JSON.stringify({ type: "get_available_models" }));
 					}
 				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: (supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 || thinkingLevel === "off") ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 ? "NONE" : thinkingLevel.toUpperCase()}</button> <button className="turk-new-btn" onClick={() => {
-				if (!confirm("새 세션을 시작할까요?")) return;
-				const ws = wsRef.current;
-				if (ws?.readyState === WebSocket.OPEN) {
-					ws.send(JSON.stringify({ type: "restart_pi" }));
-
-					setState(emptyState(DEFAULT_ROWS, DEFAULT_COLS));
-				}
-			}} title={`컨텍스트 ${contextPct ?? "—"}% — 새 세션 시작`}>
+				prevStateRef.current = state;
+				ctxMode.current = true;
+				const pct = contextPct != null ? `${Math.round(contextPct)}%` : "—";
+				const btns: Record<string, string> = Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""]));
+				btns["0"] = "🆕 새 세션"; btns["1"] = "🧹 컴팩트"; btns["2"] = "취소";
+				setState({ message: `## 컨텍스트 ${pct}\n\n실행할 작업을 선택하세요.\n- **새 세션** — 대화를 완전히 새로 시작 (컨텍스트 비움)\n- **컴팩트** — 대화 유지, 오래된 내용 요약 (컨텍스트 축소)`, buttons: btns, colors: { "2": "destructive" }, textColors: { "2": "white" } });
+			}} title={`컨텍스트 ${contextPct ?? "—"}% — 새 세션/컴팩트`}>
 					{contextPct != null ? (
 						<span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, contextPct))}%`, background: contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)" }} /><span className="turk-ctx-pct">{Math.round(contextPct)}%</span></span></span>
 						) : <span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: "0%" }} /><span className="turk-ctx-pct">—</span></span></span>}

@@ -256,6 +256,10 @@ export class ClaudeBackend extends JsonlBackend {
 			case "get_last_assistant_text":
 				this.emit({ ...base, data: { text: this.lastAssistantText }});
 				break;
+			case "compact":
+				// Claude 백엔드는 컴팩트 개념 없음 — 실패 응답으로 클라에 명시
+				this.emit({ type: "response", command: "compact", success: false, error: "Claude 백엔드는 컴팩트를 지원하지 않습니다" });
+				break;
 			case "set_model":
 			case "set_thinking_level":
 			case "cycle_thinking_level":
