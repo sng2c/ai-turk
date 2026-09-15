@@ -521,6 +521,8 @@ export default function App() {
 					setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
 					else setLoading(false); // 놓친 agent_end(백그라운드 유실)로 인한 로딩 스틱 해제
+					// 처리중 프롬프트 표시 — 재연결/새로고침 후에도 "뭘 기다리는지"를 입력창에 (서버 제공, streaming 중만)
+					if (msg.data.isStreaming && typeof msg.data.lastPrompt === "string" && msg.data.lastPrompt) { setInput(msg.data.lastPrompt); userSentRef.current = true; }
 					// 놓친 성공 정리 — 서버 idle+성공 = 이전 턴 완료. 필드에 낡은 프롬프트가 남으면 중복 전송을 유도하므로 클리어.
 					// userSentRef가 true일 때만(=전송된 프롬프트) — 미전송 신규 초안은 보호 (재연결 블립 시 날아가지 않게)
 					if (!msg.data.isStreaming && (msg.data as any).lastTurnFailed !== true && userSentRef.current) { clearInput(); userSentRef.current = false; }
@@ -799,7 +801,7 @@ export default function App() {
 		message = `[현재 일시: ${dt} KST]\n\n${message}`;
 
 		if (files.length) setAttachments([]); // 첨부 소비 — 전송 후 클리어
-		ws.send(JSON.stringify({ type: "prompt", message, route }));
+		ws.send(JSON.stringify({ type: "prompt", message, userInput: userText, route })); // userInput: 서버 처리중 표시용
 	}, [piReady]);
 
 	const handleSend = (text: string) => {
