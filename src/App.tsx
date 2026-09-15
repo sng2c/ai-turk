@@ -521,6 +521,9 @@ export default function App() {
 					setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
 					else setLoading(false); // 놓친 agent_end(백그라운드 유실)로 인한 로딩 스틱 해제
+					// 놓친 성공 정리 — 서버 idle+성공 = 이전 턴 완료. 필드에 낡은 프롬프트가 남으면 중복 전송을 유도하므로 클리어.
+					// userSentRef가 true일 때만(=전송된 프롬프트) — 미전송 신규 초안은 보호 (재연결 블립 시 날아가지 않게)
+					if (!msg.data.isStreaming && (msg.data as any).lastTurnFailed !== true && userSentRef.current) { clearInput(); userSentRef.current = false; }
 					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null) : (m.reasoning ? ["off", "high"] : ["off"]); }
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);
