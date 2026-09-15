@@ -117,6 +117,7 @@ export default function App() {
 	// 파싱 실패 시 자가 수정 재시도 카운터 (무한 루프 방지)
 	const retryCountRef = useRef(0);
 	const MAX_PARSE_RETRIES = 2;
+	const answerToRef = useRef<string | null>(null); // 현재 턴의 질문 — 응답 상단 짝표시용
 	// ── 스케줄러 관련 ref ──
 	// schedulerTriggerRef: scheduler_trigger 이벤트 수신 시 설정 → 다음 agent_end 응답 message 앞에 prefix 부착
 	const schedulerTriggerRef = useRef<{ ids: string[]; whens: string[] } | null>(null);
@@ -334,7 +335,7 @@ export default function App() {
 					userSentRef.current = false; // 실패 턴 — clearInput 생략 (입력 유지)
 					schedulerPrefixRef.current = null;
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
-					setState(errState(`⚠️ 응답 실패: ${String(msg.error).slice(0, 200)}`, gridRef.current.rows, gridRef.current.cols));
+					setState({ ...errState(`⚠️ 응답 실패: ${String(msg.error).slice(0, 200)}`, gridRef.current.rows, gridRef.current.cols), answerTo: answerToRef.current ?? undefined });
 					break;
 				}
 				// 취소로 종료된 턴(stopReason "aborted") — 자가수정 재요청 금지 + 부분 출력 커밋 금지.
@@ -361,6 +362,7 @@ export default function App() {
 					const trig = schedulerTriggerRef.current;
 					schedulerTriggerRef.current = null; // 1회용
 					schedulerPrefixRef.current = `⏰ [예약 실행: ${trig.ids.join(", ")}]\n`;
+					answerToRef.current = `⏰ 예약 실행 (${trig.ids.join(",")})`; // 짝표시
 				}
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				setToolStatus(null);
@@ -375,6 +377,7 @@ export default function App() {
 					if (result && "parsed" in result) {
 						retryCountRef.current = 0; // 성공 시 카운터 리셋
 						const parsed = result.parsed;
+						parsed.answerTo = answerToRef.current ?? undefined; // 짝표시 부착
 						// schedules는 silent 여부와 무관하게 항상 처리
 						if (Array.isArray(parsed.schedules)) {
 							for (const sch of parsed.schedules) {
@@ -411,6 +414,7 @@ export default function App() {
 						if (fallback && "parsed" in fallback) {
 							retryCountRef.current = 0;
 							const parsed = fallback.parsed;
+							parsed.answerTo = answerToRef.current ?? undefined; // 짝표시 부착
 							// schedules는 silent 여부와 무관하게 항상 처리
 							if (Array.isArray(parsed.schedules)) {
 								for (const sch of parsed.schedules) {
@@ -452,13 +456,13 @@ export default function App() {
 							schedulerPrefixRef.current = null; // prefix 클리어
 							const errInfo = (result && "error" in result) ? result.error
 								: (fallback && "error" in fallback) ? fallback.error : "알 수 없는 오류";
-							commit(errState(`[파싱실패] ${errInfo}\n${text.slice(0, 150)}`, gridRef.current.rows, gridRef.current.cols));
+							commit({ ...errState(`[파싱실패] ${errInfo}\n${text.slice(0, 150)}`, gridRef.current.rows, gridRef.current.cols), answerTo: answerToRef.current ?? undefined });
 						}
 					}
 				} else if (!loading) {
 					// 응답 텍스트 자체가 없는 경우 (도구만 사용 등)
 					schedulerPrefixRef.current = null; // prefix 클리어
-					commit(errState("응답이 비어 있습니다. 다시 시도해주세요.", gridRef.current.rows, gridRef.current.cols));
+					commit({ ...errState("응답이 비어 있습니다. 다시 시도해주세요.", gridRef.current.rows, gridRef.current.cols), answerTo: answerToRef.current ?? undefined });
 				}
 				break;
 			}
@@ -516,7 +520,7 @@ export default function App() {
 								const lrText = lr && Array.isArray(lr.messages) ? extractAssistantText(lr.messages) : "";
 								const lrRes = lrText ? parseTurkJSON(lrText) : null;
 								if (lrRes && "parsed" in lrRes && lrRes.parsed.silent !== true) {
-									commit(lrRes.parsed);
+									commit({ ...lrRes.parsed, answerTo: (msg.data as any).lastResponsePrompt ?? undefined }); // 서버 짝 정보
 									// setLoading(false) 금지 — loading은 동기 isStreaming 분기가 소유.
 									// 재연결 시 서버가 스트리밍/씽킹중면 dim이 유지되어야 함 (이전 커밋화면은 dim 아래)
 								} else if (saved) {
@@ -788,6 +792,8 @@ export default function App() {
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
 		userSentRef.current = true; // 사용자 전송 — agent_end 시 클리어
+		// 응답 짝표시 — 이 턴의 응답이 "무엇에 대한 대답"인지 (user: 순수 입력 / tool: 원 질문 승계)
+		if (route === "user") answerToRef.current = userText;
 
 		let message = userText;
 
@@ -970,6 +976,9 @@ export default function App() {
 					className={`turk-message${loading ? " turk-message-loading" : ""}`}
 					onScroll={updateScrollArrows}
 				>
+					{state.answerTo && (
+						<div title={state.answerTo} style={{ fontSize: "10px", fontFamily: '"NeoDunggeunmo", monospace', color: "var(--muted-foreground)", opacity: 0.75, marginBottom: "0.35rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>↳ {state.answerTo}</div>
+					)}
 					{loading && toolStatus ? (
 						<span className="turk-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</span>
 					) : (
