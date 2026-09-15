@@ -14,6 +14,7 @@ import { readFile, stat } from "node:fs/promises";
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import { WebSocket, WebSocketServer } from "ws";
 import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
@@ -405,7 +406,7 @@ wss.on("connection", (ws, req) => {
 					if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Buffer] read_buffer: since=${since} → ${missed.length}건`);
 					ws.send(JSON.stringify({ type: "response", command: "read_buffer", success: true, data: { missed } }));
 				} else if (msg.type === "attach") {
-					// 파일 업로드 → 세션 워크스페이스 uploads/ 저장 — 에이전트가 자기 read 도구로 읽음
+					// 파일 업로드 → OS 임시디렉토리 저장 (휘발 — OS가 정리) — 에이전트가 자기 read 도구로 읽음
 					const MAX_ATTACH = 8 * 1024 * 1024;
 					const data = typeof msg.data === "string" ? msg.data : "";
 					const name = String(msg.name ?? "file").split(/[\\/]/).pop()!.replace(/[\x00-\x1f]/g, "").trim().slice(0, 100) || "file";
@@ -413,13 +414,13 @@ wss.on("connection", (ws, req) => {
 						ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: "파일 크기 초과 — 최대 8MB" }));
 					} else {
 						try {
-							const dir = join(envPaths("ai-turk").data, userKey, "workspace", "uploads");
+							const dir = join(tmpdir(), "ai-turk-attach", userKey);
 							mkdirSync(dir, { recursive: true });
 							const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
-							const rel = `uploads/${ts}-${name}`;
-							writeFileSync(join(envPaths("ai-turk").data, userKey, "workspace", rel), Buffer.from(data, "base64"));
-							console.log(`[${userKey.slice(0, 8)}] [Attach] 저장: ${rel}`);
-							ws.send(JSON.stringify({ type: "response", command: "attach", success: true, data: { path: rel, name } }));
+							const abs = join(dir, `${ts}-${name}`);
+							writeFileSync(abs, Buffer.from(data, "base64"));
+							console.log(`[${userKey.slice(0, 8)}] [Attach] 저장: ${abs}`);
+							ws.send(JSON.stringify({ type: "response", command: "attach", success: true, data: { path: abs, name } }));
 						} catch (err) {
 							ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: err instanceof Error ? err.message : String(err) }));
 						}
