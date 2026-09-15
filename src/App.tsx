@@ -325,6 +325,18 @@ export default function App() {
 				if (msg.willRetry) {
 					break;
 				}
+				// 응답 실패 명시 정의 — agent_end.error: 실패 화면 + 입력 유지(재시도 대상)
+				if (msg.error) {
+					setLoading(false);
+					setLogoMode("robot");
+					setToolStatus(null);
+					setShowThinking(false);
+					userSentRef.current = false; // 실패 턴 — clearInput 생략 (입력 유지)
+					schedulerPrefixRef.current = null;
+					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
+					setState(errState(`⚠️ 응답 실패: ${String(msg.error).slice(0, 200)}`, gridRef.current.rows, gridRef.current.cols));
+					break;
+				}
 				setLoading(false);
 				setLogoMode("robot");
 				// 사용자 전송 응답 종료 시 입력창 클리어 (스케줄러 응답은 유지)
@@ -484,6 +496,10 @@ export default function App() {
 									kvGet(`${msg.data.sessionId}:last-response`),
 									kvGet(`${msg.data.sessionId}:input`),
 								]);
+								// 응답 실패 명시 — 마지막 턴 실패 시 구버전 커밋 대신 실패 화면 (입력 유지)
+								if ((msg.data as any).lastTurnFailed === true) {
+									setState(errState("⚠️ 응답이 실패했습니다. 입력을 다시 전송해주세요.", gridRef.current.rows, gridRef.current.cols));
+								} else {
 								// 서버 캐시 응답 우선 — 백그라운드/재연결 중 놓친 agent_end 복원 (IndexedDB 저장은 수신 시에만 갱신 → 유실 시 구버전)
 								const lr = (msg.data as any).lastResponse;
 								const lrText = lr && Array.isArray(lr.messages) ? extractAssistantText(lr.messages) : "";
@@ -497,6 +513,7 @@ export default function App() {
 								} else {
 									setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 								}
+							}
 								if (savedInput) setInput(savedInput);
 							} catch {
 								await kvDel(`${msg.data.sessionId}:last-response`);
