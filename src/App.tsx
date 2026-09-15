@@ -473,6 +473,7 @@ export default function App() {
 
 			case "response":
 				if (msg.command === "compact" && !msg.success) {
+					setLoading(false); // 안전 해제 — compaction_end 누락 대비
 					setState({ message: `⚠️ 컴팩트 실패: ${String(msg.error).slice(0, 200)}`, buttons: {} });
 				}
 				if (msg.command === "attach") {
@@ -509,6 +510,7 @@ export default function App() {
 					setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
 					else setLoading(false); // 놓친 agent_end(백그라운드 유실)로 인한 로딩 스틱 해제
+					if ((msg.data as any).isCompacting === true) setLoading(true); // 컴팩트 진행 중 복원 — compaction_end까지 dim 유지
 					// 처리중 프롬프트 표시 — 재연결/새로고침 후에도 "뭘 기다리는지"를 입력창에 (서버 제공, streaming 중만)
 					if (msg.data.isStreaming && typeof msg.data.lastPrompt === "string" && msg.data.lastPrompt) { setInput(msg.data.lastPrompt); userSentRef.current = true; }
 					// 실패 재시도 에코 — lastTurnFailed 시 마지막 프롬프트 복원. 유저가 이미 새로 타이핑 중이면 보호
@@ -601,12 +603,16 @@ export default function App() {
 
 			case "compaction_start":
 				// 수동 컴팩트만 표시 (threshold/overflow 자동 컴팩트는 조용히)
-				if ((msg as any).reason === "manual") setState((s) => ({ ...s, message: "🧹 컴팩트 진행 중..." }));
+				if ((msg as any).reason === "manual") {
+					setState((s) => ({ ...s, message: "🧹 컴팩트 진행 중..." }));
+					if (!loading) setLoading(true); // dim — 컴팩트 동안 동시 전송 차단
+				}
 				break;
 			case "compaction_end": {
 				setContextPct(null); // 컴팩트 직후 percent=null — 다음 턴까지 "—" 표시
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" })); // 갱신 폴링
 				if ((msg as any).reason !== "manual") break; // 자동 컴팩트 — 화면 변경 없음
+				setLoading(false); // 수동 컴팩트 dim 해제
 				if ((msg as any).aborted) { setState({ message: "🧹 컴팩트 취소됨", buttons: {} }); break; }
 				const r = (msg as any).result;
 				const fmtTok = (n?: number) => n == null ? "?" : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
