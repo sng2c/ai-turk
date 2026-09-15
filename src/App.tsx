@@ -7,7 +7,7 @@ import {
 	subscribePush, Md,
 } from "./lib/turk";
 import type { TurkState, ToolStatus } from "./lib/turk";
-import { kvSet, kvGet, kvDel } from "./lib/storage";
+import { kvSet, kvGet } from "./lib/storage";
 
 // 모바일(터치) 감지 — 모바일에서는 자동 포커스로 가상 키보드 자동 노출 방지
 const IS_FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(hover: hover) and (pointer: fine)")?.matches === true;
@@ -389,8 +389,6 @@ export default function App() {
 							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 							return;
 						}
-						// IndexedDB에 마지막 응답 저장
-						if (sessionId) kvSet(`${sessionId}:last-response`, text);
 						// 화면 표시
 						if (Array.isArray(parsed.schedules)) {
 							const { schedules, ...stateWithoutSchedules } = parsed;
@@ -426,8 +424,6 @@ export default function App() {
 								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 								return;
 							}
-							// IndexedDB에 마지막 응답 저장
-							if (sessionId) kvSet(`${sessionId}:last-response`, text);
 							if (Array.isArray(parsed.schedules)) {
 								const { schedules, ...stateWithoutSchedules } = parsed;
 								if (schedulerPrefixRef.current) {
@@ -506,34 +502,23 @@ export default function App() {
 					if (pendingModelUpdateRef.current) { pendingModelUpdateRef.current = false; setModelChanging(false); } // 모델 변경 완료 — 지원 레벨/컨텍스트 갱신됨
 					if (msg.data.sessionId) {
 						setSessionId(msg.data.sessionId);
-						// IndexedDB에서 마지막 응답 + 입력 복원
-						(async () => {
-							try {
-								const saved = await kvGet(`${msg.data.sessionId}:last-response`);
-								// 응답 실패 명시 — 마지막 턴 실패 시 구버전 커밋 대신 실패 화면 (입력 유지).
-								// 단 서버가 이미 다음 턴을 스트리밍 중이면 실패 화면 생략 (이전 턴의 실패 — dim 우선)
-								if ((msg.data as any).lastTurnFailed === true && msg.data.isStreaming !== true) {
-									setState(errState("⚠️ 응답이 실패했습니다. 입력을 다시 전송해주세요.", gridRef.current.rows, gridRef.current.cols));
-								} else {
-								// 서버 캐시 응답 우선 — 백그라운드/재연결 중 놓친 agent_end 복원 (IndexedDB 저장은 수신 시에만 갱신 → 유실 시 구버전)
-								const lr = (msg.data as any).lastResponse;
-								const lrText = lr && Array.isArray(lr.messages) ? extractAssistantText(lr.messages) : "";
-								const lrRes = lrText ? parseTurkJSON(lrText) : null;
-								if (lrRes && "parsed" in lrRes && lrRes.parsed.silent !== true) {
-									commit({ ...lrRes.parsed, answerTo: (msg.data as any).lastResponsePrompt ?? undefined }); // 서버 짝 정보
-									// setLoading(false) 금지 — loading은 동기 isStreaming 분기가 소유.
-									// 재연결 시 서버가 스트리밍/씽킹중면 dim이 유지되어야 함 (이전 커밋화면은 dim 아래)
-								} else if (saved) {
-									const result = parseTurkJSON(saved);
-									if (result && "parsed" in result && result.parsed.silent !== true) commit(result.parsed);
-								} else {
-									setState(emptyState(gridRef.current.rows, gridRef.current.cols));
-								}
+						// 응답 실패 명시 — 마지막 턴 실패 시 실패 화면 (입력 유지).
+						// 단 서버가 이미 다음 턴을 스트리밍 중이면 실패 화면 생략 (이전 턴의 실패 — dim 우선)
+						if ((msg.data as any).lastTurnFailed === true && msg.data.isStreaming !== true) {
+							setState(errState("⚠️ 응답이 실패했습니다. 입력을 다시 전송해주세요.", gridRef.current.rows, gridRef.current.cols));
+						} else {
+							// 복원은 서버 lastResponse 단일 채널 (클라 IndexedDB 캐시 제거됨)
+							const lr = (msg.data as any).lastResponse;
+							const lrText = lr && Array.isArray(lr.messages) ? extractAssistantText(lr.messages) : "";
+							const lrRes = lrText ? parseTurkJSON(lrText) : null;
+							if (lrRes && "parsed" in lrRes && lrRes.parsed.silent !== true) {
+								commit({ ...lrRes.parsed, answerTo: (msg.data as any).lastResponsePrompt ?? undefined }); // 서버 짝 정보
+								// setLoading(false) 금지 — loading은 동기 isStreaming 분기가 소유.
+								// 재연결 시 서버가 스트리밍/씽킹중면 dim이 유지되어야 함 (이전 커밋화면은 dim 아래)
+							} else {
+								setState(emptyState(gridRef.current.rows, gridRef.current.cols));
 							}
-							} catch {
-								await kvDel(`${msg.data.sessionId}:last-response`);
-							}
-						})();
+						}
 					}
 					setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
