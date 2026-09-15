@@ -935,7 +935,14 @@ export default function App() {
 					onScroll={updateScrollArrows}
 				>
 					{state.answerTo && (
-						<div title={state.answerTo} style={{ fontSize: "12px", fontFamily: '"NeoDunggeunmo", monospace', color: "var(--muted-foreground)", opacity: 0.75, marginBottom: "0.35rem", display: "flex", alignItems: "center", gap: "0.25rem" }}><SendHorizontal className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} /><span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span></div>
+						<div
+							title={state.answerTo.length > 300 ? state.answerTo.slice(0, 300) + "…" : state.answerTo} // 툴팁도 300자 요약
+							onClick={(e) => navigator.clipboard?.writeText(state.answerTo ?? "").then(() => { e.currentTarget.style.opacity = "1"; setTimeout(() => { e.currentTarget.style.opacity = "0.75"; }, 600); }).catch(() => { /* 클립보드 실패 무시 */ })} // 클릭 → 전체 질문 복사 + 밝기 플래시
+							style={{ fontSize: "12px", fontFamily: '"NeoDunggeunmo", monospace', color: "var(--muted-foreground)", opacity: 0.75, marginBottom: "0.35rem", display: "flex", alignItems: "center", gap: "0.25rem", cursor: "pointer", userSelect: "none" }}
+						>
+							<SendHorizontal className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} />
+							<span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span>
+						</div>
 					)}
 					{loading && toolStatus ? (
 						<span className="turk-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</span>
