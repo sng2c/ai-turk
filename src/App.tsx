@@ -496,8 +496,9 @@ export default function App() {
 									kvGet(`${msg.data.sessionId}:last-response`),
 									kvGet(`${msg.data.sessionId}:input`),
 								]);
-								// 응답 실패 명시 — 마지막 턴 실패 시 구버전 커밋 대신 실패 화면 (입력 유지)
-								if ((msg.data as any).lastTurnFailed === true) {
+								// 응답 실패 명시 — 마지막 턴 실패 시 구버전 커밋 대신 실패 화면 (입력 유지).
+								// 단 서버가 이미 다음 턴을 스트리밍 중이면 실패 화면 생략 (이전 턴의 실패 — dim 우선)
+								if ((msg.data as any).lastTurnFailed === true && msg.data.isStreaming !== true) {
 									setState(errState("⚠️ 응답이 실패했습니다. 입력을 다시 전송해주세요.", gridRef.current.rows, gridRef.current.cols));
 								} else {
 								// 서버 캐시 응답 우선 — 백그라운드/재연결 중 놓친 agent_end 복원 (IndexedDB 저장은 수신 시에만 갱신 → 유실 시 구버전)
@@ -506,7 +507,8 @@ export default function App() {
 								const lrRes = lrText ? parseTurkJSON(lrText) : null;
 								if (lrRes && "parsed" in lrRes && lrRes.parsed.silent !== true) {
 									commit(lrRes.parsed);
-									setLoading(false);
+									// setLoading(false) 금지 — loading은 동기 isStreaming 분기가 소유.
+									// 재연결 시 서버가 스트리밍/씽킹중면 dim이 유지되어야 함 (이전 커밋화면은 dim 아래)
 								} else if (saved) {
 									const result = parseTurkJSON(saved);
 									if (result && "parsed" in result && result.parsed.silent !== true) commit(result.parsed);
