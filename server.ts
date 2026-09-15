@@ -74,7 +74,6 @@ interface Session {
 	pushSubscription: any; // 마지막 구독 (1인 — 세션당 1개)
 	ws: Set<WebSocket>; // 같은 유저 다중 탭 — 동일 세션 broadcast
 	lastPrompt: string | null; // 마지막 프롬프트 (새로고침 복원용)
-	outBuf: { ts: number; ev: TurkEvent }[]; // 사용자향 출력 버퍼 — WS 유실분 접속 시 풀 재생용 (silent 제외, cap 20)
 	lastResponse: any | null; // 마지막 agent_end 이벤트 캐시 — WS 미연결(백그라운드) 유실분 복원용 (마지막 1건)
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
 	lastActivity: number; // 마지막 활동 타임스탬프 (LRU 정리용)
@@ -123,13 +122,6 @@ function startBackend(session: Session): void {
 			session.lastResponse = ev; // WS 미연결 동안 유실 대비 — get_state 복원용 캐시
 			session.scheduler.drainQueue();
 			if (session.pushSubscription) sendPushNotification(session, ev);
-			// 사용자향 출력 버퍼 적재 — WS 연결 중이면 buffer_signal(시그널)만 전송, 데이터는 클라가 풀로 읽어감
-			if (!isSilentEvent(ev)) {
-				const lastTs = session.outBuf.length ? session.outBuf[session.outBuf.length - 1].ts : 0;
-				session.outBuf.push({ ts: Math.max(Date.now(), lastTs + 1), ev }); // 단조 ts — restart_pi seq 리셋 문제 회피
-				if (session.outBuf.length > 20) session.outBuf.shift();
-				if (session.ws.size > 0) broadcast(session, { type: "buffer_signal" });
-			}
 		}
 		// get_state 응답 보강: lastPrompt + isStreaming 주입
 		if (ev.type === "response" && ev.command === "get_state") {
@@ -179,19 +171,6 @@ function extractTextFromMessages(messages: any[]): string {
 		}
 	}
 	return "";
-}
-
-// silent 응답 판별 — 출력 버퍼 제외용 (push 폐기와 동일 기준)
-function isSilentEvent(ev: TurkEvent): boolean {
-	const messages = (ev as any).messages;
-	if (!Array.isArray(messages)) return false;
-	const text = extractTextFromMessages(messages);
-	if (!text) return false;
-	try {
-		const greedy = text.match(/\{[\s\S]*\}/);
-		const parsed = JSON.parse(greedy?.[0] ?? text);
-		return !!(parsed && parsed.silent === true);
-	} catch { return false; }
 }
 
 function sendPushNotification(session: Session, ev: TurkEvent): void {
@@ -269,7 +248,6 @@ function createSession(userKey: string): Session {
 		pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원 (재시작 후 재구독 불필요)
 		ws: new Set(),
 		lastPrompt: null,
-		outBuf: [],
 		lastResponse: null,
 		isStreaming: false,
 		lastActivity: Date.now(),
@@ -345,7 +323,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 // ── WebSocket 서버 ──────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 16 * 1024 * 1024 }); // 첨부 base64 프레임 수용
-const customCommands = ["restart_pi", "schedule", "push_subscribe", "read_buffer", "attach"];
+const customCommands = ["restart_pi", "schedule", "push_subscribe", "attach"];
 
 wss.on("connection", (ws, req) => {
 	const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -383,7 +361,6 @@ wss.on("connection", (ws, req) => {
 					session.agentSessionId = null;
 				session.lastPrompt = null; // 새 세션 — 저장된 ID 클리어 → 백엔드 --no-session(새 세션) → ready 후 get_state로 새 ID 갱신
 				session.lastResponse = null; // 새 세션 — 응답 캐시 클리어
-				session.outBuf = []; // 새 세션 — 이전 세션 유실분 재생 방지
 					console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 					setTimeout(() => startBackend(session), 500);
 				} else if (msg.type === "schedule") {
@@ -399,12 +376,6 @@ wss.on("connection", (ws, req) => {
 					session.pushSubscription = msg.subscription;
 					savePushSubscription(userKey, msg.subscription); // 영속화
 					if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신+저장: ${msg.subscription?.endpoint?.slice(0, 60)}`);
-				} else if (msg.type === "read_buffer") {
-					// 클라 풀 — since 이후 유실분 유니캐스트 (버퍼 유지, 탭별 커서, 멱등)
-					const since = typeof msg.since === "number" ? msg.since : 0;
-					const missed = session.outBuf.filter((e) => e.ts > since);
-					if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Buffer] read_buffer: since=${since} → ${missed.length}건`);
-					ws.send(JSON.stringify({ type: "response", command: "read_buffer", success: true, data: { missed } }));
 				} else if (msg.type === "attach") {
 					// 파일 업로드 → OS 임시디렉토리 저장 (휘발 — OS가 정리) — 에이전트가 자기 read 도구로 읽음
 					const MAX_ATTACH = 8 * 1024 * 1024;
