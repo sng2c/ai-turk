@@ -359,7 +359,7 @@ export default function App() {
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				setToolStatus(null);
 				setShowThinking(false);
-				// 씽킹 스트립 유지(임시) — 턴 종료 후에도 표시, 다음 agent_start에서 교체
+				setThinkingText(""); // 턴 종료 — 씽킹 스트립 클리어
 				// 1차: agent_end의 messages에서 텍스트 추출
 				let text = msg.messages?.length ? extractAssistantText(msg.messages) : "";
 				// 2차(fallback): messages가 비었거나 파싱 실패 시 스트리밍 누적본 사용
@@ -483,7 +483,7 @@ export default function App() {
 			case "response":
 				if (msg.command === "compact" && !msg.success) {
 					setLoading(false); // 안전 해제 — compaction_end 누락 대비
-					setStrip(`⚠️ 컴팩트 실패: ${String(msg.error).slice(0, 200)}`); // 상태 스트립 — 메인 출력 보존, 다음 턴까지 유지
+					setStrip(`⚠️ 컴팩트 실패: ${String(msg.error).slice(0, 200)}`, 5000); // 상태 스트립 — 메인 출력 보존
 				}
 				if (msg.command === "attach") {
 					// 업로드 완료 → 칩 추가 (경로는 서버가 부여)
@@ -625,7 +625,7 @@ export default function App() {
 				const r = (msg as any).result;
 				const fmtTok = (n?: number) => n == null ? "?" : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 				// 상태 스트립 표시 (5초 후 자동 소멸) — 메인 출력은 컴팩트 선택 시 prevState로 복원됨
-				setStrip((msg as any).aborted ? "🧹 컴팩트 취소됨" : `✅ 컴팩트 완료 (${fmtTok(r?.tokensBefore)} → ${fmtTok(r?.estimatedTokensAfter)} tokens)`); // 다음 턴까지 유지
+				setStrip((msg as any).aborted ? "🧹 컴팩트 취소됨" : `✅ 컴팩트 완료 (${fmtTok(r?.tokensBefore)} → ${fmtTok(r?.estimatedTokensAfter)} tokens)`, 5000);
 				break;
 			}
 			case "scheduler_trigger":
