@@ -483,7 +483,6 @@ body {
 	justify-content: center;
 }
 .turk-thinking-area {
-	background: var(--muted);
 	margin: 0 var(--box-shadow-width);
 	padding: 0.15rem 0.6rem;
 	cursor: pointer;
