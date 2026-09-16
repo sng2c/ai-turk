@@ -994,10 +994,11 @@ export default function App() {
 				</button></span>
 			</header>
 
-			{thinkingText && (
+			{(thinkingText || toolStatus) && (
 				<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
-					<span className="turk-thinking-label">{showThinking ? "🤔 사고중..." : "ℹ️ 상태"}</span>
-					<div className="turk-thinking-text" ref={stripRef}>{thinkingText.slice(-2000)}</div>
+					<span className="turk-thinking-label">{showThinking ? "🤔 사고중..." : toolStatus ? "🔧 도구" : "ℹ️ 상태"}</span>
+					{toolStatus && <div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>}
+					{thinkingText && <div className="turk-thinking-text" ref={stripRef}>{thinkingText.slice(-2000)}</div>}
 				</div>
 			)}
 
@@ -1028,11 +1029,8 @@ export default function App() {
 							<span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span>
 						</div>
 					)}
-					{loading && toolStatus ? (
-						<span className="turk-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</span>
-					) : (
-						<Md text={state.message} />
-					)}
+					{/* 메인 출력 — 툴 실행 중에도 대체되지 않음 (툴 상태는 상태 스트립으로 이동) */}
+					<Md text={state.message} />
 				</div>
 			</div>
 
