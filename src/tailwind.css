@@ -477,10 +477,8 @@ body {
 /* 사고 영역 */
 .turk-thinking-area {
 	background: var(--muted);
-	border: 0.143rem solid var(--muted-foreground);
-	box-shadow: var(--pixel-box-shadow);
 	margin: var(--box-shadow-width);
-	padding: 0.429rem 0.857rem;
+	padding: 0.2rem 0.6rem;
 	cursor: pointer;
 	overflow: hidden;
 }
@@ -494,23 +492,20 @@ body {
 }
 
 .turk-thinking-text {
-	font-size: var(--turk-font-size);
+	font-size: calc(var(--turk-font-size) * 0.8);
 	line-height: 1.6;
 	color: var(--muted-foreground);
 	font-style: italic;
-	white-space: pre-wrap;
+	white-space: nowrap;
 	overflow: hidden;
-	display: -webkit-box;
-	-webkit-line-clamp: 2;
-	line-clamp: 2;
-	-webkit-box-orient: vertical;
-	max-height: 2rem;
+	text-overflow: ellipsis;
+	max-height: 1.5em;
 	font-family: "NeoDunggeunmo", monospace;
 }
 
 .turk-thinking-area.expanded .turk-thinking-text {
-	-webkit-line-clamp: unset;
-	line-clamp: unset;
+	white-space: pre-wrap;
+	text-overflow: unset;
 	max-height: 14.286rem;
 	overflow-y: auto;
 }
@@ -522,14 +517,13 @@ body {
 
 .turk-strip-tool {
 	color: var(--warning);
-	font-size: var(--turk-font-size);
+	font-size: calc(var(--turk-font-size) * 0.8);
 	display: flex;
 	align-items: center;
 	gap: 0.25rem;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	margin-bottom: 0.286rem;
 }
 
 /* 버튼 그리드 */

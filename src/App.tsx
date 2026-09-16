@@ -996,9 +996,9 @@ export default function App() {
 
 			{(thinkingText || toolStatus) && (
 				<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
-					<span className="turk-thinking-label">{showThinking ? "🤔 사고중..." : toolStatus ? "🔧 도구" : "ℹ️ 상태"}</span>
-					{toolStatus && <div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>}
-					{thinkingText && <div className="turk-thinking-text" ref={stripRef}>{thinkingText.slice(-2000)}</div>}
+					{toolStatus
+						? <div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div> /* 툴 = 노란색 */
+						: <div className="turk-thinking-text" ref={stripRef}>{thinkingText.slice(-120)}</div>} /* 씽킹 = 회색 이탤릭 */
 				</div>
 			)}
 
