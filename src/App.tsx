@@ -1004,7 +1004,7 @@ export default function App() {
 			</header>
 
 			<div className="turk-strip-slot">
-				{loading && (thinkingText || toolStatus) ? ( /* dim 중: 인디케이터 / 그 외: 응답 짝 */
+				{(thinkingText || toolStatus) ? ( /* 인디케이터(씽킹/툴) 우선, 없으면 응답 짝 — 늘 차 있는 한 줄 */
 					<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
 						{toolStatus ? (
 							<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
