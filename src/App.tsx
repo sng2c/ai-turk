@@ -612,6 +612,16 @@ export default function App() {
 				}
 				break;
 
+			case "auto_retry_start": {
+				// API 한도/과부하 등 일시 오류 자동 재시도 — dim 중 인디케이터에 표시 (agent_end에서 통일 클리어)
+				const em = String((msg as any).errorMessage ?? "");
+				const brief = em.match(/"message":"([^"]*)"/)?.[1] ?? em.replace(/\s+/g, " ").slice(0, 80);
+				setStrip(`⚠️ 재시도 ${(msg as any).attempt}/${(msg as any).maxAttempts} — ${brief} (${Math.round(((msg as any).delayMs ?? 0) / 1000)}초 후)`);
+				break;
+			}
+			case "auto_retry_end":
+				setThinkingText(""); // 재시도 후 새 응답 시작 — 인디케이터 리셋
+				break;
 			case "compaction_start":
 				// 수동 컴팩트만 표시 (threshold/overflow 자동 컴팩트는 조용히)
 				if ((msg as any).reason === "manual") {
