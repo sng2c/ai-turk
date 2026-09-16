@@ -477,7 +477,7 @@ body {
 /* 사고 영역 */
 .turk-thinking-area {
 	background: var(--muted);
-	margin: var(--box-shadow-width);
+	margin: -0.286rem var(--box-shadow-width); /* 세로 음수 — 컨테이너 flex gap 상쇄해 인디케이터 간격 축소 */
 	padding: 0.2rem 0.6rem;
 	cursor: pointer;
 	overflow: hidden;
