@@ -484,7 +484,7 @@ body {
 }
 .turk-thinking-area {
 	margin: 0 var(--box-shadow-width);
-	padding: 0.15rem 0.6rem;
+	padding: 0.15rem 0;
 	cursor: pointer;
 	overflow: hidden;
 	display: flex;
