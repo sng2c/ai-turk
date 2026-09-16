@@ -42,16 +42,26 @@ export default function App() {
 	const attachRef = useRef(attachments);
 	attachRef.current = attachments;
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	const pendingFilesRef = useRef<{ name: string; data: string; mimeType: string }[]>([]); // 연결 대기 첨부 큐 — 준비되면 자동 전송
+	const flushPendingFiles = () => {
+		const ws = wsRef.current;
+		if (!ws || ws.readyState !== WebSocket.OPEN || !pendingFilesRef.current.length) return;
+		for (const f of pendingFilesRef.current) ws.send(JSON.stringify({ type: "attach", name: f.name, data: f.data, mimeType: f.mimeType }));
+		pendingFilesRef.current = [];
+	};
 	const handleFiles = (files: FileList | null) => {
 		if (!files?.length) return;
-		const ws = wsRef.current;
-		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) { alert("연결 준비 중입니다 — 잠시 후 다시 시도하세요."); return; }
 		for (const f of [...files].slice(0, 5)) {
 			if (f.size > 50 * 1024 * 1024) { alert(`파일이 너무 큽니다: ${f.name} (최대 50MB)`); continue; }
 			const reader = new FileReader();
 			reader.onload = () => {
 				const data = String(reader.result).split(",")[1] ?? "";
-				ws.send(JSON.stringify({ type: "attach", name: f.name, data, mimeType: f.type }));
+				const ws = wsRef.current;
+				if (ws && ws.readyState === WebSocket.OPEN && piReady) {
+					ws.send(JSON.stringify({ type: "attach", name: f.name, data, mimeType: f.type }));
+				} else {
+					pendingFilesRef.current.push({ name: f.name, data, mimeType: f.type }); // 재연결 후 자동 첨부
+				}
 			};
 			reader.readAsDataURL(f);
 		}
@@ -259,6 +269,7 @@ export default function App() {
 		switch (msg.type) {
 			case "pi_ready":
 				setPiReady(true);
+				flushPendingFiles(); // 연결 대기 중 선택된 파일 자동 첨부
 				if (typeof msg.backend === "string") setBackendKind(msg.backend);
 				// 웹 푸시 구독: VAPID 공개키로 서비스 워커 등록 + 구독 → 서버 전송
 				if (typeof msg.vapidPublicKey === "string") subscribePush(msg.vapidPublicKey, wsRef.current);
