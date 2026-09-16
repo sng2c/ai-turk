@@ -477,7 +477,7 @@ body {
 /* 사고 영역 */
 .turk-strip-slot {
 	/* 인디케이터 컨테이너 — 항상 렌더, 숨김 시에도 min-height로 타이틀↔출력창 간격 유지 */
-	min-height: 0.857rem;
+	min-height: 1.286rem; /* 인디케이터 높이 여유 */
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
