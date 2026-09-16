@@ -344,6 +344,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 // ── WebSocket 서버 ──────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 100 * 1024 * 1024 }); // 첨부 base64 프레임 수용 (50MB 파일)
+// WS keepalive — 모바일 NAT의 유휴 컷(1005 churn) 방지: 주기 ping에 브라우저가 자동 pong
+setInterval(() => { for (const c of wss.clients) if (c.readyState === WebSocket.OPEN) c.ping(); }, 25000);
 const customCommands = ["restart_pi", "schedule", "push_subscribe", "attach"];
 
 wss.on("connection", (ws, req) => {

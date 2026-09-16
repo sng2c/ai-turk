@@ -294,6 +294,9 @@ function savePushSubscription(userKey: string, sub: any): void {
 		configureServer(server) {
 			// noServer 모드: Vite HMR 역그레이드 핸들러와 충돌 방지
 			const wss = new WebSocketServer({ noServer: true, maxPayload: 100 * 1024 * 1024 }); // 첨부 base64 프레임 수용 (50MB 파일)
+			// WS keepalive — 모바일 NAT의 유휴 컷(1005 churn) 방지: 주기 ping에 브라우저가 자동 pong
+			const keepAlive = setInterval(() => { for (const c of wss.clients) if (c.readyState === WebSocket.OPEN) c.ping(); }, 25000);
+			keepAlive.unref?.();
 			server.httpServer!.on("upgrade", (req, socket, head) => {
 				const url = new URL(req.url || "", "http://localhost");
 				if (url.pathname === "/ws") {
