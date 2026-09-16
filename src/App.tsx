@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, SendHorizontal } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, MessageSquareMore } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey,
@@ -1014,7 +1014,7 @@ export default function App() {
 					</div>
 				) : state.answerTo ? (
 					<div className="turk-thinking-area" title={state.answerTo.length > 300 ? state.answerTo.slice(0, 300) + "…" : state.answerTo} onClick={(e) => navigator.clipboard?.writeText(state.answerTo ?? "").then(() => { e.currentTarget.style.opacity = "1"; setTimeout(() => { e.currentTarget.style.opacity = "0.75"; }, 600); }).catch(() => { /* 클립보드 실패 무시 */ })}>
-						<div className="turk-thinking-text" style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", display: "flex", alignItems: "center", gap: "0.25rem" }}><SendHorizontal className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} /><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span></div>
+						<div className="turk-thinking-text" style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", display: "flex", alignItems: "center", gap: "0.25rem" }}><MessageSquareMore className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} /><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span></div>
 					</div>
 				) : null}
 			</div>
