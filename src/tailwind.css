@@ -487,7 +487,9 @@ body {
 	padding: 0.15rem 0.6rem;
 	cursor: pointer;
 	overflow: hidden;
-	text-align: center; /* 인디케이터 가운데 정렬 */
+	text-align: center; /* 가로 센터 */
+	display: flex;
+	align-items: center; /* 세로 센터 */
 }
 
 .turk-thinking-label {
@@ -499,6 +501,7 @@ body {
 }
 
 .turk-thinking-text {
+	flex: 1 1 auto;
 	font-size: calc(var(--turk-font-size) * 0.8);
 	line-height: 1.6;
 	color: var(--muted-foreground);
@@ -523,6 +526,7 @@ body {
 }
 
 .turk-strip-tool {
+	flex: 1 1 auto;
 	color: var(--warning);
 	font-size: calc(var(--turk-font-size) * 0.8);
 	display: flex;
