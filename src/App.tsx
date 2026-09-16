@@ -45,9 +45,9 @@ export default function App() {
 	const handleFiles = (files: FileList | null) => {
 		if (!files?.length) return;
 		const ws = wsRef.current;
-		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
+		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) { alert("연결 준비 중입니다 — 잠시 후 다시 시도하세요."); return; }
 		for (const f of [...files].slice(0, 5)) {
-			if (f.size > 8 * 1024 * 1024) { alert(`파일이 너무 큽니다: ${f.name} (최대 8MB)`); continue; }
+			if (f.size > 50 * 1024 * 1024) { alert(`파일이 너무 큽니다: ${f.name} (최대 50MB)`); continue; }
 			const reader = new FileReader();
 			reader.onload = () => {
 				const data = String(reader.result).split(",")[1] ?? "";
@@ -1086,7 +1086,7 @@ export default function App() {
 					</div>
 				)}
 				<input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} />
-				<button type="button" className="turk-submit-btn" style={{ flex: "0 0 auto", padding: "0 0.6rem" }} title="파일 첨부 (최대 8MB)" disabled={loading || !piReady} onClick={() => fileInputRef.current?.click()}>
+				<button type="button" className="turk-submit-btn" style={{ flex: "0 0 auto", padding: "0 0.6rem" }} title="파일 첨부 (최대 50MB)" disabled={loading || !piReady} onClick={() => fileInputRef.current?.click()}>
 					<Paperclip style={{ width: "1em", height: "1em" }} />
 				</button>
 				<input
