@@ -520,9 +520,16 @@ body {
 	font-style: italic;
 }
 
-.turk-tool {
+.turk-strip-tool {
 	color: var(--warning);
 	font-size: var(--turk-font-size);
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	margin-bottom: 0.286rem;
 }
 
 /* 버튼 그리드 */
