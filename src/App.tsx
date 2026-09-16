@@ -90,7 +90,6 @@ export default function App() {
 	const [showThinking, setShowThinking] = useState(false);
 	const [thinkingExpanded, setThinkingExpanded] = useState(false);
 	const stripSeqRef = useRef(0); // 스트립 시퀀스 — 자동소멸 타이머 가드
-	const [stripSticky, setStripSticky] = useState<string | null>(null); // dim 꺼진 후에도 잠깐 표시하는 경고 (컴팩트 실패 등)
 	const stripRef = useRef<HTMLDivElement>(null);
 	// 상태 스트립 setter — autoMs 지정 시 그 시퀀스가 최신일 때만 자동 소멸
 	const setStrip = (t: string | ((p: string) => string), autoMs?: number) => {
@@ -305,7 +304,6 @@ export default function App() {
 				setStreamingText("");
 				streamingTextRef.current = "";
 				setThinkingText("");
-				setStripSticky(null);
 				setShowThinking(false);
 				setThinkingExpanded(false);
 				setToolStatus(null);
@@ -326,6 +324,7 @@ export default function App() {
 					setLogoMode("robot");
 					setToolStatus(null);
 					setShowThinking(false);
+					setThinkingText(""); // dim 해제 = 클리어 (통일)
 					userSentRef.current = false; // 실패 턴 — clearInput 생략 (입력 유지)
 					schedulerPrefixRef.current = null;
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
@@ -339,6 +338,7 @@ export default function App() {
 					setLogoMode("robot");
 					setToolStatus(null);
 					setShowThinking(false);
+					setThinkingText(""); // dim 해제 = 클리어 (통일)
 					userSentRef.current = false; // 취소 턴 — 입력 클리어 생략(에코 유지), 이후 agent_end 오염 방지
 					retryCountRef.current = 0; // 자가수정 카운터 리셋 — 취소가 재시도로 이어지지 않게
 					schedulerPrefixRef.current = null;
@@ -485,10 +485,7 @@ export default function App() {
 			case "response":
 				if (msg.command === "compact" && !msg.success) {
 					setLoading(false); // 안전 해제 — compaction_end 누락 대비
-					// dim 꺼진 후에도 5초간 표시되는 스티키 경고 (실패는 조용히 사라지면 안 됨)
-					setStripSticky(`컴팩트 실패: ${String(msg.error).slice(0, 200)}`);
-					const seq = ++stripSeqRef.current;
-					setTimeout(() => { if (stripSeqRef.current === seq) setStripSticky(null); }, 5000);
+					setThinkingText(""); // dim 해제 = 클리어 (통일)
 				}
 				if (msg.command === "attach") {
 					// 업로드 완료 → 칩 추가 (경로는 서버가 부여)
@@ -626,7 +623,8 @@ export default function App() {
 				setContextPct(null); // 컴팩트 직후 percent=null — 다음 턴까지 "—" 표시
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" })); // 갱신 폴링
 				if ((msg as any).reason !== "manual") break; // 자동 컴팩트 — 화면 변경 없음
-				setLoading(false); // dim 해제 = 완료 신호 (인디케이터는 dim 중만 표시 — 별도 완료 메시지 없음)
+				setLoading(false);
+				setThinkingText(""); // dim 해제 = 클리어 (통일)
 				break;
 			}
 			case "scheduler_trigger":
@@ -996,11 +994,9 @@ export default function App() {
 			</header>
 
 			<div className="turk-strip-slot">
-				{(loading && (thinkingText || toolStatus)) || stripSticky ? ( /* 인디케이터는 dim 중에만 — 최종 출력 커밋 시 사라짐 */
+				{loading && (thinkingText || toolStatus) ? ( /* 인디케이터는 dim 중에만 — dim 해제 시 클리어가 유일한 경로 */
 					<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
-						{stripSticky ? (
-							<div className="turk-strip-tool">⚠️ {stripSticky}</div>
-						) : toolStatus ? (
+						{toolStatus ? (
 							<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
 						) : (
 							<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
