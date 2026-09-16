@@ -999,7 +999,7 @@ export default function App() {
 					{toolStatus ? (
 						<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
 					) : (
-						<div className="turk-thinking-text" ref={stripRef}>{thinkingText.slice(-120)}</div>
+						<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
 					)}
 				</div>
 			)}
