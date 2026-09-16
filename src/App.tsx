@@ -1014,7 +1014,7 @@ export default function App() {
 					</div>
 				) : state.answerTo ? (
 					<div className="turk-thinking-area" title={state.answerTo.length > 300 ? state.answerTo.slice(0, 300) + "…" : state.answerTo} onClick={(e) => navigator.clipboard?.writeText(state.answerTo ?? "").then(() => { e.currentTarget.style.opacity = "1"; setTimeout(() => { e.currentTarget.style.opacity = "0.75"; }, 600); }).catch(() => { /* 클립보드 실패 무시 */ })}>
-						<div className="turk-thinking-text"><SendHorizontal className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} /> {state.answerTo}</div>
+						<div className="turk-thinking-text" style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", display: "flex", alignItems: "center", gap: "0.25rem" }}><SendHorizontal className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} /><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span></div>
 					</div>
 				) : null}
 			</div>
