@@ -491,14 +491,6 @@ body {
 	align-items: center; /* 세로 센터 */
 }
 
-.turk-thinking-label {
-	font-size: var(--turk-font-size);
-	color: var(--muted-foreground);
-	display: block;
-	margin-bottom: 0.286rem;
-	user-select: none;
-}
-
 .turk-thinking-text {
 	flex: 1 1 auto;
 	font-size: calc(var(--turk-font-size) * 0.8);
@@ -517,11 +509,6 @@ body {
 	text-overflow: unset;
 	max-height: 14.286rem;
 	overflow-y: auto;
-}
-
-.turk-thinking {
-	color: var(--muted-foreground);
-	font-style: italic;
 }
 
 .turk-strip-tool {
