@@ -105,7 +105,7 @@ body {
 	padding: 0.571rem 0.857rem 4.5rem; /* 하단 4.5rem: 입력창 영역 */
 	display: flex;
 	flex-direction: column;
-	gap: 0.857rem;
+	gap: 0; /* 간격은 슬롯 min-height·그리드 마진이 관리 */
 	height: 100dvh;
 	overflow: hidden;
 }
@@ -475,10 +475,17 @@ body {
 .turk-message th, .turk-message td { border: 0.071rem solid var(--muted-foreground); padding: 0.2em 0.4em; }
 
 /* 사고 영역 */
+.turk-strip-slot {
+	/* 인디케이터 컨테이너 — 항상 렌더, 숨김 시에도 min-height로 타이틀↔출력창 간격 유지 */
+	min-height: 1.6rem;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+}
 .turk-thinking-area {
 	background: var(--muted);
-	margin: -0.857rem var(--box-shadow-width); /* 세로 완전 상쇄 — 헤더·출력창과 밀착 (flex gap 0.857rem 상쇄) */
-	padding: 0.2rem 0.6rem;
+	margin: 0 var(--box-shadow-width);
+	padding: 0.15rem 0.6rem;
 	cursor: pointer;
 	overflow: hidden;
 }
@@ -531,6 +538,7 @@ body {
 	display: grid;
 	gap: 0.143rem;
 	flex: 1 1 auto; /* 그리드 영역 60% */
+	margin-top: 0.857rem; /* 제거된 컨테이너 gap 보완 (출력창↔그리드 간격 유지) */
 	min-height: 0;
 	grid-auto-rows: auto; /* 정사각형 높이 — 행 딱 붙음 */
 	justify-items: stretch; /* 가로 채움 */

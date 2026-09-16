@@ -994,15 +994,17 @@ export default function App() {
 				</button></span>
 			</header>
 
-			{(thinkingText || toolStatus) && (
-				<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
-					{toolStatus ? (
-						<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
-					) : (
-						<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
-					)}
-				</div>
-			)}
+			<div className="turk-strip-slot">
+				{(thinkingText || toolStatus) && (
+					<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
+						{toolStatus ? (
+							<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
+						) : (
+							<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
+						)}
+					</div>
+				)}
+			</div>
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
 				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${userKey} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "\"NeoDunggeunmo\", monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
