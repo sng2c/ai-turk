@@ -153,7 +153,10 @@ function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { 
 	const route = (opts?.route ?? cmd.route ?? "user") as "user" | "scheduler" | "tool";
 	session.currentRoute = route;
 	// 처리중 프롬프트 기록 — 재연결/새로고침 후 get_state로 표시 (user 라우트 순수 입력만)
-	if (cmd.type === "prompt" && route === "user" && typeof cmd.userInput === "string") session.lastPrompt = cmd.userInput;
+	if (cmd.type === "prompt" && route === "user" && typeof cmd.userInput === "string") {
+		session.lastPrompt = cmd.userInput;
+		saveLastPrompt(session.userKey, cmd.userInput); // 출력버퍼 영속화
+	}
 	// prompt 전송 전에 합성 agent_start broadcast — 즉시 로고 전환 + dim
 	if (cmd.type === "prompt") {
 		session.isStreaming = true;
@@ -215,6 +218,17 @@ function saveAgentSessionId(userKey: string, agentSessionId: string): void {
 		writeFileSync(configPath(userKey), agentSessionId); // 평문 UUID
 	} catch (err) { console.log(`[${userKey.slice(0, 8)}] [config] 저장 실패: ${err instanceof Error ? err.message : err}`); }
 }
+// ── lastPrompt 영속화 (서버 출력버퍼) — 재시작·세션 재생성·다른 브라우저와 무관하게 이전 입력 제공 ──
+function loadLastPrompt(userKey: string): string | null {
+	try {
+		const f = `${envPaths("ai-turk").data}/${userKey}/last-prompt`;
+		if (!existsSync(f)) return null;
+		return readFileSync(f, "utf-8") || null;
+	} catch { return null; }
+}
+function saveLastPrompt(userKey: string, v: string): void {
+	try { writeFileSync(`${envPaths("ai-turk").data}/${userKey}/last-prompt`, v); } catch { /* 디스크 실패 무시 */ }
+}
 function pushPath(userKey: string): string {
 	return `${envPaths("ai-turk").data}/${userKey}/push.json`;
 }
@@ -254,7 +268,7 @@ function createSession(userKey: string): Session {
 		ws: new Set(),
 		lastResponse: null,
 		lastTurnFailed: false,
-		lastPrompt: null,
+		lastPrompt: loadLastPrompt(userKey), // 영속 버퍼에서 복원 — 이전 입력 짝 캡션
 		lastResponsePrompt: null,
 		isStreaming: false,
 		lastActivity: Date.now(),
@@ -369,6 +383,7 @@ wss.on("connection", (ws, req) => {
 				session.lastResponse = null; // 새 세션 — 응답 캐시 클리어
 				session.lastTurnFailed = false; // 새 세션 — 실패 플래그 클리어
 				session.lastPrompt = null; // 새 세션 — 처리중 표시 클리어
+				saveLastPrompt(session.userKey, ""); // 새 세션 — 영속 버퍼도 클리어
 				session.lastResponsePrompt = null; // 새 세션 — 짝 정보 클리어
 					console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 					setTimeout(() => startBackend(session), 500);
