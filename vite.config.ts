@@ -74,11 +74,32 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		return "";
 	}
 
-		function stripMarkdownServer(text: string): string {
+	function stripMarkdownServer(text: string): string {
 		return removeMarkdown(text)
 			.replace(/\n/g, " ")
 			.replace(/\s+/g, " ")
 			.trim();
+	}
+
+	// 응답 텍스트에서 터크 JSON 추출 — 후보: 코드펜스 → greedy {…} → 첫 '{'부터 끝까지 (클라이언트 parseTurkJSON과 동일 전략)
+	// silent 캐시 판정·schedules 적용의 공용 파서. 파싱 실패 시 parsed=null (원문 text는 보존).
+	function parseTurkResponse(ev: TurkEvent): { text: string; parsed: any | null } {
+		const messages = (ev as any).messages;
+		const text = Array.isArray(messages) ? extractTextFromMessages(messages) : "";
+		if (!text) return { text: "", parsed: null };
+		const candidates: string[] = [];
+		const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+		if (fence) candidates.push(fence[1]);
+		const greedy = text.match(/\{[\s\S]*\}/);
+		if (greedy) candidates.push(greedy[0]);
+		const firstBrace = text.indexOf("{");
+		if (firstBrace !== -1) candidates.push(text.slice(firstBrace));
+		for (const raw of candidates) {
+			const s = raw.trim();
+			if (!s) continue;
+			try { return { text, parsed: JSON.parse(s) }; } catch { /* 다음 후보 */ }
+		}
+		return { text, parsed: null };
 	}
 
 	function sendPushNotification(session: Session, ev: TurkEvent): void {
@@ -156,10 +177,28 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				// 응답 실패 명시 정의 — agent_end.error → 실패 플래그. lastResponse는 성공분만 캐시
 				const aborted = Array.isArray((ev as any).messages) && (ev as any).messages.some((m: any) => m.role === "assistant" && m.stopReason === "aborted");
 				session.lastTurnFailed = !!(ev as any).error;
-				// 취소(aborted)는 성공도 실패도 아님 — lastResponse 캐시 제외. 에코는 해제(클린 스톱)
-				if (!session.lastTurnFailed && !aborted) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; } // 응답↔프롬프트 짝
+				// 응답 파싱 — silent 캐시 판정 + schedules 서버 적용에 공용
+				const { parsed: respParsed } = parseTurkResponse(ev);
+				// 취소(aborted)·silent는 lastResponse 캐시에서 제외 (AGENTS.md 약속: silent = no cache) —
+				// 백그라운드 조건 스킵 턴이 이전 가시 화면 복원본(lastResponse)을 덮어써 재오픈 시 빈 화면이 되던 버그 수정
+				if (!session.lastTurnFailed && !aborted && respParsed?.silent !== true) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; } // 응답↔프롬프트 짝
 				if (!session.lastTurnFailed) session.lastPrompt = null;
 				// 실패: lastPrompt 유지 — get_state가 재시도 에코로 전달 (실패 화면과 짝)
+				// schedules 배열을 서버가 응답에서 직접 스케줄러에 적용 — 클라이언트 릴레이 제거 (prod server.ts와 동일)
+				// 백그라운드(WS 끊김) 트리거에서도 체이닝 재등록이 유실되지 않게
+				if (!session.lastTurnFailed && !aborted && Array.isArray(respParsed?.schedules)) {
+					for (const sch of respParsed.schedules) {
+						if (!sch || typeof sch !== "object") continue;
+						const r = session.scheduler.handle(sch);
+						console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] 응답 적용: action=${sch.action} id=${sch.id ?? "-"} when=${sch.when ?? "-"} → ${r.success ? "ok" : `오류: ${r.error}`}`);
+						broadcast(session, {
+							type: "response",
+							command: "schedule",
+							success: r.success,
+							...(r.success ? { data: r.data } : { error: r.error }),
+						});
+					}
+				}
 				// LLM 응답 전체 로깅 (디버그) — push 파싱 원인 확정용
 				if (DEBUG) {
 					const msgs = (ev as any).messages;
