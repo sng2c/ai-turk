@@ -521,17 +521,6 @@ body {
 	font-style: italic;
 }
 
-.turk-answer-to {
-	font-size: calc(var(--turk-font-size) * 0.8);
-	color: var(--muted-foreground);
-	opacity: 0.85;
-	display: flex;
-	align-items: center;
-	gap: 0.25rem;
-	cursor: pointer;
-	user-select: none;
-	padding: 0 0.6rem;
-}
 .turk-strip-tool {
 	color: var(--warning);
 	font-size: calc(var(--turk-font-size) * 0.8);
