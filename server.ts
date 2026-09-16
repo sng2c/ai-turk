@@ -28,7 +28,9 @@ console.log(`[Turk] __dirname: ${__dirname}`);
 // ── .env 로더 (의존성 없음) ────────────────────────────────────────────
 try {
 	const envFile = process.env.TURK_ENV_FILE || ".env";
-	const content = readFileSync(join(__dirname, envFile), "utf8");
+	// 절대경로는 그대로, 상대경로는 서버 파일 기준 해결 (join이 절대경로를 깨먹는 것 방지 — TURK_ENV_FILE=/abs/.env 사용 가능)
+	const envPath = envFile.startsWith("/") ? envFile : join(__dirname, envFile);
+	const content = readFileSync(envPath, "utf8");
 	for (const line of content.split("\n")) {
 		const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
 		if (m && !(m[1] in process.env)) {
