@@ -996,9 +996,11 @@ export default function App() {
 
 			{(thinkingText || toolStatus) && (
 				<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
-					{toolStatus
-						? <div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div> /* 툴 = 노란색 */
-						: <div className="turk-thinking-text" ref={stripRef}>{thinkingText.slice(-120)}</div>} /* 씽킹 = 회색 이탤릭 */
+					{toolStatus ? (
+						<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
+					) : (
+						<div className="turk-thinking-text" ref={stripRef}>{thinkingText.slice(-120)}</div>
+					)}
 				</div>
 			)}
 
