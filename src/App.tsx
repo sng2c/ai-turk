@@ -1004,13 +1004,22 @@ export default function App() {
 			</header>
 
 			<div className="turk-strip-slot">
-				{loading && (thinkingText || toolStatus) ? ( /* 인디케이터는 dim 중에만 — dim 해제 시 클리어가 유일한 경로 */
+				{loading && (thinkingText || toolStatus) ? ( /* dim 중: 인디케이터 / 그 외: 응답 짝 */
 					<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
 						{toolStatus ? (
 							<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
 						) : (
 							<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
 						)}
+					</div>
+				) : state.answerTo ? (
+					<div
+						className="turk-answer-to"
+						title={state.answerTo.length > 300 ? state.answerTo.slice(0, 300) + "…" : state.answerTo} /* 툴팁도 300자 요약 */
+						onClick={(e) => navigator.clipboard?.writeText(state.answerTo ?? "").then(() => { e.currentTarget.style.opacity = "1"; setTimeout(() => { e.currentTarget.style.opacity = "0.75"; }, 600); }).catch(() => { /* 클립보드 실패 무시 */ })} /* 클릭 → 전체 질문 복사 */
+					>
+						<SendHorizontal className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} />
+						<span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span>
 					</div>
 				) : null}
 			</div>
@@ -1032,17 +1041,7 @@ export default function App() {
 					className={`turk-message${loading ? " turk-message-loading" : ""}`}
 					onScroll={updateScrollArrows}
 				>
-					{state.answerTo && (
-						<div
-							title={state.answerTo.length > 300 ? state.answerTo.slice(0, 300) + "…" : state.answerTo} // 툴팁도 300자 요약
-							onClick={(e) => navigator.clipboard?.writeText(state.answerTo ?? "").then(() => { e.currentTarget.style.opacity = "1"; setTimeout(() => { e.currentTarget.style.opacity = "0.75"; }, 600); }).catch(() => { /* 클립보드 실패 무시 */ })} // 클릭 → 전체 질문 복사 + 밝기 플래시
-							style={{ fontSize: "12px", fontFamily: '"NeoDunggeunmo", monospace', color: "var(--muted-foreground)", opacity: 0.75, marginBottom: "0.35rem", display: "flex", alignItems: "center", gap: "0.25rem", cursor: "pointer", userSelect: "none" }}
-						>
-							<SendHorizontal className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} />
-							<span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span>
-						</div>
-					)}
-					{/* 메인 출력 — 툴 실행 중에도 대체되지 않음 (툴 상태는 상태 스트립으로 이동) */}
+					{/* 메인 출력 — 짝(answerTo)은 상태 스트립으로 이동, 툴 실행 중에도 대체되지 않음 */}
 					<Md text={state.message} />
 				</div>
 			</div>
