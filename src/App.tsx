@@ -376,13 +376,8 @@ export default function App() {
 						retryCountRef.current = 0; // 성공 시 카운터 리셋
 						const parsed = result.parsed;
 						parsed.answerTo = answerToRef.current ?? undefined; // 짝표시 부착
-						// schedules는 silent 여부와 무관하게 항상 처리
-						if (Array.isArray(parsed.schedules)) {
-							for (const sch of parsed.schedules) {
-								wsRef.current?.send(JSON.stringify({ type: "schedule", ...sch }));
-							}
-						}
-						// silent: 사용자에게 미표시 — schedules는 이미 처리됨
+						// schedules는 서버가 agent_end에서 직접 스케줄러에 적용 (릴레이 제거 — 백그라운드 트리거 체이닝 보존)
+						// silent: 사용자에게 미표시
 						if (parsed.silent === true) {
 							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
 							return;
@@ -411,12 +406,7 @@ export default function App() {
 							retryCountRef.current = 0;
 							const parsed = fallback.parsed;
 							parsed.answerTo = answerToRef.current ?? undefined; // 짝표시 부착
-							// schedules는 silent 여부와 무관하게 항상 처리
-							if (Array.isArray(parsed.schedules)) {
-								for (const sch of parsed.schedules) {
-									wsRef.current?.send(JSON.stringify({ type: "schedule", ...sch }));
-								}
-							}
+							// schedules는 서버가 agent_end에서 직접 스케줄러에 적용 (릴레이 제거 — 백그라운드 트리거 체이닝 보존)
 							// silent: 사용자에게 미표시
 							if (parsed.silent === true) {
 								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
