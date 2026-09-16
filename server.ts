@@ -343,7 +343,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 });
 
 // ── WebSocket 서버 ──────────────────────────────────────────────────────
-const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 16 * 1024 * 1024 }); // 첨부 base64 프레임 수용
+const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 100 * 1024 * 1024 }); // 첨부 base64 프레임 수용 (50MB 파일)
 const customCommands = ["restart_pi", "schedule", "push_subscribe", "attach"];
 
 wss.on("connection", (ws, req) => {
@@ -402,11 +402,11 @@ wss.on("connection", (ws, req) => {
 					if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신+저장: ${msg.subscription?.endpoint?.slice(0, 60)}`);
 				} else if (msg.type === "attach") {
 					// 파일 업로드 → OS 임시디렉토리 저장 (휘발 — OS가 정리) — 에이전트가 자기 read 도구로 읽음
-					const MAX_ATTACH = 8 * 1024 * 1024;
+					const MAX_ATTACH = 50 * 1024 * 1024;
 					const data = typeof msg.data === "string" ? msg.data : "";
 					const name = String(msg.name ?? "file").split(/[\\/]/).pop()!.replace(/[\x00-\x1f]/g, "").trim().slice(0, 100) || "file";
 					if (!data || data.length > MAX_ATTACH * 1.4) {
-						ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: "파일 크기 초과 — 최대 8MB" }));
+						ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: "파일 크기 초과 — 최대 50MB" }));
 					} else {
 						try {
 							const dir = join(tmpdir(), "ai-turk-attach", userKey);

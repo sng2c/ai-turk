@@ -293,7 +293,7 @@ function savePushSubscription(userKey: string, sub: any): void {
 		name: "turk-rpc",
 		configureServer(server) {
 			// noServer 모드: Vite HMR 역그레이드 핸들러와 충돌 방지
-			const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 }); // 첨부 base64 프레임 수용
+			const wss = new WebSocketServer({ noServer: true, maxPayload: 100 * 1024 * 1024 }); // 첨부 base64 프레임 수용 (50MB 파일)
 			server.httpServer!.on("upgrade", (req, socket, head) => {
 				const url = new URL(req.url || "", "http://localhost");
 				if (url.pathname === "/ws") {
@@ -357,11 +357,11 @@ function savePushSubscription(userKey: string, sub: any): void {
 								if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신: ${msg.subscription?.endpoint?.slice(0, 60)}`);
 								} else if (msg.type === "attach") {
 								// 파일 업로드 → OS 임시디렉토리 저장 (휘발 — OS가 정리) — 에이전트가 자기 read 도구로 읽음
-								const MAX_ATTACH = 8 * 1024 * 1024;
+								const MAX_ATTACH = 50 * 1024 * 1024;
 								const data = typeof msg.data === "string" ? msg.data : "";
 								const name = String(msg.name ?? "file").split(/[\\/]/).pop()!.replace(/[\x00-\x1f]/g, "").trim().slice(0, 100) || "file";
 								if (!data || data.length > MAX_ATTACH * 1.4) {
-									ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: "파일 크기 초과 — 최대 8MB" }));
+									ws.send(JSON.stringify({ type: "response", command: "attach", success: false, error: "파일 크기 초과 — 최대 50MB" }));
 								} else {
 									try {
 										const dir = join(tmpdir(), "ai-turk-attach", userKey);
