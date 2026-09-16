@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, MessageSquareMore } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey,
@@ -98,6 +98,8 @@ export default function App() {
 		if (autoMs) setTimeout(() => { if (stripSeqRef.current === seq) setThinkingText(""); }, autoMs);
 	};
 	useEffect(() => { if (stripRef.current) stripRef.current.scrollTop = stripRef.current.scrollHeight; }, [thinkingText]);
+	// 짝(이전 입력)을 별도 렌더가 아닌 인디케이터 텍스트에 설정 — 씽킹/툴 시작 시 자연 교체
+	useEffect(() => { setStrip(state.answerTo ?? ""); }, [state.answerTo]);
 	const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null);
 	const [keyboardUp, setKeyboardUp] = useState(false);
 	const [kbHeight, setKbHeight] = useState(0);
@@ -503,7 +505,9 @@ export default function App() {
 						// 응답 실패 명시 — 마지막 턴 실패 시 실패 화면 (입력 유지).
 						// 단 서버가 이미 다음 턴을 스트리밍 중이면 실패 화면 생략 (이전 턴의 실패 — dim 우선)
 						if ((msg.data as any).lastTurnFailed === true && msg.data.isStreaming !== true) {
-							setState(errState("⚠️ 응답이 실패했습니다. 입력을 다시 전송해주세요.", gridRef.current.rows, gridRef.current.cols));
+							// 실패 복원 — 서버 버퍼에 남은 이전 입력(lastPrompt)을 짝 캡션으로
+							const lp = (msg.data as any).lastPrompt;
+							setState({ ...errState("⚠️ 응답이 실패했습니다. 입력을 다시 전송해주세요.", gridRef.current.rows, gridRef.current.cols), answerTo: typeof lp === "string" && lp ? lp : undefined });
 						} else {
 							// 복원은 서버 lastResponse 단일 채널 (클라 IndexedDB 캐시 제거됨)
 							const lr = (msg.data as any).lastResponse;
@@ -1013,10 +1017,6 @@ export default function App() {
 						) : (
 							<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
 						)}
-					</div>
-				) : state.answerTo ? (
-					<div className="turk-thinking-area" title={state.answerTo.length > 300 ? state.answerTo.slice(0, 300) + "…" : state.answerTo} onClick={(e) => navigator.clipboard?.writeText(state.answerTo ?? "").then(() => { e.currentTarget.style.opacity = "1"; setTimeout(() => { e.currentTarget.style.opacity = "0.75"; }, 600); }).catch(() => { /* 클립보드 실패 무시 */ })}>
-						<div className="turk-thinking-text" style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", display: "flex", alignItems: "center", gap: "0.25rem" }}><MessageSquareMore className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} /><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span></div>
 					</div>
 				) : null}
 			</div>
