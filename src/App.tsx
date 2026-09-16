@@ -514,7 +514,9 @@ export default function App() {
 								// setLoading(false) 금지 — loading은 동기 isStreaming 분기가 소유.
 								// 재연결 시 서버가 스트리밍/씽킹중면 dim이 유지되어야 함 (이전 커밋화면은 dim 아래)
 							} else {
-								setState(emptyState(gridRef.current.rows, gridRef.current.cols));
+								// lastResponse 없음(실패/빈 응답/서버 재시작) — 이전 입력(lastPrompt)을 짝 캡션으로 복원
+								const lp = (msg.data as any).lastPrompt;
+								setState({ ...emptyState(gridRef.current.rows, gridRef.current.cols), answerTo: typeof lp === "string" && lp ? lp : undefined });
 							}
 						}
 					}
