@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, MessageSquareMore } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey,
@@ -98,8 +98,6 @@ export default function App() {
 		if (autoMs) setTimeout(() => { if (stripSeqRef.current === seq) setThinkingText(""); }, autoMs);
 	};
 	useEffect(() => { if (stripRef.current) stripRef.current.scrollTop = stripRef.current.scrollHeight; }, [thinkingText]);
-	// 짝(이전 입력)을 별도 렌더가 아닌 인디케이터 텍스트에 설정 — 씽킹/툴 시작 시 자연 교체
-	useEffect(() => { setStrip(state.answerTo ?? ""); }, [state.answerTo]);
 	const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null);
 	const [keyboardUp, setKeyboardUp] = useState(false);
 	const [kbHeight, setKbHeight] = useState(0);
@@ -1017,6 +1015,10 @@ export default function App() {
 						) : (
 							<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
 						)}
+					</div>
+				) : state.answerTo ? (
+					<div className="turk-thinking-area">
+						<div className="turk-thinking-text" style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}><MessageSquareMore className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} /><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span></div>
 					</div>
 				) : null}
 			</div>
