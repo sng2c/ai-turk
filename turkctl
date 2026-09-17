@@ -71,8 +71,8 @@ if [ -z "${TURK_HOST:-}" ] && [ -f "$ENV_FILE" ]; then
 fi
 TURK_HOST="${TURK_HOST:-127.0.0.1}"
 
-LOG_FILE="/tmp/ai-turk-${TURK_PORT}.log"
-PID_FILE="/tmp/ai-turk-${TURK_PORT}.pid"
+LOG_FILE="${TMPDIR:-/tmp}/ai-turk-${TURK_PORT}.log"
+PID_FILE="${TMPDIR:-/tmp}/ai-turk-${TURK_PORT}.pid"
 
 # 자식 프로세스(vite/server.ts) 에 전달 — 환경변수로 명시
 export TURK_PORT="$TURK_PORT"
