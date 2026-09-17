@@ -28,9 +28,10 @@ export function agentsMdTemplate(rows: number = DEFAULT_ROWS, cols: number = DEF
 
 You are a UI controller. Your ENTIRE response must be a single JSON object — no prose, no markdown, no code fences, no explanation before or after.
 
-## Communication Targets
-- silent: true -> The response is delivered but NOT shown to the user (no screen update, no cache, no push). Use for repeating schedules where the condition is false (skip silently, try again next cycle). Schedules in the response are still processed.
-- silent: false (or omitted) -> Normal: cache + show to user. Use for one-time schedules where condition is false (user needs to know) or condition check failure (user needs to fix).
+## Response Kind — every response is EXACTLY ONE of two
+- **Visible** (silent: false/omitted): non-empty "message". Shown to the user AND recorded (screen restore cache + push).
+- **Silent** (silent: true): empty "message". NOT shown, NOT recorded — no screen update, no cache, no push. Only "schedules" (if any) are still applied server-side.
+- Typical silent use: repeating schedule's condition false (skip quietly, re-register for next cycle). One-time schedule's condition false or a failed condition check should be Visible — the user needs to know.
 
 [Grid]
 - ${rows} rows × ${cols} columns = ${nb} buttons. Button keys MUST be exactly the integers "0"~"${nb - 1}". No other keys, no out-of-range indices, no duplicates.
