@@ -14,7 +14,7 @@ import webpush from "web-push";
 import removeMarkdown from "remove-markdown";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 
 
 /**
@@ -183,7 +183,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				// 응답 파싱 — JSON Schema 1차 게이트 (prod server.ts와 동일)
 				const { parsed: respParsed, valid: respValid } = parseTurkResponse(ev);
 				// 취소(aborted)·스키마 위반·silent는 lastResponse 캐시에서 제외 — 빈 message는 스키마 단계에서 자동 배제
-				if (!session.lastTurnFailed && !aborted && respValid && respParsed?.silent !== true) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; } // 응답↔프롬프트 짝
+				if (!session.lastTurnFailed && !aborted && respValid && respParsed?.silent !== true) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; saveLastResponse(session.userKey, ev, session.lastPrompt); } // 응답↔프롬프트 짝 — 파일 영속화
 				if (!session.lastTurnFailed) session.lastPrompt = null;
 				// 실패: lastPrompt 유지 — get_state가 재시도 에코로 전달 (실패 화면과 짝)
 				// schedules 배열을 서버가 응답에서 직접 스케줄러에 적용 — 클라이언트 릴레이 제거 (prod server.ts와 동일)
@@ -247,6 +247,24 @@ function turkPlugin(env: Record<string, string>): Plugin {
 	function saveLastPrompt(userKey: string, v: string): void {
 		try { writeFileSync(`${envPaths("ai-turk").data}/${userKey}/last-prompt`, v); } catch { /* 디스크 실패 무시 */ }
 	}
+
+	// ── lastResponse 영속화 — prod server.ts와 대칭 (재시작·세션 재생성에도 마지막 가시 응답 유지)
+	function lastResponsePath(userKey: string): string {
+		return `${envPaths("ai-turk").data}/${userKey}/last-response`;
+	}
+	function loadLastResponse(userKey: string): { ev: any; prompt: string | null } | null {
+		try {
+			const f = lastResponsePath(userKey);
+			if (!existsSync(f)) return null;
+			return JSON.parse(readFileSync(f, "utf-8"));
+		} catch { return null; }
+	}
+	function saveLastResponse(userKey: string, ev: any, prompt: string | null): void {
+		try { writeFileSync(lastResponsePath(userKey), JSON.stringify({ ev, prompt })); } catch { /* 디스크 실패 무시 */ }
+	}
+	function clearLastResponse(userKey: string): void {
+		try { rmSync(lastResponsePath(userKey), { force: true }); } catch { /* 무시 */ }
+	}
 function pushPath(userKey: string): string {
 		return `${envPaths("ai-turk").data}/${userKey}/push.json`;
 	}
@@ -283,10 +301,10 @@ function savePushSubscription(userKey: string, sub: any): void {
 			}),
 			pushSubscription: loadPushSubscription(userKey), // 영속화된 구독 복원
 			ws: new Set(),
-			lastResponse: null,
+			lastResponse: loadLastResponse(userKey)?.ev ?? null, // 영속 버퍼에서 복원 (prod와 대칭)
 			lastTurnFailed: false,
 			lastPrompt: loadLastPrompt(userKey), // 영속 버퍼에서 복원 — 이전 입력 짝 캡션
-			lastResponsePrompt: null,
+			lastResponsePrompt: loadLastResponse(userKey)?.prompt ?? null,
 			isStreaming: false,
 			lastActivity: Date.now(),
 			currentRoute: "user",
@@ -385,6 +403,7 @@ function savePushSubscription(userKey: string, sub: any): void {
 				session.lastPrompt = null; // 새 세션 — 처리중 표시 클리어
 				saveLastPrompt(session.userKey, ""); // 새 세션 — 영속 버퍼도 클리어
 				session.lastResponsePrompt = null; // 새 세션 — 짝 정보 클리어
+				clearLastResponse(session.userKey); // 새 세션 — 영속 응답 버퍼도 클리어
 								console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 								setTimeout(() => startBackend(session), 500);
 							} else if (msg.type === "schedule") {
