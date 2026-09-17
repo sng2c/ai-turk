@@ -166,23 +166,31 @@ function uuidv4Fallback(): string {
 }
 
 // ── 유저 구분키 — #뒤 값이 있으면 그 키로 세션 오버라이드(링크 공유), 없으면 발급(localStorage) userKey.
-//    기본은 깨끗한 URL(해시 없음)로 발급 userKey 작동 → 공유는 #<키> 로 다른 세션 진입.
+//    저장된 userKey(localStorage) = 기본값. 해시 없음 → 기본키(없으면 발급)로 초기화 + reflectUserKey로 주소창 반영.
 //    런타임 hashchange → resolveUserKey() 재호출로 갱신, App.tsx가 WS 재접속하여 세션 전환.
 function hashUserKey(): string | null {
 	const h = location.hash.replace(/^#/, "").trim();
-	return h || null;
+	if (!h) return null;
+	try { return decodeURIComponent(h); } catch { return h; } // 한글 등 인코딩된 해시 → 디코드
 }
 function ensureLocalKey(): string {
 	let k = localStorage.getItem("turk-user-key");
 	if (!k) { k = crypto.randomUUID?.() ?? uuidv4Fallback(); localStorage.setItem("turk-user-key", k); }
 	return k;
 }
-// 현재 유효 userKey 계산 — #뒤 값이 있으면 그 키(오버라이드), 없으면 발급(localStorage) userKey.
-// URL hash는 명시적 오버라이드(공유 링크)일 때만 의미 — 기본은 깨끗한 URL 유지(해시 미기입).
+// 현재 유효 userKey 계산 — 해시(#뒤 값) 우선: 있으면 그 키, 없으면 기본키(발급/조회 localStorage).
+// 발급키는 진입 시 reflectUserKey로 해시에 반영 — 주소창이 항상 현재 userKey 표시(복사=공유, 편집=전환).
 export function resolveUserKey(): string {
 	const h = hashUserKey();
-	if (h) return h; // #뒤 값 → 그 키로 오버라이드 (링크 공유)
-	return ensureLocalKey(); // 없으면 발급 userKey — URL hash 미건드림
+	if (h) return h; // 해시 → 그 키로 초기화 (localStorage 미사용)
+	return ensureLocalKey(); // 없으면 기본키 — 발급(첫 방문) 또는 조회
 }
+// 현재 userKey를 URL hash에 반영 — 멀티 userKey(탭별 #<이름> 병렬 운영)·공유(주소 복사=세션 진입).
+// replaceState — 히스토리 오염 없음·hashchange 미유발(자기 키=무변화 → 재접속 루프 없음).
+export function reflectUserKey(key: string): void {
+	if (hashUserKey() === key) return;
+	try { history.replaceState(null, "", `#${encodeURIComponent(key)}`); } catch { /* 무시 */ }
+}
+
 // 초기값 (모듈 로드 1회) — 정적 표시/하위호환. 런타임 전환은 userKey state + resolveUserKey().
 export const TURK_USER_KEY: string = resolveUserKey();

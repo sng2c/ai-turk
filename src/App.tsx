@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
-	TURK_USER_KEY, resolveUserKey,
+	TURK_USER_KEY, resolveUserKey, reflectUserKey,
 	emptyState, errState, extractAssistantText, parseTurkJSON,
 	subscribePush, Md,
 } from "./lib/turk";
@@ -246,6 +246,9 @@ export default function App() {
 		window.addEventListener("hashchange", onHashChange);
 		return () => window.removeEventListener("hashchange", onHashChange);
 	}, [connect]);
+
+	// 최초 진입 userKey를 URL hash에 반영 — 발급키도 주소로 식별 (#<키> 편집 = 멀티탭 멀티 userKey, 주소 복사 = 공유)
+	useEffect(() => { reflectUserKey(userKeyRef.current); }, []);
 
 	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
 	useEffect(() => {
