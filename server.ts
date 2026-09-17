@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { WebSocket, WebSocketServer } from "ws";
 import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
+import { validateTurkResponse } from "./src/lib/response-schema.ts";
 import { ensureAgentsMd } from "./src/lib/agents-md-server.ts";
 import envPaths from "env-paths";
 import webpush from "web-push";
@@ -126,17 +127,18 @@ function startBackend(session: Session): void {
 			// 응답 실패 명시 정의 — agent_end.error → 실패 플래그. lastResponse는 성공분만 캐시
 			const aborted = Array.isArray((ev as any).messages) && (ev as any).messages.some((m: any) => m.role === "assistant" && m.stopReason === "aborted");
 			session.lastTurnFailed = !!(ev as any).error;
-			// 응답 파싱 — silent 캐시 판정 + schedules 서버 적용에 공용
-			const { parsed: respParsed } = parseTurkResponse(ev);
-			// 취소(aborted)·silent는 lastResponse 캐시에서 제외 (AGENTS.md 약속: silent = no cache) —
-			// 백그라운드 조건 스킵 턴이 이전 가시 화면 복원본(lastResponse)을 덮어써 재오픈 시 빈 화면이 되던 버그 수정
-			if (!session.lastTurnFailed && !aborted && respParsed?.silent !== true) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; } // 응답↔프롬프트 짝
+			// 응답 파싱 — JSON Schema 1차 게이트 (스키마=법, 프롬프트=보조 교육)
+			const { parsed: respParsed, valid: respValid, errors: respErrors } = parseTurkResponse(ev);
+			if (DEBUG && !respValid && respErrors) console.log(`[${session.userKey.slice(0, 8)}] [Schema] 응답 위반 → 미기록: ${respErrors.slice(0, 200)}`);
+			// 취소(aborted)·스키마 위반·silent는 lastResponse 캐시에서 제외 (AGENTS.md 약속: silent = no cache) —
+			// 빈 message 등 위반 응답은 스키마 단계에서 자동 배제 → 이전 가시 화면 복원본 보존
+			if (!session.lastTurnFailed && !aborted && respValid && respParsed?.silent !== true) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; } // 응답↔프롬프트 짝
 			if (!session.lastTurnFailed) session.lastPrompt = null;
 			// 실패: lastPrompt 유지 — get_state가 재시도 에코로 전달 (실패 화면과 짝)
 			// schedules 배열을 서버가 응답에서 직접 스케줄러에 적용 — 클라이언트 릴레이 제거.
 			// 백그라운드(WS 끊김) 트리거에서도 체이닝 재등록이 유실되지 않게 (silent 스킵의 schedules 재등록이 사라지던 버그 수정)
 			// 결과 broadcast는 기존 클라이언트 로직이 소비 — list 자동 재주입(data.text)·오류 피드백(error)
-			if (!session.lastTurnFailed && !aborted && Array.isArray(respParsed?.schedules)) {
+			if (!session.lastTurnFailed && !aborted && respValid && Array.isArray(respParsed?.schedules)) {
 				for (const sch of respParsed.schedules) {
 					if (!sch || typeof sch !== "object") continue;
 					const r = session.scheduler.handle(sch);
@@ -203,12 +205,13 @@ function extractTextFromMessages(messages: any[]): string {
 	return "";
 }
 
-// 응답 텍스트에서 터크 JSON 추출 — 후보: 코드펜스 → greedy {…} → 첫 '{'부터 끝까지 (클라이언트 parseTurkJSON과 동일 전략, 검증은 소비부가 담당)
-// silent 캐시 판정·push 선별·schedules 적용의 공용 파서. 파싱 실패 시 parsed=null (원문 text는 보존).
-function parseTurkResponse(ev: TurkEvent): { text: string; parsed: any | null } {
+// 응답 텍스트에서 터크 JSON 추출 후 JSON Schema 1차 게이트 검사.
+// 후보(코드펜스→greedy→첫'{') 중 스키마 유효한 것 채택 — 전부 위반 시 parsed는 보존하되 valid=false.
+// 스키마가 법: Visible/Silent 이분법·schedules 형태 위반은 소비부(캐시·push·적용)에서 일괄 배제된다.
+function parseTurkResponse(ev: TurkEvent): { text: string; parsed: any | null; valid: boolean; errors?: string } {
 	const messages = (ev as any).messages;
 	const text = Array.isArray(messages) ? extractTextFromMessages(messages) : "";
-	if (!text) return { text: "", parsed: null };
+	if (!text) return { text: "", parsed: null, valid: false };
 	const candidates: string[] = [];
 	const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
 	if (fence) candidates.push(fence[1]);
@@ -216,19 +219,25 @@ function parseTurkResponse(ev: TurkEvent): { text: string; parsed: any | null } 
 	if (greedy) candidates.push(greedy[0]);
 	const firstBrace = text.indexOf("{");
 	if (firstBrace !== -1) candidates.push(text.slice(firstBrace));
+	let firstParsed: any = null, firstErrors: string | undefined;
 	for (const raw of candidates) {
 		const s = raw.trim();
 		if (!s) continue;
-		try { return { text, parsed: JSON.parse(s) }; } catch { /* 다음 후보 */ }
+		try {
+			const obj = JSON.parse(s);
+			const v = validateTurkResponse(obj);
+			if (v.ok) return { text, parsed: obj, valid: true };
+			if (firstParsed === null) { firstParsed = obj; firstErrors = v.errors; }
+		} catch { /* 다음 후보 */ }
 	}
-	return { text, parsed: null };
+	return { text, parsed: firstParsed, valid: false, errors: firstErrors };
 }
 
 function sendPushNotification(session: Session, ev: TurkEvent): void {
-	const { text, parsed } = parseTurkResponse(ev);
+	const { text, parsed, valid } = parseTurkResponse(ev);
 	if (!text) return;
-	// silent 응답은 push 폐기 — sw.js 파싱 중복 방지 목적 서버에서 선별
-	if (parsed && parsed.silent === true) return;
+	// 스키마 유효 + Visible 응답만 푸시 — Silent·위반(빈 message 등)은 폐기
+	if (!valid || parsed?.silent === true) return;
 	// 전체 text 전송 + sessionId → sw.js가 IndexedDB 저장에 사용
 	const payload = JSON.stringify({ body: text, sessionId: session.agentSessionId || "" });
 	webpush.sendNotification(session.pushSubscription, payload)

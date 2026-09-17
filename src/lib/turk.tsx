@@ -2,35 +2,11 @@
 // 의존: ReactMarkdown, remarkGfm (Md 컴포넌트), 브라우저 API (localStorage/SW/Push).
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { z } from "zod";
+import { validateTurkResponse } from "./response-schema";
 
-// ── zod 스키마 (LLM 응답 검증) ─────────────────────────────────────
-const ScheduleSchema = z.object({
-	action: z.enum(["add", "remove", "clear", "list"]),
-	id: z.string().optional(),
-	when: z.string().optional(),
-	prompt: z.string().optional(),
-	condition: z.string().optional(),
-}).superRefine((data, ctx) => {
-	if (data.action === "add") {
-		if (!data.id) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "add requires id", path: ["id"] });
-		if (!data.when) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "add requires when", path: ["when"] });
-		if (!data.prompt) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "add requires prompt", path: ["prompt"] });
-	}
-	if (data.action === "remove" && !data.id) {
-		ctx.addIssue({ code: z.ZodIssueCode.custom, message: "remove requires id", path: ["id"] });
-	}
-});
-
-export const TurkStateSchema = z.object({
-	message: z.string(),
-	buttons: z.record(z.string(), z.string()),
-	colors: z.record(z.string(), z.string()).optional(),
-	textColors: z.record(z.string(), z.string()).optional(),
-	schedules: z.array(ScheduleSchema).optional(),
-	silent: z.boolean().optional(),
-	repeat: z.boolean().optional(),
-});
+// ── 응답 검증 — zod 스키마 제거, 공용 JSON Schema(response-schema.ts)로 이원화.
+// 스키마가 1차 게이트(법) — 프롬프트(AGENTS.md)는 보조 교육. 위반 시 오류 문구가
+// self-correction 재시도 안내문에 그대로 실려 모델이 교정하게 된다.
 
 // ── 타입 ──────────────────────────────────────────────────────────────
 export interface TurkState {
@@ -114,11 +90,11 @@ export function parseTurkJSON(text: string): { parsed: TurkState } | { error: st
 		if (!s) continue;
 		try {
 			const obj = JSON.parse(s);
-			const result = TurkStateSchema.safeParse(obj);
-			if (result.success) {
-				return { parsed: result.data as TurkState };
+			const result = validateTurkResponse(obj);
+			if (result.ok) {
+				return { parsed: obj as TurkState };
 			}
-			lastError = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+			lastError = result.errors ?? "schema violation"; // JSON Schema 1차 게이트 — Visible/Silent 이분법·형태 위반
 		} catch (e) {
 			lastError = e instanceof Error ? e.message : String(e);
 		}
