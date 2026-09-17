@@ -328,7 +328,7 @@ body {
 .turk-message-wrap {
 	position: relative;
 	margin: var(--box-shadow-width);
-	flex: 0 0 40%; /* 출력창 40% — 그리드 영역 60% */
+	flex: 0 0 50%; /* 출력창 50% — 그리드 50% (버튼 4×4) */
 	min-height: 0;
 }
 
@@ -359,11 +359,6 @@ body {
 .turk-answer-chip span {
 	overflow: hidden;
 	text-overflow: ellipsis;
-}
-.turk-answer-chip .turk-ico {
-	width: 0.9em;
-	height: 0.9em;
-	flex-shrink: 0;
 }
 
 @keyframes turk-msg-pop {
@@ -574,7 +569,7 @@ body {
 .turk-grid {
 	display: grid;
 	gap: 0.143rem;
-	flex: 1 1 auto; /* 그리드 영역 60% */
+	flex: 1 1 auto; /* 그리드 영역 50% (출력창 50%) */
 	margin-top: 0.857rem; /* 제거된 컨테이너 gap 보완 (출력창↔그리드 간격 유지) */
 	min-height: 0;
 	grid-auto-rows: auto; /* 정사각형 높이 — 행 딱 붙음 */

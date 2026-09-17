@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, MessageSquareMore } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey,
@@ -150,7 +150,7 @@ export default function App() {
 	const availableModels = useRef<any[]>([]);
 	const modelPage = useRef(0);
 	const recentModelsRef = useRef<string[]>([]); // 최근 선택 모델 (provider/name 최신순 최대 3개)
-	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 3; // 17 (나머지 3칸은 이전/다음/취소)
+	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 3; // 나머지 3칸은 이전/다음/취소
 	const reconnectDelay = useRef(1000);
 	const gridRef = useRef({ rows: DEFAULT_ROWS, cols: DEFAULT_COLS });
 	gridRef.current = { rows, cols };
@@ -510,9 +510,9 @@ export default function App() {
 								// setLoading(false) 금지 — loading은 동기 isStreaming 분기가 소유.
 								// 재연결 시 서버가 스트리밍/씽킹중면 dim이 유지되어야 함 (이전 커밋화면은 dim 아래)
 							} else {
-								// lastResponse 없음(실패/빈 응답/서버 재시작) — 이전 입력(lastPrompt)을 짝 캡션으로 복원
+								// lastResponse 없음(실패/빈 응답/서버 재시작) — 이전 입력(lastPrompt) 있으면 짝 캡션으로, 없으면 웰컴 제목(🤖 AI Turk) 유지
 								const lp = (msg.data as any).lastPrompt;
-								setState({ ...emptyState(gridRef.current.rows, gridRef.current.cols), answerTo: typeof lp === "string" && lp ? lp : undefined });
+								setState({ ...emptyState(gridRef.current.rows, gridRef.current.cols), ...(typeof lp === "string" && lp ? { answerTo: lp } : {}) });
 							}
 						}
 					}
@@ -793,7 +793,7 @@ export default function App() {
 		const recent = recentModelsRef.current.length > 0
 			? `\n\n**최근 선택**\n${recentModelsRef.current.map((m, i) => `${i + 1}. \`${m}\``).join("\n")}`
 			: "";
-		setState({ message: `## 모델 선택\n\n**현재 모델:** \`${currentModelRef.current || "—"}\`\n\n페이지 ${page + 1}/${totalPages} — 모델을 선택하세요.${recent}`, buttons, colors, textColors });
+		setState({ message: `**현재 모델:** \`${currentModelRef.current || "—"}\`\n\n페이지 ${page + 1}/${totalPages} — 모델을 선택하세요.${recent}`, buttons, colors, textColors, answerTo: "모델 선택" }); // 제목은 짝박스 위치
 	};
 
 	// ── 프롬프트 전송 ───────────────────────────────────────────────────
@@ -994,7 +994,7 @@ export default function App() {
 				const btns: Record<string, string> = Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""]));
 				btns["0"] = "🆕 새 세션"; btns["1"] = "🧹 컴팩트"; btns[String(DEFAULT_ROWS * DEFAULT_COLS - 1)] = "취소";
 				const last = String(DEFAULT_ROWS * DEFAULT_COLS - 1);
-				setState({ message: `## 컨텍스트\n\n**사용률:** \`${pct}\`\n\n작업을 선택하세요 — 새 세션은 대화를 새로 시작(컨텍스트 비움), 컴팩트는 대화를 유지한 채 오래된 내용을 요약합니다(컨텍스트 축소).`, buttons: btns, colors: { [last]: "destructive" }, textColors: { [last]: "white" } });
+				setState({ message: `**사용률:** \`${pct}\`\n\n작업을 선택하세요 — 새 세션은 대화를 새로 시작(컨텍스트 비움), 컴팩트는 대화를 유지한 채 오래된 내용을 요약합니다(컨텍스트 축소).`, buttons: btns, colors: { [last]: "destructive" }, textColors: { [last]: "white" }, answerTo: "컨텍스트" }); // 제목은 짝박스 위치
 			}} title={`컨텍스트 ${contextPct ?? "—"}% — 새 세션/컴팩트`}>
 					{contextPct != null ? (
 						<span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, contextPct))}%`, background: contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)" }} /><span className="turk-ctx-pct">{Math.round(contextPct)}%</span></span></span>
@@ -1033,7 +1033,7 @@ export default function App() {
 				<div key={msgVerRef.current} className="turk-msg-anim">
 					{state.answerTo && (
 						/* 항상 표시 — 딤 중에도 유지: 스트립 높이 확보(min-height 3rem)로 인디케이터 텍스트와 간격 확보 */
-						<div className="turk-answer-chip" title={state.answerTo}><MessageSquareMore className="turk-ico" /><span>{state.answerTo}</span></div>
+						<div className="turk-answer-chip" title={state.answerTo}><span>{state.answerTo}</span></div>
 					)}
 					<div
 						ref={messageRef}
