@@ -35,6 +35,8 @@ function turkPlugin(env: Record<string, string>): Plugin {
 	// ── 세션 구조 — 유저(브라우저)별 독립 백엔드 + 스케줄러 ───────────────────
 	interface Session {
 		userKey: string;
+		thinkingBuf: string; // 턴 내 씽킹 누적 — 재접속 소켓 리플레이용 (prod와 대칭)
+		textBuf: string; // 턴 내 응답 텍스트 누적 — 리플레이용
 		agentSessionId: string | null; // 백엔드 세션 ID (config.json 영속, ready 시 get_state로 갱신). null = 새 세션
 		backend: Backend | null;
 		backendReady: boolean;
@@ -308,6 +310,8 @@ function savePushSubscription(userKey: string, sub: any): void {
 			isStreaming: false,
 			lastActivity: Date.now(),
 			currentRoute: "user",
+			thinkingBuf: "",
+			textBuf: "",
 		};
 		sessions.set(userKey, session);
 		startBackend(session);
@@ -382,6 +386,9 @@ function savePushSubscription(userKey: string, sub: any): void {
 				const session = result;
 				session.ws.add(ws);
 				session.lastActivity = Date.now();
+				if (session.isStreaming && (session.thinkingBuf || session.textBuf)) {
+					(ws as any).replayPending = true; // 스트리밍 중 접속 — get_state 응답 직후 줄단위 캐시 전달 예약
+				}
 				console.log(`[Turk] 연결: ${userKey.slice(0, 8)} (세션 ${sessions.size}/${MAX_SESSIONS})`);
 
 				ws.send(JSON.stringify({
