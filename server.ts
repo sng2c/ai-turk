@@ -71,6 +71,8 @@ const MIME: Record<string, string> = {
 // ── 세션 구조 — 유저(브라우저)별 독립 백엔드 + 스케줄러 ───────────────────
 interface Session {
 	userKey: string;
+	thinkingBuf: string; // 턴 내 씽킹 누적 — 재접속 소켓 리플레이용 (줄단위, agent_start 클리어)
+	textBuf: string; // 턴 내 응답 텍스트 누적 — 리플레이용
 	agentSessionId: string | null; // 백엔드 세션 ID (config.json 영속, ready 시 get_state로 갱신). null = 새 세션
 	backend: Backend | null;
 	backendReady: boolean;
@@ -119,7 +121,7 @@ function startBackend(session: Session): void {
 		}
 		if (ev.type === "pi_exit" || ev.type === "pi_error") session.backendReady = false;
 		// agent_start: 스트리밍 시작
-		if (ev.type === "agent_start") { session.isStreaming = true; return; } // pi 것 스킵 — 서버가 이미 합성 전송
+		if (ev.type === "agent_start") { session.isStreaming = true; session.thinkingBuf = ""; session.textBuf = ""; return; } // pi 것 스킵 — 서버가 이미 합성 전송
 		// agent_end: 스트리밍 종료 + 큐 드레인 + 웹 푸시
 		if (ev.type === "agent_end") {
 			session.isStreaming = false;
@@ -155,10 +157,28 @@ function startBackend(session: Session): void {
 			if (session.pushSubscription) sendPushNotification(session, ev);
 		}
 		// get_state 응답 보강: isStreaming 등 주입
+		// 줄단위 캐시 누적 — 재접속 소켓에 get_state 응답 직후 전달(던져주기)용
+		if (ev.type === "message_update" && (ev as any).assistantMessageEvent?.type === "thinking_delta") {
+			session.thinkingBuf += String((ev as any).assistantMessageEvent.delta ?? "");
+		}
+		if (ev.type === "message_update" && (ev as any).assistantMessageEvent?.type === "text_delta") {
+			session.textBuf += String((ev as any).assistantMessageEvent.delta ?? "");
+		}
+		const isGetState = ev.type === "response" && ev.command === "get_state";
 		if (ev.type === "response" && ev.command === "get_state") {
 			(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt, lastTurnFailed: session.lastTurnFailed };
 		}
 		broadcast(session, ev);
+		// 리플레이 — get_state 응답(클라 복원 클리어) 직후에 던져야 클리어에 흡수되지 않음.
+		// 신규 소켓(replayPending) 1회 한정 — 기존 탭은 라이브 델타를 이미 받고 있어 중복 배제.
+		if (isGetState && session.isStreaming) {
+			for (const ws of session.ws) {
+				if (!(ws as any).replayPending) continue;
+				(ws as any).replayPending = false;
+				if (session.thinkingBuf) ws.send(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: session.thinkingBuf } }));
+				if (session.textBuf) ws.send(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: session.textBuf } }));
+			}
+		}
 	});
 	session.backend.start();
 }
@@ -338,6 +358,8 @@ function createSession(userKey: string): Session {
 		isStreaming: false,
 		lastActivity: Date.now(),
 		currentRoute: "user",
+		thinkingBuf: "",
+		textBuf: "",
 	};
 	sessions.set(userKey, session);
 	startBackend(session);
@@ -438,6 +460,9 @@ wss.on("connection", (ws, req) => {
 	const session = result;
 	session.ws.add(ws);
 	session.lastActivity = Date.now();
+	if (session.isStreaming && (session.thinkingBuf || session.textBuf)) {
+		(ws as any).replayPending = true; // 스트리밍 중 접속 — get_state 응답 직후 줄단위 캐시 전달 예약
+	}
 	console.log(`[Turk] 연결: ${userKey.slice(0, 8)} (세션 ${sessions.size}/${MAX_SESSIONS})`);
 
 	// 백엔드 상태 즉시 통지 (새 탭/재연결 동기화)
