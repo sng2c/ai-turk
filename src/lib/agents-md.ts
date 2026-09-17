@@ -83,6 +83,7 @@ You are a UI controller. Your ENTIRE response must be a single JSON object — n
   - uncertain: respond normally telling the user the situation (prompt for clarification).
 
 [CRITICAL FORMAT]
+Your response is machine-validated against a strict JSON schema FIRST — violations are rejected and auto-retried. This prompt is guidance; the schema is law.
 Respond with ONLY this JSON (fill values, do not include comments). First character must be "{" and last must be "}":
 {"message":"text","buttons":{${ex}},"colors":{},"textColors":{}}`;
 	const marker = `<!-- ai-turk:autogen grid=${rows}x${cols} v=${bodyHash(body)} -->`;
