@@ -57,15 +57,15 @@ export interface ToolStatus {
 
 export function emptyState(rows: number, cols: number): TurkState {
 	return {
-		message: `# 🤖 AI Turk
-
-**LLM 기반 동적 버튼 그리드 컨트롤러**
+		// 제목(🤖 AI Turk)은 짝박스 위치 — message에는 본문부터
+		message: `**LLM 기반 동적 버튼 그리드 컨트롨러**
 
 - ⌨️ **명령/클릭** — 원하는 기능 요청 또는 옵션 선택
 - ⏰ **스케줄/알림** — 매일 정해진 시각·반복 주기로 작업 예약
 - 🎨 **맞춤 UI** — 대화하며 최적의 인터페이스 생성
 
 > 지금 바로 시작해보세요!`,
+		answerTo: "🤖 AI Turk",
 		buttons: Object.fromEntries(
 			Array.from({ length: rows * cols }, (_, i) => [String(i), ""])
 		),
