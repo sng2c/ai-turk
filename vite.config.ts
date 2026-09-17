@@ -49,7 +49,6 @@ function turkPlugin(env: Record<string, string>): Plugin {
 		lastActivity: number;
 		currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
 		thinkingText: string; // 현재 턴 누적 씽킹 — 재접속 get_state 복원용 (prod와 대칭)
-		streamingText: string; // 현재 턴 누적 응답 텍스트 델타 — 재접속 스트림 이어받기용
 	}
 
 	const sessions = new Map<string, Session>();
@@ -176,7 +175,7 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				}
 			}
 			if (ev.type === "pi_exit" || ev.type === "pi_error") session.backendReady = false;
-			if (ev.type === "agent_start") { session.isStreaming = true; session.thinkingText = ""; session.streamingText = ""; return; } // pi 것 스킵 — 서버가 이미 합성 전송
+			if (ev.type === "agent_start") { session.isStreaming = true; session.thinkingText = ""; return; } // pi 것 스킵 — 서버가 이미 합성 전송
 			if (ev.type === "agent_end") {
 				session.isStreaming = false;
 				// 응답 실패 명시 정의 — agent_end.error → 실패 플래그. lastResponse는 성공분만 캐시
@@ -211,15 +210,12 @@ function turkPlugin(env: Record<string, string>): Plugin {
 				session.scheduler.drainQueue();
 				if (session.pushSubscription) sendPushNotification(session, ev);
 			}
-			// 씽킹·텍스트 델타 누적 — 재접속 get_state 복원용 (prod와 대칭)
+			// 씽킹 델타 누적 — 재접속 get_state 복원용 (prod와 대칭)
 			if (ev.type === "message_update" && (ev as any).assistantMessageEvent?.type === "thinking_delta") {
 				session.thinkingText += String((ev as any).assistantMessageEvent.delta ?? "");
 			}
-			if (ev.type === "message_update" && (ev as any).assistantMessageEvent?.type === "text_delta") {
-				session.streamingText += String((ev as any).assistantMessageEvent.delta ?? "");
-			}
 			if (ev.type === "response" && ev.command === "get_state") {
-				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt, lastTurnFailed: session.lastTurnFailed, thinkingText: session.thinkingText, streamingText: session.streamingText };
+				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt, lastTurnFailed: session.lastTurnFailed, thinkingText: session.thinkingText };
 			}
 			broadcast(session, ev);
 		});
@@ -318,7 +314,6 @@ function savePushSubscription(userKey: string, sub: any): void {
 			lastActivity: Date.now(),
 			currentRoute: "user",
 			thinkingText: "",
-			streamingText: "",
 		};
 		sessions.set(userKey, session);
 		startBackend(session);
