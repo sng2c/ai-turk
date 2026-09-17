@@ -1002,18 +1002,16 @@ export default function App() {
 				</button></span>
 			</header>
 
-			<div className="turk-strip-slot">
-				{(thinkingText || toolStatus) ? ( /* 인디케이터(씽킹/툴) 우선, 없으면 응답 짝 — 늘 차 있는 한 줄 */
+			<div className={"turk-strip-slot" + (loading ? "" : " turk-strip-collapsed")}>
+				{/* 인디케이터(씽킹/툴) — 딤(로딩) 중에만 표시·정상 높이. 딤이 아니면 텍스트 숨김+영역 축소(예전 동작).
+					짝(answerTo)은 출력창 top border 레전드로 이동 — 대기 중 이전 입력이 인디케이터 기본값으로 보여 혼동되던 문제 해소 */}
+				{loading && (thinkingText || toolStatus) ? (
 					<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
 						{toolStatus ? (
 							<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
 						) : (
 							<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
 						)}
-					</div>
-				) : state.answerTo ? (
-					<div className="turk-thinking-area">
-						<div className="turk-thinking-text" style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}><MessageSquareMore className="turk-ico" style={{ width: "0.9em", height: "0.9em", flexShrink: 0 }} /><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{state.answerTo}</span></div>
 					</div>
 				) : null}
 			</div>
@@ -1029,14 +1027,22 @@ export default function App() {
 				{canScrollDown && (
 					<button className="turk-scroll-arrow turk-scroll-down" onClick={() => messageRef.current?.scrollTo({ top: messageRef.current.scrollHeight, behavior: "smooth" })} title="맨 아래로"><ChevronDown className="turk-ico" /></button>
 				)}
-				<div
-					ref={messageRef}
-					key={msgVerRef.current}
-					className={`turk-message${loading ? " turk-message-loading" : ""}`}
-					onScroll={updateScrollArrows}
-				>
-					{/* 메인 출력 — 짝(answerTo)은 상태 스트립으로 이동, 툴 실행 중에도 대체되지 않음 */}
-					<Md text={state.message} />
+				{/* 애니메이션 단위 박스 — 짝 레전드를 출력창 구조에 포함해 pop을 함께 받음.
+					key 리마운트로 매 턴 재생. 짝을 .turk-message(스크롤 컨테이너) 안에 직접 넣으면
+					overflow-y:auto에 잘리고 내용과 같이 스크롤되므로, 스크롤 밖 동기 박스에 배치 */}
+				<div key={msgVerRef.current} className="turk-msg-anim">
+					{state.answerTo && (
+						/* 항상 표시 — 딤 중에도 유지: 스트립 높이 확보(min-height 3rem)로 인디케이터 텍스트와 간격 확보 */
+						<div className="turk-answer-chip" title={state.answerTo}><MessageSquareMore className="turk-ico" /><span>{state.answerTo}</span></div>
+					)}
+					<div
+						ref={messageRef}
+						className={`turk-message${loading ? " turk-message-loading" : ""}`}
+						onScroll={updateScrollArrows}
+					>
+						{/* 메인 출력 — 짝(answerTo)은 top border 레전드 (인디케이터 혼동 해소) */}
+						<Md text={state.message} />
+					</div>
 				</div>
 			</div>
 
