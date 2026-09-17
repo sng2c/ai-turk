@@ -361,16 +361,24 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 	}
 
 	let filePath = join(DIST_DIR, url.pathname === "/" ? "index.html" : url.pathname);
+	// 캐시 정책: 진입점·manifest·파비콘은 항상 재검증(아이콘/manifest 갱신 즉시 반영 — Firefox A2HS가 옛 manifest 캐시로 기본 타일 생성하던 문제),
+	// 해시명 번들·폰트는 1일, PNG 아이콘은 1시간
+	const STATIC_CACHE: Record<string, string> = {
+		".html": "no-cache", ".webmanifest": "no-cache", ".svg": "no-cache", ".ico": "no-cache",
+		".png": "public, max-age=3600",
+		".js": "public, max-age=86400", ".css": "public, max-age=86400", ".woff2": "public, max-age=86400",
+	};
 	try {
 		const s = await stat(filePath);
 		if (s.isDirectory()) filePath = join(filePath, "index.html");
 		const data = await readFile(filePath);
-		res.writeHead(200, { "Content-Type": MIME[extname(filePath)] || "application/octet-stream" });
+		const ext = extname(filePath);
+		res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream", "Cache-Control": STATIC_CACHE[ext] || "no-cache" });
 		res.end(data);
 	} catch {
 		try {
 			const data = await readFile(join(DIST_DIR, "index.html"));
-			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
 			res.end(data);
 		} catch {
 			res.writeHead(404, { "Content-Type": "text/plain" });
