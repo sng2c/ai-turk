@@ -64,6 +64,7 @@ const MIME: Record<string, string> = {
 	".svg": "image/svg+xml",
 	".ico": "image/x-icon",
 	".woff2": "font/woff2",
+	".webmanifest": "application/manifest+json",
 };
 
 // ── 세션 구조 — 유저(브라우저)별 독립 백엔드 + 스케줄러 ───────────────────
