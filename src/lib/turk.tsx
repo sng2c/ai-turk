@@ -162,10 +162,12 @@ export function resolveUserKey(): string {
 	return ensureLocalKey(); // 없으면 기본키 — 발급(첫 방문) 또는 조회
 }
 // 현재 userKey를 URL hash에 반영 — 멀티 userKey(탭별 #<이름> 병렬 운영)·공유(주소 복사=세션 진입).
-// replaceState — 히스토리 오염 없음·hashchange 미유발(자기 키=무변화 → 재접속 루프 없음).
+// pushState — 진짜 히스토리 엔트리 생성. replaceState는 현재 엔트리를 몰래 고치기만 해서 브라우저가
+// 즐겨찾기에 변경 전 주소를 저장하는 문제가 있었음. pushState는 hashchange를 유발하지 않으므로
+// 자기 키 반영 시 재접속 루프 없음. 뒤로가기로 이전 hash 복귀는 hashchange → onHashChange가 처리(의도된 동작).
 export function reflectUserKey(key: string): void {
 	if (hashUserKey() === key) return;
-	try { history.replaceState(null, "", `#${encodeURIComponent(key)}`); } catch { /* 무시 */ }
+	try { history.pushState(null, "", `#${encodeURIComponent(key)}`); } catch { /* 무시 */ }
 }
 
 // 초기값 (모듈 로드 1회) — 정적 표시/하위호환. 런타임 전환은 userKey state + resolveUserKey().
