@@ -31,7 +31,7 @@ export default function App() {
 	// 최종 화면 커밋 — 과도 뷰(모델 선택/세션 상세)는 이것을 쓰지 않음 (히스토리 기능 제거 — setState 별칭)
 	const commit = useCallback((next: TurkState) => setState(next), [setState]);
 	const [loading, setLoading] = useState(false);
-	const clearInput = () => setInput("");
+	const clearInput = () => { draftEchoRef.current = false; setInput(""); };
 	const [input, setInput] = useState(() => {
 		// 초기값은 빈 문자열 — 마운트 직후 kvGet(draft:<userKey>)으로 저장 초안 복원 (아래 초안 지속성 블록)
 		return "";
@@ -145,19 +145,20 @@ export default function App() {
 	// 탭을 폐기해 페이지가 재로드되면 React 상태가 통째로 사라진다 → 초안을 IndexedDB에 저장·복원.
 	const inputValRef = useRef(input);
 	inputValRef.current = input;
+	const draftEchoRef = useRef(true); // 필드 내용이 유저 초안이 아니라 전송 프롬프트 에코(lastPrompt 복원·버튼 fill+send)면 true — 초안 저장 금지
 	const draftLoadedRef = useRef(false); // 초기 로드 완료 전 저장 금지 (빈 값이 저장본을 덮어쓰는 레이스 방지)
 	const draftTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	// 복원 — userKey 확정 시점(마운트/hash 전환)에 저장 초안 로드. 필드가 이미 채워져 있으면 현 입력 보호.
 	useEffect(() => {
 		draftLoadedRef.current = false;
 		kvGet(`draft:${userKey}`).then((d) => {
-			if (d && !inputRef.current?.value) setInput(d);
+			if (d && !inputRef.current?.value) { draftEchoRef.current = false; setInput(d); }
 		}).catch(() => { /* 무시 */ }).finally(() => { draftLoadedRef.current = true; });
 	}, [userKey]);
 	// 저장 — input 변경(타이핑·프로그램matic set·clearInput 모두)을 250ms 디바운스 저장.
 	// 전송 완료 후 클리어("")도 저장되어 낡은 초안이 남지 않음.
 	useEffect(() => {
-		if (!draftLoadedRef.current) return;
+		if (!draftLoadedRef.current || draftEchoRef.current) return; // 에코(전송 프롬프트)는 저장 안 함 — 유저 초안만 유지
 		clearTimeout(draftTimerRef.current);
 		draftTimerRef.current = setTimeout(() => { kvSet(`draft:${userKey}`, input).catch(() => { /* 무시 */ }); }, 250);
 		return () => clearTimeout(draftTimerRef.current);
@@ -166,7 +167,7 @@ export default function App() {
 	// (폐기 직전 마지막 키 입력까지 보존 — 디바운스 대기 중 폐기되는 케이스 차단)
 	useEffect(() => {
 		const flush = () => {
-			if (!draftLoadedRef.current) return;
+			if (!draftLoadedRef.current || draftEchoRef.current) return;
 			clearTimeout(draftTimerRef.current);
 			kvSet(`draft:${userKeyRef.current}`, inputValRef.current).catch(() => { /* 무시 */ });
 		};
@@ -621,9 +622,9 @@ export default function App() {
 					setThinkingText(""); // fetch 복원 — 백그라운드 전 stale 씽킹 제거, 짝 캡션이 그 자리를 받음
 					if ((msg.data as any).isCompacting === true) { setLoading(true); setThinkingText("🧹 컴팩트 진행 중..."); } // 복원 — dim+스트립 (compaction_end까지)
 					// 처리중 프롬프트 표시 — 재연결/새로고침 후에도 "뭘 기다리는지"를 입력창에 (서버 제공, streaming 중만)
-					if (msg.data.isStreaming && typeof msg.data.lastPrompt === "string" && msg.data.lastPrompt) { setInput(msg.data.lastPrompt); userSentRef.current = true; }
+					if (msg.data.isStreaming && typeof msg.data.lastPrompt === "string" && msg.data.lastPrompt) { draftEchoRef.current = true; setInput(msg.data.lastPrompt); userSentRef.current = true; }
 					// 실패 재시도 에코 — lastTurnFailed 시 마지막 프롬프트 복원. 유저가 이미 새로 타이핑 중이면 보호
-					if (!msg.data.isStreaming && (msg.data as any).lastTurnFailed === true && typeof msg.data.lastPrompt === "string" && msg.data.lastPrompt && !inputRef.current?.value) setInput(msg.data.lastPrompt);
+					if (!msg.data.isStreaming && (msg.data as any).lastTurnFailed === true && typeof msg.data.lastPrompt === "string" && msg.data.lastPrompt && !inputRef.current?.value) { draftEchoRef.current = true; setInput(msg.data.lastPrompt); }
 					// 놓친 성공 정리 — 서버 idle+성공 = 이전 턴 완료. 필드에 낡은 프롬프트가 남으면 중복 전송을 유도하므로 클리어.
 					// userSentRef가 true일 때만(=전송된 프롬프트) — 미전송 신규 초안은 보호 (재연결 블립 시 날아가지 않게)
 					if (!msg.data.isStreaming && (msg.data as any).lastTurnFailed !== true && userSentRef.current) { clearInput(); userSentRef.current = false; }
@@ -1029,6 +1030,7 @@ export default function App() {
 			}
 			return;
 		}
+		draftEchoRef.current = true;
 		setInput(text);
 		sendPrompt(text);
 	};
@@ -1202,7 +1204,7 @@ export default function App() {
 					enterKeyHint="send"
 					inputMode="text"
 					value={input}
-					onChange={(e) => setInput(e.target.value)}
+					onChange={(e) => { draftEchoRef.current = false; setInput(e.target.value); }}
 					placeholder={piReady ? "명령어 입력..." : "세션 초기화 중..."}
 					disabled={loading || !piReady}
 					autoFocus={false}
