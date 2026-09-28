@@ -132,6 +132,4 @@ TURK_ENV_FILE=.env.8004 turkctl logs
 
 ## 더 보기
 
-- [위키: AI Turk 프로젝트](https://wiki.app.example.com/pages/ai-turk)
-- [위키: 기계 튀르크 아이디어](https://wiki.app.example.com/pages/아이디어/기계터키인)
 - [GitHub 저장소](https://github.com/sng2c/ai-turk) (branch: `node-react`)
