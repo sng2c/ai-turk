@@ -4,7 +4,7 @@ import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey, reflectUserKey,
 	emptyState, errState, extractAssistantText, parseTurkJSON,
-	subscribePush, Md,
+	ensurePush, discardPush, Md,
 } from "./lib/turk";
 import type { TurkState, ToolStatus } from "./lib/turk";
 import { kvSet, kvGet } from "./lib/storage";
@@ -33,7 +33,7 @@ export default function App() {
 	const [loading, setLoading] = useState(false);
 	const clearInput = () => setInput("");
 	const [input, setInput] = useState(() => {
-		// 초기값은 빈 문자열 — 세션 ID 확보 후 kvGet으로 복원
+		// 초기값은 빈 문자열 — 마운트 직후 kvGet(draft:<userKey>)으로 저장 초안 복원 (아래 초안 지속성 블록)
 		return "";
 	});
 
@@ -139,8 +139,46 @@ export default function App() {
 	userKeyRef.current = userKey; // 매 렌더링 동기화 (hashchange 핸들러에서 즉시 직접 갱신도 병행)
 	const wsRef = useRef<WebSocket | null>(null);
 	const inputRef = useRef<HTMLInputElement>(null);
+
+	// ── 입력 초안 지속성 — 백그라운드 탭 폐기/새로고침에도 미전송 초안 보존 ──
+	// 복귀 시 WS 재연결(get_state)은 초안을 보호하지만(userSentRef 가드), 안드로이드가 백그라운드
+	// 탭을 폐기해 페이지가 재로드되면 React 상태가 통째로 사라진다 → 초안을 IndexedDB에 저장·복원.
+	const inputValRef = useRef(input);
+	inputValRef.current = input;
+	const draftLoadedRef = useRef(false); // 초기 로드 완료 전 저장 금지 (빈 값이 저장본을 덮어쓰는 레이스 방지)
+	const draftTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	// 복원 — userKey 확정 시점(마운트/hash 전환)에 저장 초안 로드. 필드가 이미 채워져 있으면 현 입력 보호.
+	useEffect(() => {
+		draftLoadedRef.current = false;
+		kvGet(`draft:${userKey}`).then((d) => {
+			if (d && !inputRef.current?.value) setInput(d);
+		}).catch(() => { /* 무시 */ }).finally(() => { draftLoadedRef.current = true; });
+	}, [userKey]);
+	// 저장 — input 변경(타이핑·프로그램matic set·clearInput 모두)을 250ms 디바운스 저장.
+	// 전송 완료 후 클리어("")도 저장되어 낡은 초안이 남지 않음.
+	useEffect(() => {
+		if (!draftLoadedRef.current) return;
+		clearTimeout(draftTimerRef.current);
+		draftTimerRef.current = setTimeout(() => { kvSet(`draft:${userKey}`, input).catch(() => { /* 무시 */ }); }, 250);
+		return () => clearTimeout(draftTimerRef.current);
+	}, [input, userKey]);
+	// 즉시 flush — 백그라운드 진입(pagehide/visibilitychange hidden) 순간 타이머를 기다리지 않고 확정 저장
+	// (폐기 직전 마지막 키 입력까지 보존 — 디바운스 대기 중 폐기되는 케이스 차단)
+	useEffect(() => {
+		const flush = () => {
+			if (!draftLoadedRef.current) return;
+			clearTimeout(draftTimerRef.current);
+			kvSet(`draft:${userKeyRef.current}`, inputValRef.current).catch(() => { /* 무시 */ });
+		};
+		const onVis = () => { if (document.hidden) flush(); };
+		window.addEventListener("pagehide", flush);
+		document.addEventListener("visibilitychange", onVis);
+		return () => { window.removeEventListener("pagehide", flush); document.removeEventListener("visibilitychange", onVis); };
+	}, []);
 	const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const shouldReconnect = useRef(true);
+	const lastMsgAtRef = useRef(Date.now()); // 마지막 서버 수신 시각 — 워치독 좀비 판정 기준
+	const pendingReconnectRef = useRef(false); // 재연결 예약 플래그 — 이중 예약/워치독 충돌 방지
 	const showSessionDetail = useRef(false);
 	// 배타적 메뉴 모드 — 한 번에 하나의 메뉴만 열림 (none | model | ctx).
 	// prevStateRef는 최초 진입 시 1회 저장, 메뉴 간 전환 시 유지 → 취소는 항상 원래 화면 복원
@@ -160,28 +198,48 @@ export default function App() {
 
 	// ── WebSocket 연결 ──────────────────────────────────────────────────
 	const connect = useCallback(() => {
+		// 스테일 소켓 정리 — CONNECTING/OPEN인 이전 소켓 핸들러 분리 후 close (중복 소켓 방지)
+		const stale = wsRef.current;
+		if (stale && stale.readyState !== WebSocket.CLOSED) {
+			stale.onopen = null; stale.onclose = null; stale.onmessage = null; stale.onerror = null;
+			try { stale.close(); } catch { /* 무시 */ }
+		}
 		const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws?u=${userKeyRef.current}`;
 		const ws = new WebSocket(wsUrl);
 		wsRef.current = ws;
 		shouldReconnect.current = true;
+		pendingReconnectRef.current = false;
+		lastMsgAtRef.current = Date.now();
 
-		ws.onopen = () => { setConnected(true); reconnectDelay.current = 1000; };
+		// 재시도 콜백 — hidden 판정을 onclose 시점이 아닌 발화 시점에 한다.
+		// (백그라운드 freeze로 지연됐던 onclose가 복귀 직후 발화하면 그 순간 hidden=false →
+		//  옛날 가드로는 타이머가 소실되어 영구 빨간대기가 됐다. hidden이면 저빈도 보류 루프)
+		const retry = () => {
+			if (document.hidden) {
+				pendingReconnectRef.current = true;
+				reconnectTimer.current = setTimeout(retry, 5000);
+				return;
+			}
+			pendingReconnectRef.current = false;
+			connect();
+		};
+
+		ws.onopen = () => { setConnected(true); reconnectDelay.current = 1000; lastMsgAtRef.current = Date.now(); };
 
 		ws.onclose = (ev) => {
 			setConnected(false);
 			setPiReady(false);
-			if (shouldReconnect.current) {
-				// 백그라운드에서는 재연결 시도 중단 — 포그라운드 복귀 시 visibilitychange가 재연결
-				if (document.hidden) return;
-				console.debug(`[WS] 종료 code=${ev.code} — ${reconnectDelay.current}ms 후 재연결`);
-				reconnectTimer.current = setTimeout(connect, reconnectDelay.current);
-				reconnectDelay.current = Math.min(reconnectDelay.current * 2, 10000);
-			}
+			if (!shouldReconnect.current || pendingReconnectRef.current) return;
+			console.debug(`[WS] 종료 code=${ev.code} — ${reconnectDelay.current}ms 후 재연결`);
+			pendingReconnectRef.current = true;
+			reconnectTimer.current = setTimeout(retry, reconnectDelay.current);
+			reconnectDelay.current = Math.min(reconnectDelay.current * 2, 10000);
 		};
 
 		ws.onerror = () => ws.close();
 
 		ws.onmessage = (ev) => {
+			lastMsgAtRef.current = Date.now();
 			try {
 				const msg = JSON.parse(ev.data);
 				handleEventRef.current(msg);
@@ -195,9 +253,37 @@ export default function App() {
 		connect();
 		return () => {
 			shouldReconnect.current = false;
+			pendingReconnectRef.current = false;
 			clearTimeout(reconnectTimer.current);
 			wsRef.current?.close();
 		};
+	}, [connect]);
+
+	// ── WS 워치독 — 좀비 소켓/타이머 소실 자가 치유 (최후 방어선) ──
+	// 서버 WS ping은 JS에 보이지 않아 앱레벨 ping/pong으로 무응답을 판정한다.
+	// 40s 무응답 = 좀비 → 강제 재연결. CLOSED인데 예약 없음 → 즉시 연결.
+	// (백그라운드 응답 완료 후 복귀 시 빨간대기 고정 → 새로고침만 답이던 버그의 근본 차단)
+	useEffect(() => {
+		const iv = setInterval(() => {
+			if (document.hidden) return;
+			const ws = wsRef.current;
+			if (!ws || ws.readyState === WebSocket.CLOSED) {
+				if (!pendingReconnectRef.current) connect();
+				return;
+			}
+			if (ws.readyState !== WebSocket.OPEN) return; // CONNECTING — 핸드셰이크 진행 중
+			const silent = Date.now() - lastMsgAtRef.current;
+			if (silent > 40000) {
+				console.debug("[WS] 워치독: 40s 무응답 — 좀비 소켓 강제 재연결");
+				ws.onopen = null; ws.onclose = null; ws.onmessage = null; ws.onerror = null;
+				try { ws.close(); } catch { /* 무시 */ }
+				wsRef.current = null;
+				connect();
+			} else if (silent > 15000) {
+				try { ws.send(JSON.stringify({ type: "ping" })); } catch { /* 무시 */ }
+			}
+		}, 5000);
+		return () => clearInterval(iv);
 	}, [connect]);
 
 	// 백그라운드 진입 시 WS를 능동 종료, 포그라운드 복귀 시 항상 신규 연결 + 상태 동기화.
@@ -206,7 +292,11 @@ export default function App() {
 		const onVisible = () => {
 			if (document.hidden) {
 				clearTimeout(reconnectTimer.current);
-				wsRef.current?.close(); // onclose가 hidden이라 자동 재연결하지 않음
+				pendingReconnectRef.current = false;
+				const old = wsRef.current;
+				// 핸들러 분리 후 close — freeze로 지연된 onclose가 복귀 후(visible) 발화해
+				// 유령 재연결 타이머를 만드는 레이스 제거 (visible 분기와 대칭)
+				if (old) { old.onopen = null; old.onclose = null; old.onmessage = null; old.onerror = null; old.close(); }
 				return;
 			}
 			clearTimeout(reconnectTimer.current);
@@ -274,8 +364,10 @@ export default function App() {
 				setPiReady(true);
 				flushPendingFiles(); // 연결 대기 중 선택된 파일 자동 첨부
 				if (typeof msg.backend === "string") setBackendKind(msg.backend);
-				// 웹 푸시 구독: VAPID 공개키로 서비스 워커 등록 + 구독 → 서버 전송
-				if (typeof msg.vapidPublicKey === "string") subscribePush(msg.vapidPublicKey, wsRef.current);
+				// 웹 푸시 등록 — 캐시가 단일 진원:
+				// ① 캐시가 현재 VAPID 키와 일치 → 동기 즉시 재전송 (SW를 건드리지 않음 — unsubscribe 레이스 없음)
+				// ② 캐시 없음/키 불일치 → 전체 재구독 (in-flight 가드; 성공 시 캐시 갱신 → 이후는 ① 경로)
+				if (typeof msg.vapidPublicKey === "string") ensurePush(msg.vapidPublicKey, wsRef.current);
 				// 상태 복원: get_state 응답 대기 — 복원 전까지 dim (last-assistant-text는 브라우저 localStorage)
 				setRestored(false);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
@@ -294,6 +386,10 @@ export default function App() {
 				// LRU 정리로 강제 종료 — 재연결 시 새 세션 할당됨
 				shouldReconnect.current = true;
 				setPiReady(false);
+				break;
+			case "push_invalid":
+				// 서버 푸시 전송이 410/404 (구독 무효) — 브라우저 구독도 폐기 → 다음 pi_ready에서 신규 등록
+				discardPush();
 				break;
 			case "pi_exit":
 				setPiReady(false);

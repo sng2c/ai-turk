@@ -46,8 +46,16 @@ const HOST = process.env.TURK_HOST || "127.0.0.1";
 const DIST_DIR = join(__dirname, "dist");
 const MAX_SESSIONS = parseInt(process.env.TURK_MAX_SESSIONS || "5");
 
-// ── Web Push (VAPID 키 자동 발급, 메모리만) — 서버 전역 1개 (모든 세션 공유) ──
-const vapidKeys = webpush.generateVAPIDKeys();
+// ── Web Push (VAPID 키 파일 영속화) — 재시작마다 키가 바뀌면 기존 구독 전부 무효(403) → 푸시 실패 ──
+const vapidPath = join(envPaths("ai-turk").data, "vapid.json");
+let vapidKeys: { publicKey: string; privateKey: string };
+try {
+	vapidKeys = JSON.parse(readFileSync(vapidPath, "utf-8"));
+	console.log("[VAPID] 저장된 키 로드");
+} catch {
+	vapidKeys = webpush.generateVAPIDKeys();
+	try { mkdirSync(envPaths("ai-turk").data, { recursive: true }); writeFileSync(vapidPath, JSON.stringify(vapidKeys)); console.log("[VAPID] 신규 키 생성+저장"); } catch { /* 디스크 실패 — 메모리 키로 계속 */ }
+}
 const VAPID_PUBLIC_KEY: string = vapidKeys.publicKey;
 const VAPID_PRIVATE_KEY: string = vapidKeys.privateKey;
 
@@ -119,7 +127,10 @@ function startBackend(session: Session): void {
 				console.log(`[${session.userKey.slice(0, 8)}] [config] agentSessionId 갱신: ${sid.slice(0, 8)}`);
 			}
 		}
-		if (ev.type === "pi_exit" || ev.type === "pi_error") session.backendReady = false;
+		if (ev.type === "pi_exit" || ev.type === "pi_error") {
+			session.backendReady = false;
+			scheduleBackendRestart(session); // 비정상 종료 자동 재시작 — 백그라운드 크래시로 세션 벽돌(pi_starting 고정) 방지
+		}
 		// agent_start: 스트리밍 시작
 		if (ev.type === "agent_start") { session.isStreaming = true; session.thinkingBuf = ""; session.textBuf = ""; return; } // pi 것 스킵 — 서버가 이미 합성 전송
 		// agent_end: 스트리밍 종료 + 큐 드레인 + 웹 푸시
@@ -181,6 +192,22 @@ function startBackend(session: Session): void {
 		}
 	});
 	session.backend.start();
+}
+
+// ── pi 비정상 종료 자동 재시작 — 백그라운드(클라 없음) 크래시로 세션 벽돌 방지. 60s 내 5회 초과 시 포기 ──
+const piRestartLog = new Map<string, number[]>();
+function scheduleBackendRestart(session: Session): void {
+	const now = Date.now();
+	const recent = (piRestartLog.get(session.userKey) ?? []).filter((t) => now - t < 60000);
+	recent.push(now);
+	piRestartLog.set(session.userKey, recent);
+	if (recent.length > 5) { console.log(`[${session.userKey.slice(0, 8)}] [pi] 60s 내 재시작 5회 초과 — 자동 재시작 중단`); return; }
+	setTimeout(() => {
+		const s = sessions.get(session.userKey);
+		if (!s || s.backend?.alive() || s.backendReady) return; // 이미 재시작됨
+		console.log(`[${session.userKey.slice(0, 8)}] [pi] 비정상 종료 감지 → 자동 재시작`);
+		startBackend(s);
+	}, 1500);
 }
 
 // 같은 세션(유저) WS 전체에 broadcast — 다중 탭 동기화
@@ -259,10 +286,18 @@ function sendPushNotification(session: Session, ev: TurkEvent): void {
 	// 스키마 유효 + Visible 응답만 푸시 — Silent·위반(빈 message 등)은 폐기
 	if (!valid || parsed?.silent === true) return;
 	// 전체 text 전송 + sessionId → sw.js가 IndexedDB 저장에 사용
-	const payload = JSON.stringify({ body: text, sessionId: session.agentSessionId || "" });
+	const payload = JSON.stringify({ body: text, sessionId: session.agentSessionId || "", url: "/#" + session.userKey });
 	webpush.sendNotification(session.pushSubscription, payload)
 		.then(() => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 성공`))
-		.catch((err) => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 실패: ${err.message}`));
+	.catch((err: any) => {
+		console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 실패: ${err.message}`);
+		// 구독 자체가 죽은 것(410/404) — 폐기 + 클라에 재구독 요청 (자가치유 루프)
+		if (err.statusCode === 410 || err.statusCode === 404) {
+			session.pushSubscription = null;
+			clearPushSubscription(session.userKey);
+			broadcast(session, { type: "push_invalid" });
+		}
+	});
 }
 
 // ── agentSessionId 영속화 (config.json) ────────────────────────────────────
@@ -330,6 +365,9 @@ function savePushSubscription(userKey: string, sub: any): void {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(pushPath(userKey), JSON.stringify(sub));
 	} catch (err) { console.log(`[${userKey.slice(0, 8)}] [push] 저장 실패: ${err instanceof Error ? err.message : err}`); }
+}
+function clearPushSubscription(userKey: string): void {
+	try { rmSync(pushPath(userKey), { force: true }); } catch { /* 무시 */ }
 }
 
 // ── 세션 관리 ────────────────────────────────────────────────────────────
@@ -439,9 +477,16 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 // ── WebSocket 서버 ──────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 100 * 1024 * 1024 }); // 첨부 base64 프레임 수용 (50MB 파일)
-// WS keepalive — 모바일 NAT의 유휴 컷(1005 churn) 방지: 주기 ping에 브라우저가 자동 pong
-setInterval(() => { for (const c of wss.clients) if (c.readyState === WebSocket.OPEN) c.ping(); }, 25000);
-const customCommands = ["restart_pi", "schedule", "push_subscribe", "attach"];
+// WS keepalive — 모바일 NAT의 유휴 컷(1005 churn) 방지 + pong 2회 무응답 좀비 소켓 서버측 정리(isAlive)
+setInterval(() => {
+	for (const c of wss.clients) {
+		if (c.readyState !== WebSocket.OPEN) continue;
+		if ((c as any).isAlive === false) { c.terminate(); continue; }
+		(c as any).isAlive = false;
+		c.ping();
+	}
+}, 25000);
+const customCommands = ["restart_pi", "schedule", "push_subscribe", "attach", "ping"];
 
 wss.on("connection", (ws, req) => {
 	const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -460,6 +505,8 @@ wss.on("connection", (ws, req) => {
 	const session = result;
 	session.ws.add(ws);
 	session.lastActivity = Date.now();
+	(ws as any).isAlive = true;
+	ws.on("pong", () => { (ws as any).isAlive = true; });
 	if (session.isStreaming && (session.thinkingBuf || session.textBuf)) {
 		(ws as any).replayPending = true; // 스트리밍 중 접속 — get_state 응답 직후 줄단위 캐시 전달 예약
 	}
@@ -501,6 +548,8 @@ wss.on("connection", (ws, req) => {
 					session.pushSubscription = msg.subscription;
 					savePushSubscription(userKey, msg.subscription); // 영속화
 					if (DEBUG) console.log(`[${userKey.slice(0, 8)}] [Push] 구독 수신+저장: ${msg.subscription?.endpoint?.slice(0, 60)}`);
+				} else if (msg.type === "ping") {
+					ws.send(JSON.stringify({ type: "pong" })); // 앱레벨 하트비트 — 클라 워치독 좀비 판정용 (pi로 전달 안 함)
 				} else if (msg.type === "attach") {
 					// 파일 업로드 → OS 임시디렉토리 저장 (휘발 — OS가 정리) — 에이전트가 자기 read 도구로 읽음
 					const MAX_ATTACH = 50 * 1024 * 1024;

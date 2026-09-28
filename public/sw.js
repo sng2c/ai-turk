@@ -22,13 +22,15 @@ self.addEventListener("push", (event) => {
 	} catch { /* 페이로드 파싱 실패 시 기본값 */ }
 	// 마크다운 제거 + 50자 트림 (알림용)
 	const notificationBody = body.replace(/[#*`_~>\-]/g, "").replace(/\s+/g, " ").trim().slice(0, 50);
+	// 딥링크 — 서버가 userKey 해시 경로(/#<userKey>)를 담아 보냄 → 알림 클릭 시 해당 세션으로 복귀
+	const url = (event.data?.json()?.url) || "/";
 
 	event.waitUntil(
 		self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
 			// 보이는(visible) 클라이언트가 있으면 포그라운드 — 알림 안 뜸
 			const visible = clientList.some((c) => c.visibilityState === "visible");
 			if (visible) return;
-			return self.registration.showNotification("AI-Turk", { body: notificationBody, icon: "/push-icon.png", badge: "/push-badge.png", tag: "ai-turk", renotify: true });
+			return self.registration.showNotification("AI-Turk", { body: notificationBody, icon: "/push-icon.png", badge: "/push-badge.png", tag: "ai-turk", renotify: true, data: { url } });
 		})
 	);
 });
@@ -36,15 +38,16 @@ self.addEventListener("push", (event) => {
 // ── 알림 클릭: 탭 열기 ────────────────────────────────────────────────────
 self.addEventListener("notificationclick", (event) => {
 	event.notification.close();
+	const url = event.notification.data?.url || "/";
 	event.waitUntil(
 		self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-			// 이미 열린 탭이면 포커스, 없으면 새 창
+			// 같은 userKey 해시를 연 탭이면 포커스, 없으면 해당 해시로 새 창
 			for (const client of clientList) {
-				if (client.url.includes(self.location.origin) && "focus" in client) {
+				if (client.url.includes(url) && "focus" in client) {
 					return client.focus();
 				}
 			}
-			if (self.clients.openWindow) return self.clients.openWindow("/");
+			if (self.clients.openWindow) return self.clients.openWindow(url);
 		})
 	);
 });

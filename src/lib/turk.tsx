@@ -117,19 +117,42 @@ export function urlBase64ToUint8Array(base64String: string): Uint8Array {
 }
 
 // ── 서비스 워커 등록 + Push 구독 → 서버에 전송 ──────────────────────────────
-export async function subscribePush(publicKey: string, ws: WebSocket | null): Promise<void> {
-	if (!("serviceWorker" in navigator) || !ws || ws.readyState !== WebSocket.OPEN) return;
+// 반환 true = push_subscribe가 소켓으로 실제 전송됨.
+// 성공 즉시 localStorage 캐시("turk-push-sub")에 저장 — 이후 pi_ready에서
+// 비동기 SW 대기 없이 동기 재전송할 수 있어, 앱을 1초만 켜도 등록이 유지된다.
+let pushInFlight = false;
+export async function ensurePush(publicKey: string, ws: WebSocket | null): Promise<boolean> {
+	if (pushInFlight || !ws) return false;
+	const sock = ws; // await 이후에도 non-null
+	pushInFlight = true;
 	try {
+		if (!("serviceWorker" in navigator)) return false;
 		const reg = await navigator.serviceWorker.register("/sw.js");
-		// 기존 구독이 있으면 해제 (서버 재시작으로 VAPID 키 변경 대응)
-		const existing = await reg.pushManager.getSubscription();
-		if (existing) await existing.unsubscribe();
-		const subscription = await reg.pushManager.subscribe({
-			userVisibleOnly: true,
-			applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
-		});
-		ws.send(JSON.stringify({ type: "push_subscribe", subscription: subscription.toJSON() }));
-	} catch (e) { console.debug("[Push] 구독 실패:", e); }
+		const keyBytes = urlBase64ToUint8Array(publicKey);
+		let sub = await reg.pushManager.getSubscription();
+		// 키가 다른 옛 구독만 교체 — 같은 키면 재사용 (무조건 unsubscribe/subscribe 금지 → 등록-파기 레이스 원천 제거)
+		if (sub && sub.options.applicationServerKey &&
+			new Uint8Array(sub.options.applicationServerKey as ArrayBuffer).toString() !== new Uint8Array(keyBytes).toString()) {
+			await sub.unsubscribe();
+			sub = null;
+		}
+		if (!sub) {
+			sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes as BufferSource });
+		}
+		if (sock.readyState !== WebSocket.OPEN) return false; // 산 구독은 브라우저가 보유 — 다음 pi_ready에서 재전송
+		sock.send(JSON.stringify({ type: "push_subscribe", subscription: sub.toJSON() }));
+		return true;
+	} catch (e) { console.debug("[Push] 구독 실패:", e); return false; }
+	finally { pushInFlight = false; }
+}
+
+// push_invalid (구독 무효) — 브라우저 산 구독도 이미 죽은 것이니 폐기 → 다음 pi_ready에서 신규 등록
+export async function discardPush(): Promise<void> {
+	try {
+		const reg = await navigator.serviceWorker.getRegistration();
+		const sub = await reg?.pushManager.getSubscription();
+		if (sub) await sub.unsubscribe();
+	} catch { /* 무시 */ }
 }
 
 // ── non-secure context(LAN IP 등) 대응 — crypto.randomUUID가 없으면 Math.random 폴백
