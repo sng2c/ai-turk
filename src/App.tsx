@@ -212,15 +212,10 @@ export default function App() {
 		pendingReconnectRef.current = false;
 		lastMsgAtRef.current = Date.now();
 
-		// 재시도 콜백 — hidden 판정을 onclose 시점이 아닌 발화 시점에 한다.
-		// (백그라운드 freeze로 지연됐던 onclose가 복귀 직후 발화하면 그 순간 hidden=false →
-		//  옛날 가드로는 타이머가 소실되어 영구 빨간대기가 됐다. hidden이면 저빈도 보류 루프)
+		// 재시도 콜백 — visible 상태에서만. 백그라운드에서는 어떤 시도도 하지 않는다:
+		// 복귀(visibilitychange visible) 시 onVisible이 항상 신규 연결을 만들므로 백그라운드 보류 루프는 불필요.
 		const retry = () => {
-			if (document.hidden) {
-				pendingReconnectRef.current = true;
-				reconnectTimer.current = setTimeout(retry, 5000);
-				return;
-			}
+			if (document.hidden) return; // 백그라운드 — 시도 없음, 복귀 시 onVisible이 재수립
 			pendingReconnectRef.current = false;
 			connect();
 		};
@@ -231,6 +226,7 @@ export default function App() {
 			setConnected(false);
 			setPiReady(false);
 			if (!shouldReconnect.current || pendingReconnectRef.current) return;
+			if (document.hidden) return; // 백그라운드 종료 — 예약 없음. 복귀 시 onVisible이 즉시 신규 연결
 			console.debug(`[WS] 종료 code=${ev.code} — ${reconnectDelay.current}ms 후 재연결`);
 			pendingReconnectRef.current = true;
 			reconnectTimer.current = setTimeout(retry, reconnectDelay.current);
