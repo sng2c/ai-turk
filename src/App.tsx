@@ -901,6 +901,10 @@ export default function App() {
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
 		userSentRef.current = true; // 사용자 전송 — agent_end 시 클리어
+		// 보내는 즉시 초안 소멸 — 전송된 프롬프트는 초안이 아님. 스트리밍 중 폐기→재로드 시 낡은 초안이 부활하는 것 방지.
+		draftEchoRef.current = true;
+		clearTimeout(draftTimerRef.current);
+		kvSet(`draft:${userKeyRef.current}`, "").catch(() => { /* 무시 */ });
 		// 응답 짝표시 — 이 턴의 응답이 "무엇에 대한 대답"인지 (user: 순수 입력 / tool: 원 질문 승계)
 		if (route === "user") answerToRef.current = userText;
 
