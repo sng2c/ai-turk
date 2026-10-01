@@ -38,3 +38,4 @@ drafts/
 *.bak
 *.bak.*
 .diag-restart.mjs
+gamebook/
