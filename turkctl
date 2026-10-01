@@ -130,6 +130,12 @@ is_running() {
   curl -s -o /dev/null -w "%{http_code}" "http://$TURK_HOST:$TURK_PORT/" 2>/dev/null | grep -q 200
 }
 
+# 기본 .env 인스턴스는 PM2 'turk' 슬롯이 감시(run.sh prod 경로). start/stop은 pm2 위임해야
+# kill→즉시부활 경합이 생기지 않음. --env 커스텀 인스턴스는 기존 nohup 관리 유지.
+is_pm2_slot() {
+  [ "$ENV_FILE" = "$TURK_DIR/.env" ]
+}
+
 # 특정 포트에 묶인 프로세스 종료 (다른 인스턴스 영향 안 줌)
 # PID 파일 우선(표준 관리) — 없거나 살아있으면 lsof 폴백(기존 인스턴스 호환)
 kill_port() {
@@ -166,6 +172,23 @@ rotate_log() {
 }
 
 cmd_start() {
+  if is_pm2_slot; then
+    if is_running; then
+      echo "✅ 이미 실행 중: http://$TURK_HOST:$TURK_PORT (PM2: turk, run.sh prod 경로)"
+      return 0
+    fi
+    echo "▶ PM2 기동 (turk — run.sh prod 경로)..."
+    pm2 start turk >/dev/null 2>&1 || pm2 restart turk >/dev/null 2>&1 || true
+    sleep 3
+    if is_running; then
+      echo "✅ 서버 실행 중: http://$TURK_HOST:$TURK_PORT (PM2 turk)"
+      echo "   로그: pm2 logs turk"
+    else
+      echo "❌ PM2 기동 실패 — pm2 logs turk 확인"
+      return 1
+    fi
+    return 0
+  fi
   if is_running; then
     echo "✅ 이미 실행 중: http://$TURK_HOST:$TURK_PORT (env: $ENV_FILE)"
     return 0
@@ -222,6 +245,16 @@ cmd_start_prod() {
 }
 
 cmd_stop() {
+  if is_pm2_slot && pm2 describe turk >/dev/null 2>&1; then
+    echo "▶ 중지 중... (PM2: turk)"
+    if pm2 stop turk >/dev/null 2>&1; then
+      echo "✅ 중지됨 (PM2 상태 stopped — 자부활 없음)"
+    else
+      kill_port
+      echo "✅ 중지됨 (kill_port 폴백)"
+    fi
+    return 0
+  fi
   echo "▶ 중지 중... (포트 $TURK_PORT)"
   kill_port
   echo "✅ 서버 및 관련 프로세스 중지됨 (포트 $TURK_PORT)"
@@ -239,9 +272,13 @@ cmd_status() {
     local health
     health=$(curl -s "http://$TURK_HOST:$TURK_PORT/api/health" 2>/dev/null || echo "{}")
     echo "   $health"
-    local ws_count
-    ws_count=$(grep -c "클라이언트 연결" "$LOG_FILE" 2>/dev/null || echo "0")
-    echo "   로그: $LOG_FILE"
+    if is_pm2_slot; then
+      echo "   감시: PM2 'turk' (run.sh prod = tsx dist 서빙)"
+    else
+      local ws_count
+      ws_count=$(grep -c "클라이언트 연결" "$LOG_FILE" 2>/dev/null || echo "0")
+      echo "   로그: $LOG_FILE"
+    fi
   else
     echo "⚪ 서버 미실행 (포트 $TURK_PORT) — turkctl --env $(basename "$ENV_FILE") start"
   fi
@@ -255,6 +292,10 @@ cmd_status() {
 }
 
 cmd_logs() {
+  if is_pm2_slot; then
+    echo "(PM2 turk 로그 스트리밍 — Ctrl+C 종료)"
+    exec pm2 logs turk
+  fi
   if [ -f "$LOG_FILE" ]; then
     tail -f "$LOG_FILE"
   else
