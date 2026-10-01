@@ -13,6 +13,7 @@
  */
 
 import { ChildProcess, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { mkdirSync } from "node:fs";
 
@@ -130,9 +131,13 @@ export class PiBackend extends JsonlBackend {
 		const extra = (process.env.TURK_PI_ARGS || "").split(/\s+/).filter(Boolean);
 		// userKey 있으면 해당 세션 복원(--session-id), 없으면 pi가 자체 영속 세션 생성 (--no-session 사용 안함)
 		const sessionArgs = this.opts.userKey ? ["--session-id", this.opts.userKey] : [];
+		// gateway 사용 구분: userKey별 토큰 (gw가 client=pi:<해시>로 기록). 미지정 세션은 폴백 사용
+		const userHash = this.opts.userKey ? createHash("sha256").update(this.opts.userKey).digest("hex").slice(0, 12) : "";
+		// 미지정(신규) 세션 폴백: gw에서 client=pi:unsessioned로 기록 (실제 키는 gw .env에만 존재)
+		const spawnEnv: Record<string, string> = { GATEWAY_TOKEN: userHash ? `gw_pi_${userHash}` : "gw_pi_unsessioned" };
 		const args = ["--mode", "rpc", ...sessionArgs, ...(model ? ["--model", model] : []), ...extra];
 		this.log(`[Turk] ${bin} ${args.join(" ")} 시작`);
-		this.attach(spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], cwd: this.opts.cwd }), "pi");
+		this.attach(spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], cwd: this.opts.cwd, env: { ...process.env, ...spawnEnv } }), "pi");
 		this.emit({ type: "pi_ready", backend: this.kind() });
 	}
 
