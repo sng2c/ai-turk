@@ -131,10 +131,12 @@ export class PiBackend extends JsonlBackend {
 		const extra = (process.env.TURK_PI_ARGS || "").split(/\s+/).filter(Boolean);
 		// userKey 있으면 해당 세션 복원(--session-id), 없으면 pi가 자체 영속 세션 생성 (--no-session 사용 안함)
 		const sessionArgs = this.opts.userKey ? ["--session-id", this.opts.userKey] : [];
-		// ollama-gw 사용 구분: userKey별 토큰 (gw가 client=pi:<해시>로 기록). 미지정 세션은 폴백 사용
+		// 세션별 API 토큰 귀속 — 접두사·폴백 토큰은 .env에서 주입 (게이트웨이 세부는 리포 외부)
 		const userHash = this.opts.userKey ? createHash("sha256").update(this.opts.userKey).digest("hex").slice(0, 12) : "";
-		// 미지정(신규) 세션 폴백: gw에서 client=pi:unsessioned로 기록 (실제 키는 gw .env에만 존재)
-		const spawnEnv: Record<string, string> = { OGW_TOKEN: userHash ? `ogw_pi_${userHash}` : "ogw_pi_unsessioned" };
+		const gwPrefix = process.env.GATEWAY_TOKEN_PREFIX;
+		const gwFallback = process.env.GATEWAY_FALLBACK_TOKEN;
+		const spawnEnv: Record<string, string> = {};
+		if (gwPrefix) spawnEnv.GATEWAY_TOKEN = userHash ? `${gwPrefix}${userHash}` : (gwFallback || `${gwPrefix}unsessioned`);
 		const args = ["--mode", "rpc", ...sessionArgs, ...(model ? ["--model", model] : []), ...extra];
 		this.log(`[Turk] ${bin} ${args.join(" ")} 시작`);
 		this.attach(spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], cwd: this.opts.cwd, env: { ...process.env, ...spawnEnv } }), "pi");
