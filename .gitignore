@@ -34,3 +34,7 @@ python-archive
 # pi-subagents artifacts
 .pi-subagents/
 workspace
+drafts/
+*.bak
+*.bak.*
+.diag-restart.mjs
