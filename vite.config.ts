@@ -8,7 +8,6 @@ import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 const DEBUG = !!process.env.TURK_DEBUG;
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
 import { ensureAgentsMd } from "./src/lib/agents-md-server.ts";
-import { userTitle } from "./src/lib/ukey.ts";
 import { validateTurkResponse } from "./src/lib/response-schema.ts";
 import envPaths from "env-paths";
 import webpush from "web-push";
@@ -391,27 +390,6 @@ function savePushSubscription(userKey: string, sub: any): void {
 	return {
 		name: "turk-rpc",
 		configureServer(server) {
-			// ── 동적 manifest — ?u=<userKey> → name/short_name을 userid 조합으로 치환.
-			//    A2HS(홈스크린 설치) 시 Chrome이 현재 manifest href를 fetch → 홈스크린 아이콘 라벨에 userid 부여.
-			//    정적 public/ 경로보다 먼저 가로채므로 ?u가 있으면 여기서 응답, 그 외엔 통과.
-			server.middlewares.use((req, res, next) => {
-				if (!req.url?.startsWith("/manifest.webmanifest")) return next();
-				try {
-					const reqUrl = new URL(req.url, "http://localhost");
-					const u = reqUrl.searchParams.get("u") || "";
-					const m = JSON.parse(readFileSync(join(process.cwd(), "public", "manifest.webmanifest"), "utf-8"));
-					if (u) {
-						const t = userTitle(u);
-						m.name = t; m.short_name = t;
-						// 설치 타일·북마크가 userid 세션으로 진입하도록 start_url에 해시 부여 (prod server.ts와 동일)
-						m.scope = "/";
-						m.start_url = `/#${encodeURIComponent(u)}`;
-					}
-					res.writeHead(200, { "Content-Type": "application/manifest+json", "Cache-Control": "no-cache" });
-					res.end(JSON.stringify(m));
-				} catch { return next(); }
-			});
-
 			// noServer 모드: Vite HMR 역그레이드 핸들러와 충돌 방지
 			const wss = new WebSocketServer({ noServer: true, maxPayload: 100 * 1024 * 1024 }); // 첨부 base64 프레임 수용 (50MB 파일)
 			// WS keepalive — 모바일 NAT의 유휴 컷(1005 churn) 방지 + pong 2회 무응답 좀비 소켓 서버측 정리(isAlive)

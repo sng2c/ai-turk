@@ -197,14 +197,12 @@ export function reflectUserKey(key: string): void {
 // 초기값 (모듈 로드 1회) — 정적 표시/하위호환. 런타임 전환은 userKey state + resolveUserKey().
 export const TURK_USER_KEY: string = resolveUserKey();
 
-// ── 유저 식별 타이틀 반영 — 탭 제목(document.title)·iOS A2HS 타이틀 meta·manifest 링크(href ?u=).
-//    Chrome은 A2HS(설치) 시점에 현재 link[rel=manifest] href를 fetch하고, 서버(vite plugin/server.ts)가
-//    ?u를 받아 name/short_name을 유저 식별 조합으로 치환 → 홈스크린 아이콘 라벨에 userid 표시.
+// ── 유저 식별 타이틀 반영 — 탭 제목(document.title)·iOS 북마크 타이틀 meta.
+//    즐겨찾기·공유는 Chrome이 당존 탭 주소(#<userKey> 해시선반영 참조)·타이틀을 사용 —
+//    manifest(A2HS) 오버라이드 기계장치는 제거됨 (설치 기능 미사용).
 export function applyUserTitle(key: string): void {
 	const t = userTitle(key);
 	document.title = t;
 	const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]') as HTMLMetaElement | null;
 	if (apple) apple.content = t;
-	const man = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
-	if (man) man.href = `/manifest.webmanifest?u=${encodeURIComponent(key)}`;
 }

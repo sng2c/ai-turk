@@ -337,7 +337,7 @@ export default function App() {
 	// 최초 진입 userKey를 URL hash에 반영 — 발급키도 주소로 식별 (#<키> 편집 = 멀티탭 멀티 userKey, 주소 복사 = 공유)
 	useEffect(() => { reflectUserKey(userKeyRef.current); }, []);
 
-	// 유저 식별 타이틀 — 탭 제목·A2HS manifest 라벨을 현재 userKey로 반영 (hash 전환마다 갱신)
+	// 유저 식별 타이틀 — 탭 제목(즐겨찾기·공유 제목)을 현재 userKey로 반영 (hash 전환마다 갱신)
 	useEffect(() => { applyUserTitle(userKey); }, [userKey]);
 
 	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
