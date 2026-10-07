@@ -400,7 +400,13 @@ function savePushSubscription(userKey: string, sub: any): void {
 					const reqUrl = new URL(req.url, "http://localhost");
 					const u = reqUrl.searchParams.get("u") || "";
 					const m = JSON.parse(readFileSync(join(process.cwd(), "public", "manifest.webmanifest"), "utf-8"));
-					if (u) { const t = userTitle(u); m.name = t; m.short_name = t; }
+					if (u) {
+						const t = userTitle(u);
+						m.name = t; m.short_name = t;
+						// 설치 타일·북마크가 userid 세션으로 진입하도록 start_url에 해시 부여 (prod server.ts와 동일)
+						m.scope = "/";
+						m.start_url = `/#${encodeURIComponent(u)}`;
+					}
 					res.writeHead(200, { "Content-Type": "application/manifest+json", "Cache-Control": "no-cache" });
 					res.end(JSON.stringify(m));
 				} catch { return next(); }

@@ -454,8 +454,14 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 	if (url.pathname === "/manifest.webmanifest") {
 		try {
 			const m = JSON.parse(await readFile(join(DIST_DIR, "manifest.webmanifest"), "utf-8"));
-			const u = url.searchParams.get("u") || "";
-			if (u) { const t = userTitle(u); m.name = t; m.short_name = t; }
+		const u = url.searchParams.get("u") || "";
+		if (u) {
+			const t = userTitle(u);
+			m.name = t; m.short_name = t;
+			// 설치 타일·북마크가 userid 세션으로 진입하도록 — start_url에 해시 부여 (동적 manifest에 명시되지 않으면 기본 "/"로 설치됨 → 앱 내 즐겨찾기·재접속이 userid 없이 됨)
+			m.scope = "/";
+			m.start_url = `/#${encodeURIComponent(u)}`;
+		}
 			res.writeHead(200, { "Content-Type": MIME[".webmanifest"] || "application/manifest+json", "Cache-Control": "no-cache" });
 			res.end(JSON.stringify(m));
 			return;
