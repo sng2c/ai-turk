@@ -20,6 +20,7 @@ import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
 import { validateTurkResponse } from "./src/lib/response-schema.ts";
 import { ensureAgentsMd } from "./src/lib/agents-md-server.ts";
+import { userTitle } from "./src/lib/ukey.ts";
 import envPaths from "env-paths";
 import webpush from "web-push";
 
@@ -446,6 +447,19 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		res.writeHead(200, { "Content-Type": "application/json" });
 		res.end(JSON.stringify({ ok: true, sessions: sessions.size, maxSessions: MAX_SESSIONS }));
 		return;
+	}
+
+	// 동적 manifest — ?u=<userKey> → name/short_name을 userid 조합으로 치환 (A2HS 홈스크린 라벨 = 유저 식별).
+	// Chrome이 설치 시점에 현재 manifest href를 fetch하므로 라벨이 userid로 결정됨. no-cache로 항상 재검증.
+	if (url.pathname === "/manifest.webmanifest") {
+		try {
+			const m = JSON.parse(await readFile(join(DIST_DIR, "manifest.webmanifest"), "utf-8"));
+			const u = url.searchParams.get("u") || "";
+			if (u) { const t = userTitle(u); m.name = t; m.short_name = t; }
+			res.writeHead(200, { "Content-Type": MIME[".webmanifest"] || "application/manifest+json", "Cache-Control": "no-cache" });
+			res.end(JSON.stringify(m));
+			return;
+		} catch { /* 실패 시 아래 정적 경로 폴백 */ }
 	}
 
 	let filePath = join(DIST_DIR, url.pathname === "/" ? "index.html" : url.pathname);

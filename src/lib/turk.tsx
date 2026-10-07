@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { validateTurkResponse } from "./response-schema";
+import { userTitle } from "./ukey";
 
 // ── 응답 검증 — zod 스키마 제거, 공용 JSON Schema(response-schema.ts)로 이원화.
 // 스키마가 1차 게이트(법) — 프롬프트(AGENTS.md)는 보조 교육. 위반 시 오류 문구가
@@ -195,3 +196,15 @@ export function reflectUserKey(key: string): void {
 
 // 초기값 (모듈 로드 1회) — 정적 표시/하위호환. 런타임 전환은 userKey state + resolveUserKey().
 export const TURK_USER_KEY: string = resolveUserKey();
+
+// ── 유저 식별 타이틀 반영 — 탭 제목(document.title)·iOS A2HS 타이틀 meta·manifest 링크(href ?u=).
+//    Chrome은 A2HS(설치) 시점에 현재 link[rel=manifest] href를 fetch하고, 서버(vite plugin/server.ts)가
+//    ?u를 받아 name/short_name을 유저 식별 조합으로 치환 → 홈스크린 아이콘 라벨에 userid 표시.
+export function applyUserTitle(key: string): void {
+	const t = userTitle(key);
+	document.title = t;
+	const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]') as HTMLMetaElement | null;
+	if (apple) apple.content = t;
+	const man = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
+	if (man) man.href = `/manifest.webmanifest?u=${encodeURIComponent(key)}`;
+}

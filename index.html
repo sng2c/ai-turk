@@ -3,10 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-title" content="AI Turk" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/neodgm/neodgm-webfont@latest/neodgm/style.css" />
     <title>AI Turk</title>
+    <script>
+      // 최초 로드 동기 반영 — React 마운트 전에 현재 userKey(#해시 우선)를 탭 타이틀·manifest URL에 부여.
+      // Chrome은 A2HS(설치) 시점에 link[rel=manifest] 현재 href를 fetch하므로, 서버의 ?u= 동적 치환과
+      // 합쳐 홈스크린 아이콘 라벨이 userid로 결정된다. (hashchange 후 런타임 전환은 App.tsx effect가 갱신)
+      try {
+        var h = location.hash.replace(/^#/, "").trim();
+        try { if (h) h = decodeURIComponent(h); } catch (e) {}
+        var k = h || localStorage.getItem("turk-user-key") || "";
+        if (k) {
+          var id = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(k) ? k.slice(0, 8) : k; // UUID형만 축약
+          var t = "AI Turk \u00B7 " + id;
+          document.title = t;
+          var m = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+          if (m) m.setAttribute("content", t);
+          document.querySelector('link[rel="manifest"]').setAttribute("href", "/manifest.webmanifest?u=" + encodeURIComponent(k));
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body style="background:#000">
     <div id="root"></div>
