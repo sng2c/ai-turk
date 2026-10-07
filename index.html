@@ -10,13 +10,29 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/neodgm/neodgm-webfont@latest/neodgm/style.css" />
     <title>AI Turk</title>
     <script>
-      // 최초 로드 동기 반영 — React 마운트 전에 현재 userKey(#해시 우선)를 탭 타이틀·manifest URL에 부여.
+      // 최초 로드 동기 반영 — React 마운트 전에 현재 userKey(#해시 우선)를 URL 해시·탭 타이틀·manifest URL에 부여.
+      // 해시 선반영(pushState) 위치가 중요: React 마운트(useEffect)까지 미루면 직후 로딩에 즐겨찾기를 누른 경우
+      // 브라우저가 변경 전 주소("/")를 즐겨찾기로 저장했었음 → HTML 파싱 시점에 즉시 pushState로 창을 소멸.
+      // 발급 규칙은 turk.tsx ensureLocalKey와 동일 슬롯(turk-user-key) — 순차실행이라 이중발급 없음.
       // Chrome은 A2HS(설치) 시점에 link[rel=manifest] 현재 href를 fetch하므로, 서버의 ?u= 동적 치환과
       // 합쳐 홈스크린 아이콘 라벨이 userid로 결정된다. (hashchange 후 런타임 전환은 App.tsx effect가 갱신)
+      function uuidv4Safe() {
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+          var r = (Math.random() * 16) | 0;
+          return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+        });
+      }
       try {
         var h = location.hash.replace(/^#/, "").trim();
         try { if (h) h = decodeURIComponent(h); } catch (e) {}
-        var k = h || localStorage.getItem("turk-user-key") || "";
+        var k;
+        if (h) {
+          k = h; // 해시 우선 — 세션 오버라이드(저장 미사용, turk.tsx와 동일)
+        } else {
+          k = localStorage.getItem("turk-user-key");
+          if (!k) { k = (crypto.randomUUID && crypto.randomUUID()) || uuidv4Safe(); localStorage.setItem("turk-user-key", k); }
+          history.pushState(null, "", "#" + encodeURIComponent(k)); // 주소창·즐겨찾기에 userid 반영 (React 마운트 전)
+        }
         if (k) {
           var id = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(k) ? k.slice(0, 8) : k; // UUID형만 축약
           var t = "AI Turk \u00B7 " + id;
