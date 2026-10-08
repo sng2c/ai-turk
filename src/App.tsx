@@ -131,8 +131,8 @@ export default function App() {
 		setCanScrollUp(el.scrollTop > 2);
 		setCanScrollDown(el.scrollTop + el.clientHeight < el.scrollHeight - 2);
 	}, []);
-	// 런타임 hash 전환 대응 — userKey state(표시/리렌더) + ref(stable connect 콜백 내 최신값 참조)
-	const [userKey, setUserKey] = useState(TURK_USER_KEY);
+	// 런타임 hash 전환은 풀리로드(onHashChange)라 이 state는 읽기 전용 — 표시·ref 갱신용
+	const [userKey] = useState(TURK_USER_KEY);
 	const userKeyRef = useRef(userKey);
 	userKeyRef.current = userKey; // 매 렌더링 동기화 (hashchange 핸들러에서 즉시 직접 갱신도 병행)
 	const wsRef = useRef<WebSocket | null>(null);
