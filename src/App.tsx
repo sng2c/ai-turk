@@ -305,31 +305,19 @@ export default function App() {
 	}, [connect]);
 
 	// ── URL hash 런타임 변경 → 세션 전환 (링크 공유/복귀) ─────────────────
-	// hashchange(주소창 편집·공유 링크 이동·뒤로가기) 시 userKey 재계산 → 변경되면 기존 WS 종료(자동재연결 억제) 후 새 userKey로 재접속.
+	// 해시 편집·뒤로가기 시 풀리로드 — Chrome same-document 전환은 document.title 갱신이
+	// 히스토리 엔트리·즐겨찾기 다이얼로그에 새로 커밋이 아니라고 반영 안 되는 동작이 있어서(이전 타이틀로 즐겨찾기 저장),
+	// 재로드로 새 커밋을 만들어 부트 스크립트(index.html)가 주소·타이틀을 즉시 확정한다.
+	// 재로드 부트가 해시에서 다시 읽으므로 재귀 루프 없음.
 	useEffect(() => {
 		const onHashChange = () => {
 			const next = resolveUserKey();
 			if (next === userKeyRef.current) return; // 동일 키 → 무시
-			// userKey 즉시 갱신 — ref는 connect가 즉시 볼 수 있게, state는 리렌더/표시 갱신용
-			userKeyRef.current = next;
-			setUserKey(next);
-			// 세션 관련 상태 초기화 — 새 get_state 복원 전까지 dim
-			setSessionId("");
-			setRestored(false);
-			setPiReady(false);
-			setLoading(false);
-			streamingTextRef.current = "";
-			setState({ message: "", buttons: {} });
-			// 기존 WS 종료 — 핸들러 분리 후 close (onclose의 지연 자동재연결이 중복 소켓을 만들지 않게)
-			clearTimeout(reconnectTimer.current);
-			const old = wsRef.current;
-			if (old) { old.onclose = null; old.onmessage = null; old.onerror = null; old.close(); }
-			reconnectDelay.current = 1000;
-			connect();
+			location.reload();
 		};
 		window.addEventListener("hashchange", onHashChange);
 		return () => window.removeEventListener("hashchange", onHashChange);
-	}, [connect]);
+	}, []);
 
 	// 최초 진입 userKey를 URL hash에 반영 — 발급키도 주소로 식별 (#<키> 편집 = 멀티탭 멀티 userKey, 주소 복사 = 공유)
 	useEffect(() => { reflectUserKey(userKeyRef.current); }, []);
