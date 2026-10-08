@@ -43,7 +43,7 @@ self.addEventListener("push", (event) => {
 	// userKey — 서버 명시 필드 우선, 없으면 url 해시 역추출 (구형 페이로드 호환)
 	const userKey = typeof data.userKey === "string" && data.userKey ? data.userKey : keyFromUrl(data.url);
 	// userKey 구분 — tag는 키별 독립 슬롯(치환 방식), 제목에 키 표기(쌓인 알림 식별)
-	const title = userKey ? `AI Turk · ${shortUserKey(userKey)}` : "AI-Turk";
+	const title = userKey ? `AI Turk #${shortUserKey(userKey)}` : "AI-Turk";
 	const tag = userKey ? `ai-turk-${userKey}` : "ai-turk";
 
 	event.waitUntil(

@@ -9,5 +9,6 @@ export function shortUserKey(key: string): string {
 
 // ── A2HS(홈스크린 설치) 라벨·탭 타이틀 조합 — userid가 포함된 앱 이름
 export function userTitle(key: string): string {
-	return `AI Turk · ${shortUserKey(key)}`;
+	// 주소창 해시(#<userKey>)와 동일 표기 — 알림→딥링크 연상 직관화
+	return `AI Turk #${shortUserKey(key)}`;
 }
