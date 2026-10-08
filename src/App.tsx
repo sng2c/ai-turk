@@ -335,7 +335,11 @@ export default function App() {
 	useEffect(() => { reflectUserKey(userKeyRef.current); }, []);
 
 	// 유저 식별 타이틀 — 탭 제목(즐겨찾기·공유 제목)을 현재 userKey로 반영 (hash 전환마다 갱신)
-	useEffect(() => { applyUserTitle(userKey); }, [userKey]);
+	useEffect(() => {
+		applyUserTitle(userKey);
+		// same-document 전환 후 엔트리 타이틀 재스냅샷 — Chrome 즐겨찾기가 커밋 시점 타이틀을 쓰는 문제 보완
+		history.replaceState(null, "", location.href);
+	}, [userKey]);
 
 	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
 	useEffect(() => {

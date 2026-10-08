@@ -34,7 +34,7 @@
         }
         if (k) {
           var id = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(k) ? k.slice(0, 8) : k; // UUID형만 축약
-          var t = "AI Turk \u00B7 " + id;
+          var t = "AI Turk #" + id; // 주소창 해시와 동일 표기 (ukey.ts userTitle과 통일)
           document.title = t;
           var m = document.querySelector('meta[name="apple-mobile-web-app-title"]');
           if (m) m.setAttribute("content", t);
