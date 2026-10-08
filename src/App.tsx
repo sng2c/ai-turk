@@ -108,9 +108,7 @@ export default function App() {
 
 	// 스트리밍 텍스트 누적 (agent_end의 messages가 비었거나 잘렸을 때 fallback용)
 	const streamingTextRef = useRef("");
-	// 파싱 실패 시 자가 수정 재시도 카운터 (무한 루프 방지)
-	const retryCountRef = useRef(0);
-	const MAX_PARSE_RETRIES = 2;
+	// 파싱 실패 자가수정은 서버 전담 (WS 유무 무관 — 위반 원문+에러 되돌려 재시도 주입) — 클라 카운터 제거
 	const answerToRef = useRef<string | null>(null); // 현재 턴의 질문 — 응답 상단 짝표시용
 	// ── 스케줄러 관련 ref ──
 	// schedulerTriggerRef: scheduler_trigger 이벤트 수신 시 설정 → 다음 agent_end 응답 message 앞에 prefix 부착
@@ -320,7 +318,6 @@ export default function App() {
 			setRestored(false);
 			setPiReady(false);
 			setLoading(false);
-			retryCountRef.current = 0;
 			streamingTextRef.current = "";
 			setState({ message: "", buttons: {} });
 			// 기존 WS 종료 — 핸들러 분리 후 close (onclose의 지연 자동재연결이 중복 소켓을 만들지 않게)
@@ -443,7 +440,6 @@ export default function App() {
 					setShowThinking(false);
 					setThinkingText(""); // dim 해제 = 클리어 (통일)
 					userSentRef.current = false; // 취소 턴 — 입력 클리어 생략(에코 유지), 이후 agent_end 오염 방지
-					retryCountRef.current = 0; // 자가수정 카운터 리셋 — 취소가 재시도로 이어지지 않게
 					schedulerPrefixRef.current = null;
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 					break;
@@ -472,7 +468,6 @@ export default function App() {
 				if (text) {
 					const result = parseTurkJSON(text);
 					if (result && "parsed" in result) {
-						retryCountRef.current = 0; // 성공 시 카운터 리셋
 						const parsed = result.parsed;
 						parsed.answerTo = answerToRef.current ?? undefined; // 짝표시 부착
 						// schedules는 서버가 agent_end에서 직접 스케줄러에 적용 (릴레이 제거 — 백그라운드 트리거 체이닝 보존)
@@ -502,7 +497,6 @@ export default function App() {
 							? parseTurkJSON(streamingTextRef.current)
 							: null;
 						if (fallback && "parsed" in fallback) {
-							retryCountRef.current = 0;
 							const parsed = fallback.parsed;
 							parsed.answerTo = answerToRef.current ?? undefined; // 짝표시 부착
 							// schedules는 서버가 agent_end에서 직접 스케줄러에 적용 (릴레이 제거 — 백그라운드 트리거 체이닝 보존)
@@ -525,27 +519,16 @@ export default function App() {
 								}
 								commit(parsed);
 							}
-						} else if (retryCountRef.current < MAX_PARSE_RETRIES) {
-							// 자가 수정 재시도: 원문 + JSON.parse 에러를 모델에게 돌려주며 형식 재요청
-							retryCountRef.current++;
-							schedulerFeedbackRef.current = null; // 피드백 캐시 클리어
-							setLoading(true);
-							const errInfo = (result && "error" in result) ? result.error
-								: (fallback && "error" in fallback) ? fallback.error : "";
-							const retry = `지난 응답이 올바른 JSON 형식이 아닙니다. JSON.parse 에러: ${errInfo}\n다음 원문을 참고하여, 동일한 내용으로 올바른 JSON 버튼 그리드 하나만 다시 출력하세요. 원문 외 설명/코드펜스 금지.\n\n[잘못된 응답]\n${text.slice(0, 800)}`;
-							sendPrompt(retry, "tool"); // AGENTS.md는 백엔드 세션에 이미 로드됨 — 재부착 불필요
 						} else {
-							retryCountRef.current = 0;
-							schedulerPrefixRef.current = null; // prefix 클리어
-							const errInfo = (result && "error" in result) ? result.error
-								: (fallback && "error" in fallback) ? fallback.error : "알 수 없는 오류";
-							commit({ ...errState(`[파싱실패] ${errInfo}\n${text.slice(0, 150)}`, gridRef.current.rows, gridRef.current.cols), answerTo: answerToRef.current ?? undefined });
+							// 자가수정은 서버 전담 (261008 — 클라 전담 시절 백그라운드 WS 끊김 턴의 위반 응답이
+							// 무보정·무기록으로 유실됨). willRetry=true agent_end에서 서버가 위반 원문+에러를
+							// 되돌려 route tool 재시도 주입 → agent_start가 이어 받아 dim 유지. 소진 시 agent_end.error로 마감.
 						}
 					}
 				} else if (!loading) {
 					// 응답 텍스트 자체가 없는 경우 (도구만 사용 등)
 					schedulerPrefixRef.current = null; // prefix 클리어
-					commit({ ...errState("응답이 비어 있습니다. 다시 시도해주세요.", gridRef.current.rows, gridRef.current.cols), answerTo: answerToRef.current ?? undefined });
+					// (빈 텍스트 응답도 서버 자가수정(그리드 정리 재시도)이 이어 처리)
 				}
 				break;
 			}

@@ -45,6 +45,7 @@ const PORT = parseInt(process.env.TURK_PORT || "3000");
 const HOST = process.env.TURK_HOST || "127.0.0.1";
 const DIST_DIR = join(__dirname, "dist");
 const MAX_SESSIONS = parseInt(process.env.TURK_MAX_SESSIONS || "5");
+const SERVER_PARSE_RETRIES = parseInt(process.env.TURK_PARSE_RETRIES || "2"); // 서버 자가수정 재시도 한도 — 응답 위반(파싱·스키마) 시 원문+에러 되돌려 교정
 
 // ── Web Push (VAPID 키 파일 영속화) — 재시작마다 키가 바뀌면 기존 구독 전부 무효(403) → 푸시 실패 ──
 const vapidPath = join(envPaths("ai-turk").data, "vapid.json");
@@ -94,6 +95,7 @@ interface Session {
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
 	lastActivity: number; // 마지막 활동 타임스탬프 (LRU 정리용)
 	currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
+	parseRetryCount: number; // 서버 자가수정(위반 응답 재시도) 카운터 — 성공·취소·신규 유저입력에서 리셋
 }
 
 
@@ -141,13 +143,19 @@ function startBackend(session: Session): void {
 			const aborted = Array.isArray((ev as any).messages) && (ev as any).messages.some((m: any) => m.role === "assistant" && m.stopReason === "aborted");
 			session.lastTurnFailed = !!(ev as any).error;
 			// 응답 파싱 — JSON Schema 1차 게이트 (스키마=법, 프롬프트=보조 교육)
-			const { parsed: respParsed, valid: respValid, errors: respErrors } = parseTurkResponse(ev);
+			const { parsed: respParsed, valid: respValid, errors: respErrors, text: respText } = parseTurkResponse(ev);
 			if (DEBUG && !respValid && respErrors) console.log(`[${session.userKey.slice(0, 8)}] [Schema] 응답 위반 → 미기록: ${respErrors.slice(0, 200)}`);
+			// 성공/취소 — 자가수정 카운터 리셋
+			if (respValid || aborted) session.parseRetryCount = 0;
+			// 위반(파싱 실패·스키마 미달·빈 텍스트) — 서버 자가수정 대상 (WS 유무 무관)
+			const violated = !session.lastTurnFailed && !aborted && !respValid;
+			const retryPlanned = violated && session.parseRetryCount < SERVER_PARSE_RETRIES;
+			if (retryPlanned) (ev as any).willRetry = true; // 클라 agent_end가 willRetry=true로 전파 — dim 유지, 주입 agent_start가 인계
 			// 취소(aborted)·스키마 위반·silent는 lastResponse 캐시에서 제외 (AGENTS.md 약속: silent = no cache) —
 			// 빈 message 등 위반 응답은 스키마 단계에서 자동 배제 → 이전 가시 화면 복원본 보존
 			if (!session.lastTurnFailed && !aborted && respValid && respParsed?.silent !== true) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; saveLastResponse(session.userKey, ev, session.lastPrompt); } // 응답↔프롬프트 짝 — 파일 영속화(lastPrompt와 대칭)
-			if (!session.lastTurnFailed) session.lastPrompt = null;
-			// 실패: lastPrompt 유지 — get_state가 재시도 에코로 전달 (실패 화면과 짝)
+			// 실패/자가수정: lastPrompt 유지 — get_state가 재시도 에코로 전달 (실패 화면과 짝); 정상 완결 턴에만 클리어
+			if (!session.lastTurnFailed && !violated) session.lastPrompt = null;
 			// schedules 배열을 서버가 응답에서 직접 스케줄러에 적용 — 클라이언트 릴레이 제거.
 			// 백그라운드(WS 끊김) 트리거에서도 체이닝 재등록이 유실되지 않게 (silent 스킵의 schedules 재등록이 사라지던 버그 수정)
 			// 결과 broadcast는 기존 클라이언트 로직이 소비 — list 자동 재주입(data.text)·오류 피드백(error)
@@ -166,6 +174,26 @@ function startBackend(session: Session): void {
 			}
 			session.scheduler.drainQueue();
 			if (session.pushSubscription) sendPushNotification(session, ev);
+			// ── 서버 자가수정 주입 (broadcast 후 — 이벤트 순서: agent_end(willRetry) → agent_start(재시도 턴)).
+			//    클라 전담 시절엔 백그라운드(WS 끊김) 턴의 위반 응답이 무보정·무기록으로 유실됨 (261008 #chn —
+			//    최종 응답 message 내 미이스케이프 따옴표 1건 → 출력버퍼 기록 누락). 소진 시 실패 확정 마감.
+			if (violated) {
+				const errInfo: string = respErrors ?? "파싱 실패";
+				if (retryPlanned) {
+					session.parseRetryCount++;
+					const guide = respText
+						? `지난 응답이 올바른 JSON 형식이 아닙니다. JSON.parse 에러: ${errInfo}\n다음 원문을 참고하여, 동일한 내용으로 올바른 JSON 버튼 그리드 하나만 다시 출력하세요. 원문 외 설명/코드펜스 금지.\n\n[잘못된 응답]\n${respText.slice(0, 800)}`
+						: "지난 턴의 출력에 JSON 버튼 그리드가 없습니다. 방금 수행한 작업 결과를 turk JSON 버튼 그리드(message+buttons)로 정리해 출력하세요. 원문 외 설명/코드펜스 금지.";
+					const dt = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric", weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+					console.log(`[${session.userKey.slice(0, 8)}] [Schema] 응답 위반 → 서버 자가수정 주입 (${session.parseRetryCount}/${SERVER_PARSE_RETRIES}): ${errInfo.slice(0, 120)}`);
+					sendToBackend(session, { type: "prompt", message: `[현재 일시: ${dt} KST]\n\n${guide}` }, { route: "tool" }); // 클라 시절 재시도 계약 동일 — route tool이라 lastPrompt 불변(짝 보존)
+				} else {
+					// 재시도 소진 — 실패 확정: lastTurnFailed(입력 에코 유지·get_state 실패 화면) + 실패 전파
+					session.lastTurnFailed = true;
+					console.log(`[${session.userKey.slice(0, 8)}] [Schema] 응답 위반 재시도 소진(${SERVER_PARSE_RETRIES}) — 실패 확정: ${errInfo.slice(0, 120)}`);
+					broadcast(session, { type: "agent_end", error: `[파싱실패] ${String(errInfo).slice(0, 200)}` });
+				}
+			}
 		}
 		// get_state 응답 보강: isStreaming 등 주입
 		// 줄단위 캐시 누적 — 재접속 소켓에 get_state 응답 직후 전달(던져주기)용
@@ -226,6 +254,7 @@ function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { 
 	// 처리중 프롬프트 기록 — 재연결/새로고침 후 get_state로 표시 (user 라우트 순수 입력만)
 	if (cmd.type === "prompt" && route === "user" && typeof cmd.userInput === "string") {
 		session.lastPrompt = cmd.userInput;
+		session.parseRetryCount = 0; // 신규 유저 턴 — 자가수정 카운터 리셋 (소진 후 재전송도 재검증)
 		saveLastPrompt(session.userKey, cmd.userInput); // 출력버퍼 영속화
 	}
 	// prompt 전송 전에 합성 agent_start broadcast — 즉시 로고 전환 + dim
@@ -255,10 +284,11 @@ function extractTextFromMessages(messages: any[]): string {
 // 응답 텍스트에서 터크 JSON 추출 후 JSON Schema 1차 게이트 검사.
 // 후보(코드펜스→greedy→첫'{') 중 스키마 유효한 것 채택 — 전부 위반 시 parsed는 보존하되 valid=false.
 // 스키마가 법: Visible/Silent 이분법·schedules 형태 위반은 소비부(캐시·push·적용)에서 일괄 배제된다.
+// errors = 마지막 후보의 오류(클라 parseTurkJSON과 동일 규칙) — 서버 자가수정 안내문에 그대로 실린다.
 function parseTurkResponse(ev: TurkEvent): { text: string; parsed: any | null; valid: boolean; errors?: string } {
 	const messages = (ev as any).messages;
 	const text = Array.isArray(messages) ? extractTextFromMessages(messages) : "";
-	if (!text) return { text: "", parsed: null, valid: false };
+	if (!text) return { text: "", parsed: null, valid: false, errors: "최종 출력 텍스트 없음(도구만)" };
 	const candidates: string[] = [];
 	const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
 	if (fence) candidates.push(fence[1]);
@@ -266,7 +296,7 @@ function parseTurkResponse(ev: TurkEvent): { text: string; parsed: any | null; v
 	if (greedy) candidates.push(greedy[0]);
 	const firstBrace = text.indexOf("{");
 	if (firstBrace !== -1) candidates.push(text.slice(firstBrace));
-	let firstParsed: any = null, firstErrors: string | undefined;
+	let firstParsed: any = null, lastError: string | undefined;
 	for (const raw of candidates) {
 		const s = raw.trim();
 		if (!s) continue;
@@ -274,10 +304,13 @@ function parseTurkResponse(ev: TurkEvent): { text: string; parsed: any | null; v
 			const obj = JSON.parse(s);
 			const v = validateTurkResponse(obj);
 			if (v.ok) return { text, parsed: obj, valid: true };
-			if (firstParsed === null) { firstParsed = obj; firstErrors = v.errors; }
-		} catch { /* 다음 후보 */ }
+			if (firstParsed === null) firstParsed = obj;
+			lastError = v.errors ?? "schema violation"; // JSON Schema 1차 게이트
+		} catch (e) {
+			lastError = e instanceof Error ? e.message : String(e);
+		}
 	}
-	return { text, parsed: firstParsed, valid: false, errors: firstErrors };
+	return { text, parsed: firstParsed, valid: false, errors: lastError ?? "파싱 실패" };
 }
 
 function sendPushNotification(session: Session, ev: TurkEvent): void {
@@ -396,6 +429,7 @@ function createSession(userKey: string): Session {
 		isStreaming: false,
 		lastActivity: Date.now(),
 		currentRoute: "user",
+		parseRetryCount: 0,
 		thinkingBuf: "",
 		textBuf: "",
 	};

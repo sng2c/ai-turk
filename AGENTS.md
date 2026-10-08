@@ -162,7 +162,7 @@ turkctl build     # Production build → dist/
 |---|---|---|
 | `🔴 Disconnected` | Server not running | `turkctl start` |
 | `🟡 pi Starting` | Waiting for backend process | Wait a few seconds, or run `turkctl pi` |
-| `[Parsing Failed]` | Model outputs non-JSON text | Auto-recovers via self-correction (max 2 attempts) |
+| `[Parsing Failed]` | Model outputs non-JSON text | Server auto-corrects: injects retry (original + error, max 2) regardless of WS state |
 | `EADDRINUSE` | Port conflict | `turkctl restart` |
 | Build Failure | TypeScript error | `npx tsc -b --noEmit` |
 | CSS not reflected | HMR cache corruption | `turkctl restart` |
