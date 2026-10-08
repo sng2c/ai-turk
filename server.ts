@@ -318,8 +318,8 @@ function sendPushNotification(session: Session, ev: TurkEvent): void {
 	if (!text) return;
 	// 스키마 유효 + Visible 응답만 푸시 — Silent·위반(빈 message 등)은 폐기
 	if (!valid || parsed?.silent === true) return;
-	// 전체 text 전송 + sessionId → sw.js가 IndexedDB 저장에 사용
-	const payload = JSON.stringify({ body: text, sessionId: session.agentSessionId || "", url: "/#" + session.userKey });
+	// 전체 text + sessionId + userKey 전송 — sw.js가 userKey로 tag·억제·클릭 포커스를 키별 구분
+	const payload = JSON.stringify({ body: text, sessionId: session.agentSessionId || "", url: "/#" + session.userKey, userKey: session.userKey });
 	webpush.sendNotification(session.pushSubscription, payload)
 		.then(() => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 성공`))
 	.catch((err: any) => {
