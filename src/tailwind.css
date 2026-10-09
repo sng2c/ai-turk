@@ -754,11 +754,17 @@ body {
 		padding-bottom: 0.571rem; /* 기본 하단 패딩 */
 	}
 	.turk-message-wrap {
-		flex: 1 1 auto; /* 남은 공간 채움 */
+		flex: 7 7 0%; /* 출력창 70% */
 		max-height: none;
+		min-height: 0;
 	}
 	.turk-grid {
-		flex: 0 0 auto; /* fit content — 그리드 바로 밑에 입력창 */
+		flex: 3 3 0%; /* 버튼 30% — 출력창과 7:3 */
+		grid-auto-rows: minmax(0, 1fr); /* 행 = 30% 영역 균등 분할 */
+		align-content: stretch;
+	}
+	.turk-grid-btn {
+		aspect-ratio: auto; /* 정사각 해제 — 세로는 30% 영역에 맞춤 (4행 정사각이 30%를 초과해 잘리는 것 방지) */
 	}
 	.turk-input-form {
 		position: relative;
