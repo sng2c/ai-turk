@@ -924,12 +924,13 @@ export default function App() {
 			}
 			return;
 		}
-		if (text === "/new") {
+		if (text === "/compact") {
 			const ws = wsRef.current;
+			if (loading) { setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
 			if (ws?.readyState === WebSocket.OPEN) {
-				ws.send(JSON.stringify({ type: "restart_pi" }));
-
-				setState(emptyState(gridRef.current.rows, gridRef.current.cols));
+				ws.send(JSON.stringify({ type: "compact" }));
+				setThinkingText("🧹 컴팩트 진행 중..."); // 상태 레이어
+				setLoading(true); // dim 즉시 — compaction_start 이벤트 전 구간 커버
 			}
 			return;
 		}
@@ -950,14 +951,6 @@ export default function App() {
 				return;
 			}
 			prevStateRef.current = null;
-			if (text === "🆕 새 세션") {
-				const ws = wsRef.current;
-				if (ws?.readyState === WebSocket.OPEN) {
-					ws.send(JSON.stringify({ type: "restart_pi" }));
-					setState(emptyState(gridRef.current.rows, gridRef.current.cols));
-				}
-				return;
-			}
 			if (text === "🧹 컴팩트") {
 				const ws = wsRef.current;
 				if (loading) { setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
@@ -1075,10 +1068,10 @@ export default function App() {
 				const pct = contextPct != null ? `${Math.round(contextPct)}%` : "—";
 				// 모델 선택 메뉴와 동일 레이아웃: 액션 칸 + 마지막 칸 취소(destructive)
 				const btns: Record<string, string> = Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""]));
-				btns["0"] = "🆕 새 세션"; btns["1"] = "🧹 컴팩트"; btns[String(DEFAULT_ROWS * DEFAULT_COLS - 1)] = "취소";
+				btns["0"] = "🧹 컴팩트"; btns[String(DEFAULT_ROWS * DEFAULT_COLS - 1)] = "취소";
 				const last = String(DEFAULT_ROWS * DEFAULT_COLS - 1);
-				setState({ message: `**사용률:** \`${pct}\`\n\n작업을 선택하세요 — 새 세션은 대화를 새로 시작(컨텍스트 비움), 컴팩트는 대화를 유지한 채 오래된 내용을 요약합니다(컨텍스트 축소).`, buttons: btns, colors: { [last]: "destructive" }, textColors: { [last]: "white" }, answerTo: "컨텍스트" }); // 제목은 짝박스 위치
-			}} title={`컨텍스트 ${contextPct ?? "—"}% — 새 세션/컴팩트`}>
+				setState({ message: `**사용률:** \`${pct}\`\n\n컴팩트 — 대화를 유지한 채 오래된 내용을 요약합니다 (컨텍스트 축소·되돌릴 수 없음).`, buttons: btns, colors: { [last]: "destructive" }, textColors: { [last]: "white" }, answerTo: "컨텍스트" }); // 제목은 짝박스 위치
+			}} title={`컨텍스트 ${contextPct ?? "—"}% — 컴팩트`}>
 					{contextPct != null ? (
 						<span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, contextPct))}%`, background: contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)" }} /><span className="turk-ctx-pct">{Math.round(contextPct)}%</span></span></span>
 						) : <span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: "0%" }} /><span className="turk-ctx-pct">—</span></span></span>}

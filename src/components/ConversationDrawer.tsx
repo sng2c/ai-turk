@@ -65,7 +65,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 
 	// ── 전환·신규 — 해시 갱신 → App의 hashchange→풀리로드 계약 (신규 전환 코드 없음) ──
 	const switchTo = (id: string) => { location.hash = "#" + encodeURIComponent(id); };
-	const newConversation = () => { location.hash = "#" + crypto.randomUUID(); }; // 기존 "🆕 새 세션"(restart_pi)과 다른 유저키 해시 신규 대화
+	const newConversation = () => { location.hash = "#" + crypto.randomUUID(); }; // restart_pi(컨텍스트 리셋)와 무관 — userKey 해시 자체가 새 대화
 
 	// ── 이름 변경 — 인라인 입력 전환 ──
 	const [renameId, setRenameId] = useState<string | null>(null);
