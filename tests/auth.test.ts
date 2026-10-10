@@ -188,6 +188,7 @@ const firstMsg = (ws: any) => ws.sent[0] as Record<string, any> | undefined;
 		checkConversation(username: string, userKey: string): "own" | "orphan" | "foreign";
 		claimConversation(username: string, userKey: string): boolean;
 		listOwnedKeys(username: string): string[];
+		accountEnv(userKey: string): Record<string, string>; // 4c-refit — 계정 env 수령 계약 (이 스코프 테스트는 env 미사용 — 빈 객체 고정)
 	}
 	// alice만 사용자 — own-key는 원래 소유, orphan-key는 무주(claim 대상), foreign-key는 남의 소유 시뮬레이션
 	const owned = new Set<string>(["own-key"]);
@@ -202,6 +203,7 @@ const firstMsg = (ws: any) => ws.sent[0] as Record<string, any> | undefined;
 		},
 		claimConversation: (username, userKey) => { claims.push(`${username}/${userKey}`); owned.add(userKey); return true; },
 		listOwnedKeys: (username) => (username === "alice" ? [...owned] : []),
+		accountEnv: () => ({}),
 	};
 	function newCore(auth?: StubAuth) {
 		const backends: FakeBackend[] = [];

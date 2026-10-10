@@ -44,7 +44,7 @@ export interface BackendOptions {
 	cwd: string;
 	onLog?: (msg: string) => void;
 	userKey?: string; // 세션 ID(pi --session-id) — 영속 세션. Claude 백엔드는 무시.
-	workspaceEnv?: Record<string, string>; // 대화별 환경변수 (Phase 4c) — env-store 판독을 세션 코어가 주입. 값은 로그·이벤트로 노출 금지
+	workspaceEnv?: Record<string, string>; // 계정별 환경변수 (4c-refit) — 세션 코어가 authorize.accountEnv 계약으로 수령해 주입 (동일 계정 대화들이 공유). 값은 로그·이벤트로 노출 금지
 }
 
 // ── 공통: JSONL stdout 파서 ─────────────────────────────────────────

@@ -38,7 +38,7 @@ export function ensureAgentsMd(path: string, log: (msg: string) => void = consol
 	}
 }
 
-// ── 환경변수 섹션 갱신 (Phase 4c) — AGENTS.md의 `<!-- env:section -->` … `<!-- /env:section -->` 사이를 교체.
+// ── 환경변수 섹션 갱신 (4c-refit 계정 스코프) — AGENTS.md의 `<!-- env:section -->` … `<!-- /env:section -->` 사이를 교체.
 //    마커가 없으면(커스텀·레거시) 문서 말미에 섹션째 추가. 내용이 바뀔 때만 write — 불변 호출은 no-op
 //    (pi의 AGENTS.md 감시 오동작 방지). 섹션에는 키 이름 목록만 기록하고 값은 절대 문서화하지 않는다 (env-store 계약).
 
@@ -47,9 +47,9 @@ function buildEnvSection(keys: string[]): string {
 	const sorted = [...keys].sort();
 	const names = sorted.length > 0 ? sorted.map((k) => `- ${k}`).join("\n") : "- (none configured)";
 	return [
-		"## Conversation environment variables",
+		"## Account environment variables",
 		"",
-		"Secret values for this conversation are injected into your process environment by the system. This document lists NAMES ONLY — never values.",
+		"Secret values for your account are injected into your process environment by the system — every conversation of the account shares the same set. This document lists NAMES ONLY — never values.",
 		"",
 		"Contract:",
 		"1. For commands that need credentials/tokens, reference the variable as $NAME in your bash command (also valid as command arguments). NEVER print, echo, copy, or transmit the values — not even in your response.",

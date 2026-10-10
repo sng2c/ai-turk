@@ -24,11 +24,13 @@ import envPaths from "env-paths";
 const DATA_DIR = envPaths("ai-turk").data;
 
 // ── 계정 저장소 (users.json) ────────────────────────────────────────────
-// 스키마: { "accounts": { [username]: { salt, hash, userKeys, createdAt } } }
+// 스키마: { "accounts": { [username]: { salt, hash, userKeys, env?, createdAt } } }
 export interface UserAccount {
 	salt: string; // hex — randomBytes(16)
 	hash: string; // hex — scryptSync 64바이트
 	userKeys: string[]; // 소유 대화(userKey) 목록 — 레지스트리 계정 경계
+	env?: Record<string, string>; // 계정별 환경변수 (4c-refit) — 키의 주인 = 사람 = 계정. env-store.ts가 관리자,
+	// 이 필드의 값은 이 모듈 accountEnv(userKey) 주입 경로로만 읽힌다 (응답·로그·목록 어디에도 값 미반환)
 	createdAt: number;
 }
 export interface UsersFile {
@@ -324,6 +326,32 @@ export interface Authorizer {
 	claimConversation(username: string, userKey: string): boolean;
 	releaseConversation(username: string, userKey: string): boolean; // Phase 4a — 소유 해제 (server.ts DELETE 라우트가 소비 — 소유권 판정·claim·해제 삼형제 완결)
 	listOwnedKeys(username: string): string[];
+	/** 4c-refit — userKey 소유 계정의 env (세션 코어에게 주입 전용). 미소유·고아 → {} — 값은 백엔드 spawn 프로세스 환경으로만 흐른다. */
+	accountEnv(userKey: string): Record<string, string>;
+}
+
+/** userKey의 소유자 계정 username | null (users.json 1회 판독 역색인) — env-store 마이그레이션·accountEnv 공용 진원. */
+export function ownerOfUserKey(userKey: string): string | null {
+	for (const [name, acc] of Object.entries(loadUsers().accounts)) {
+		if (Array.isArray(acc.userKeys) && acc.userKeys.includes(userKey)) return name;
+	}
+	return null; // 미소유·고아
+}
+
+/** 4c-refit — userKey 소유 계정의 환경변수 (세션 코어 주입 경로 유일). users.json 1회 판독으로 유저 역색인 후
+ *  acc.env를 문자열-방어 복사로 반환. 미소유·고아·계정 미보유 → {}. 값은 createBackend spawn 프로세스 환경으로만
+ *  흐른다 — 응답·목록·로그 어디에도 미출력 (env-store 이름-반환 계약과 짝). 여기서 env-store을 import하지 않는다
+ *  (auth↔env-store 순환 방지 — 방어 복사 4줄의 이중 구현이 순환보다 싸다). */
+function accountEnvOf(userKey: string): Record<string, string> {
+	const owner = ownerOfUserKey(userKey);
+	if (!owner) return {};
+	const env = loadUsers().accounts[owner]?.env;
+	if (!env || typeof env !== "object") return {};
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(env)) {
+		if (typeof v === "string") out[k] = v; // 문자열 쌍만 — 타입 오염 방어 (hand-edit 포함)
+	}
+	return out;
 }
 
 /** 쿠키(turk_auth) → JWT 검증 → username | null. 쿠키 헤더 없으면 null (검증 오류도 null). */
@@ -341,6 +369,7 @@ export function createAuthorizer(): Authorizer {
 		claimConversation,
 		releaseConversation,
 		listOwnedKeys: ownedKeysOf,
+		accountEnv: accountEnvOf,
 	};
 }
 

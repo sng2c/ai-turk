@@ -16,7 +16,7 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
-import { listConversationEnvKeys, setConversationEnv, deleteConversationEnvKey } from "./env-store.ts"; // Phase 4c — 대화별 환경변수 (이름 목록·upsert·멱듬 삭제 — 값 반환 경로 없음)
+import { listAccountEnvKeys, setAccountEnv, deleteAccountEnvKey, isEnvKeyName, migrateConversationEnvToAccounts } from "./env-store.ts"; // 4c-refit — 계정별 환경변수 (이름 목록·upsert·멱듬 삭제·구 대화 env.json 이관 — 값은 주입 계통에만)
 import { createAuthorizer, attemptLogin, clearCookie, changePassword, reconcileUsersWithDisk } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경 · reconcileUsersWithDisk는 Phase 4a 부팅 잔여키 대사
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -186,45 +186,45 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		return;
 	}
 
-	// ── 대화별 환경변수 관리 (Phase 4c) — GET(이름만)·POST(upsert)·DELETE(멱등) ──
+	// ── 계정별 환경변수 관리 (4c-refit) — GET(이름만)·POST(upsert)·DELETE(멱듬) ──
 	// AUTH off → 404 (계약: dev 무인증 환경은 관리 API 없음 — vite 미배선과 동일 위임).
-	// 값은 절대 응답·로그에 노출하지 않는다 — GET은 이름 목록만 (env-store 계약: 값을 반환하는 경로가 존재하지 않음).
-	// 소유권 own만 = Phase 3 대화관리 PATCH/DELETE 계약 재사용 — 세션 코어는 authorize를 모르므로 라우트가 전담 (주석 고정).
-	// 순서 계약: ①decode+형식검증 → ②쿠키 인증 → ③소유 own만 (fs 경로조작 방어).
+	// 값은 절대 응답·로그에 노출하지 않는다 — GET은 이름 목록만 (env-store 계약).
+	// 키의 주인 = 계정: userKey 매개변수·대화 소유권 검사 불필요 — 쿠키 인증만으로 쿠키 계정의 env를 다룬다 (타 계정 도달 불가).
+	// 순서 계약: ①형식 (DELETE 세그먼트 env 키 규칙·예약 검증) → ②쿠키 인증.
+	const ENV_PATH = "/api/env";
 	const ENV_PREFIX = "/api/env/";
-	if (url.pathname.startsWith(ENV_PREFIX)) {
+	if (url.pathname === ENV_PATH || url.pathname.startsWith(ENV_PREFIX)) {
 		if (!AUTH) { res.writeHead(404, JSONH); res.end(JSON.stringify({ error: "인증 비활성" })); return; }
-		let rest = "";
-		try { rest = decodeURIComponent(url.pathname.slice(ENV_PREFIX.length)); } // 대화 키·ENV_KEY %인코딩 복원
-		catch { rest = ""; } // 깨진 %시퀀스 — 빈값으로 형식 위반 처리
-		const slash = rest.indexOf("/");
-		const id = slash === -1 ? rest : rest.slice(0, slash); // userKey 형식상 "/" 불허 — 첫 세그먼트가 곧 대화 키
-		const envKey = slash === -1 ? null : rest.slice(slash + 1);
-		// ① 경로 형태·형식 — GET·POST는 세그먼트 1(<userKey>), DELETE는 2(<userKey>/<ENV_KEY>)
-		const badShape = (req.method === "DELETE" && (envKey === null || envKey.length === 0))
-			|| (req.method !== "DELETE" && envKey !== null);
-		if (badShape || !verifyUserKeyFormat(id)) { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "경로 형식이 올바르지 않습니다" })); return; }
+		// ① GET·POST는 정확 경로만 / DELETE 세그먼트는 env 키 규칙·예약 검증 (전체 세그먼트가 곧 하나의 키 — 슬래시 불허)
+		let envKey = "";
+		if (req.method === "DELETE") {
+			try { envKey = decodeURIComponent(url.pathname.slice(ENV_PREFIX.length)); } // ENV_KEY %인코딩 복원
+			catch { envKey = ""; } // 깨진 %시퀀스 — 빈값으로 규칙 위반 처리
+		} else if (url.pathname !== ENV_PATH) {
+			res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "경로 형식이 올바르지 않습니다" })); return;
+		}
+		if (req.method === "DELETE" && !isEnvKeyName(envKey)) { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "환경변수 키 형식이 올바르지 않습니다" })); return; }
+		// ② 쿠키 인증 — 성공하면 username이 곧 저장소 스코프
 		const user = auth ? await auth.authorizeRequest(req) : null;
-		if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; } // ②
-		if (auth?.checkConversation(user, id) !== "own") { res.writeHead(403, JSONH); res.end(JSON.stringify({ error: "권한 없음" })); return; } // ③ orphan·foreign 배제
+		if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; }
 		if (req.method === "GET") {
 			// 이름 목록만 반환 — 값은 이 API 체계 어디에도 존재하지 않는다
 			res.writeHead(200, { ...JSONH, "Cache-Control": "no-store" });
-			res.end(JSON.stringify({ keys: listConversationEnvKeys(id) }));
+			res.end(JSON.stringify({ keys: listAccountEnvKeys(user) }));
 			return;
 		}
 		if (req.method === "POST") {
 			let key: unknown = null, value: unknown = null;
 			try { const body = JSON.parse(await readBody(req)); key = body?.key; value = body?.value; } catch { /* 파싱 실패 — 아래 형식 검증으로 400 */ }
 			if (typeof key !== "string" || typeof value !== "string") { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "key·value는 문자열이 필요합니다" })); return; }
-			const r = setConversationEnv(id, key, value); // 규칙·예약·상한 검증은 env-store 단일 진원
+			const r = setAccountEnv(user, key, value); // 규칙·예약·상한 검증은 env-store 단일 진원
 			if (!r.ok) { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: r.error })); return; }
 			res.writeHead(200, { ...JSONH, "Cache-Control": "no-store" });
 			res.end(JSON.stringify({ ok: true, next: "다음 백엔드 재할당부터 적용" }));
 			return;
 		}
-		// DELETE — 멱등 (미존재 ENV_KEY도 ok). false = fs 저장 실패뿐
-		if (!deleteConversationEnvKey(id, envKey as string)) { res.writeHead(500, JSONH); res.end(JSON.stringify({ error: "삭제 실패" })); return; }
+		// DELETE — 멱등 (미존재 ENV_KEY도 ok). false = 계정 미존재·fs 저장 실패뿐
+		if (!deleteAccountEnvKey(user, envKey)) { res.writeHead(500, JSONH); res.end(JSON.stringify({ error: "삭제 실패" })); return; }
 		res.writeHead(200, { ...JSONH, "Cache-Control": "no-store" });
 		res.end(JSON.stringify({ ok: true }));
 		return;
@@ -373,6 +373,10 @@ process.on("SIGINT", () => {
 if (AUTH) {
 	const dropped = reconcileUsersWithDisk();
 	if (dropped > 0) console.log(`[Turk] 잔여키 대사: ${dropped}개 탈락 (삭제된 대화의 소유 등록)`);
+	// 4c-refit — 구 대화 env.json → 계정 env 이관 (add-if-absent·계정 승리·고아 미병합·파일 유지).
+	// 구 파일·값에 점촉하는 것은 이 호출이 유일 — 부팅 후 대화 경로에서는 계정 env로만 흐른다.
+	const migrated = migrateConversationEnvToAccounts();
+	if (migrated > 0) console.log(`[Turk] 대화 env 마이그레이션: ${migrated}개 키를 계정 env로 이관`); // 개수만 — 값 미출력
 }
 
 // ── 시작 ──────────────────────────────────────────────────────────────────

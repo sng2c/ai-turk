@@ -11,9 +11,10 @@
  * AUTH off(dev): /api/me·PATCH/DELETE·/api/passwd·/api/env 서버가 404 응답(계약) → 계정 섹션은 username 응답이
  * 없어 자동 숨김, 액션은 실패 후 목록 갱신으로 무해 수렴. dev에서 개별 API가 없는 것은 의도된 위임 계약.
  *
- * 환경 모달(Phase 4c): 값은 절대 화면에 표시하지 않는다 — GET /api/env 는 이름 목록만 주고, 값 입력란은
- * masked(password 스타일). 저장·삭제 후 목록 갱신 + "다음 백엔드 재할당부터 적용" 고정 안내.
- */
+ * 환경 모달(4c-refit — 계정 스코프): 값은 절대 화면에 표시하지 않는다 — GET /api/env 는 이름 목록만 주고, 값 입력란은
+ * masked(password 스타일). 키의 주인은 계정 — 브라우저가 userKey를 보내지 않고(쿠키 계정 귀속), 현재 대화와 무관하게
+ * 언제든 열고 수정. 저장·삭제 후 목록 갱신 + "다음 백엔드 재할당부터 적용" 고정 안내.
+ *///
 
 import { useCallback, useEffect, useState } from "react";
 import { Plus, Pencil, Trash2, User, KeyRound, LogOut, X } from "lucide-react";
@@ -151,7 +152,8 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 		setPwBusy(false);
 	};
 
-	// ── 환경 변수 모달 (Phase 4c) — AUTH on(username 응답)일 때만 풋터 버튼이 렌더되는 기능.
+	// ── 환경 변수 모달 (4c-refit — 계정 스코프) — AUTH on(username 응답)일 때만 풋터 버튼이 렌더되는 기능.
+	// 이름의 주인은 계정 — 데이터 소스는 쿠키 계정(env 전체), userKey는 브라우저에서 보내지 않는다.
 	// 목록은 이름만, 값은 절대 화면에 표시하지 않는다 (입력란 masked). 서버(env-store)가 규칙·예약·상한 검증의 단일 진원.
 	const [envOpen, setEnvOpen] = useState(false);
 	const [envKeys, setEnvKeys] = useState<string[]>([]); // 이름만 — 값을 다루는 상태는 존재하지 않음
@@ -159,18 +161,17 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 	const [envValueInput, setEnvValueInput] = useState("");
 	const [envBusy, setEnvBusy] = useState(false);
 	const [envMsg, setEnvMsg] = useState("");
-	const envTitle = convs.find((c) => c.id === userKey)?.title || shortUserKey(userKey); // 모달 제목 — 현재 대화 별명/키
 
 	const refreshEnvKeys = useCallback(async () => {
 		try {
-			const r = await fetch(`/api/env/${encodeURIComponent(userKey)}`);
+			const r = await fetch("/api/env"); // 쿠키 계정의 env — userKey 매개변수 없음 (계정 스코프 계약)
 			if (!r.ok) return;
 			const j: unknown = await r.json();
 			if (j && typeof j === "object" && Array.isArray((j as { keys?: unknown }).keys)) {
 				setEnvKeys((j as { keys: string[] }).keys.filter((k) => typeof k === "string"));
 			}
 		} catch { /* 무시 — 재오픈·다음 액션이 재시도 */ }
-	}, [userKey]);
+	}, []);
 
 	const openEnvModal = () => {
 		setEnvKeyInput(""); setEnvValueInput(""); setEnvMsg("");
@@ -185,7 +186,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 		if (!key) { setEnvMsg("키(KEY)를 입력하세요"); return; }
 		setEnvMsg(""); setEnvBusy(true);
 		try {
-			const r = await fetch(`/api/env/${encodeURIComponent(userKey)}`, {
+			const r = await fetch("/api/env", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ key, value: envValueInput }),
@@ -203,7 +204,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 		if (envBusy) return;
 		setEnvBusy(true);
 		try {
-			await fetch(`/api/env/${encodeURIComponent(userKey)}/${encodeURIComponent(k)}`, { method: "DELETE" });
+			await fetch(`/api/env/${encodeURIComponent(k)}`, { method: "DELETE" });
 			refreshEnvKeys();
 		} catch { /* 무시 */ }
 		setEnvBusy(false);
@@ -280,12 +281,13 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 					</div>
 				)}
 
-				{/* 환경 변수 모달 (Phase 4c) — 비번 모달 톤 계승. 목록=이름만 · 값 입력 = masked · 적용 시점 고정 안내 */}
+				{/* 환경 변수 모달 (4c-refit — 계정 스코프) — 비번 모달 톤 계승. 목록=이름만 · 값 입력 = masked · 적용 시점 고정 안내
+					현재 대화와 무관하게 언제든 열고 수정 — 저장은 쿠키 계정에 귀속 (푸터 버튼도 계정 섹션 그대로) */}
 				{envOpen && (
 					<div className="turk-env-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeEnvModal(); }}>
 						<div className="turk-env-card" role="dialog" aria-label="환경 변수 설정">
 							<header className="turk-drawer-pw-head">
-								<span>환경 변수 — {envTitle}</span>
+								<span>환경 변수 — {me}</span>
 								<button className="turk-drawer-icon-btn" onClick={closeEnvModal} title="닫기"><X className="turk-ico" /></button>
 							</header>
 							<div className="turk-env-list">
