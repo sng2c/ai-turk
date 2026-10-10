@@ -387,12 +387,14 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	// backend.send 가로채서 route 추적
 	function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { route?: "user" | "scheduler" | "tool" }): void {
 		const route = (opts?.route ?? cmd.route ?? "user") as "user" | "scheduler" | "tool";
-		// 프롬프트 발화는 백엔드 수요지점(스케줄러 트리거·WS 프롬프트 공용) — 발화 전 멱등 할당.
-		// cap 초과 거부 시: agent_start/isStreaming 설정 없이 에러 agent_end broadcast로 마감.
-		if (cmd.type === "prompt") {
+		// 프롬프트·컴팩트는 백엔드 수요지점(스케줄러 트리거·WS 프롬프트·컴팩트 공용) — 발화/실행 전 멱등 할당.
+		// 컴팩트 미게이트는 실장애(261010): dormant 세션에서 무음 소실 → UI '진행 중' 사장.
+		// cap 초과 거부 시: agent_start/isStreaming 설정 없이 에러 응답을 클라가 해듑하는 형태로 마감.
+		if (cmd.type === "prompt" || cmd.type === "compact") {
 			if (!ensureBackend(session)) {
-				console.log(`[${session.userKey.slice(0, 8)}] [Pool] 백엔드 초과 — 프롬프트 거부 (활성 ${activeBackendCount()}/${MAX_BACKENDS})`);
-				broadcast(session, { type: "agent_end", error: "최대 백엔드 초과 — 활성 세션이 가득 찼습니다. 잠시 후 다시 시도해 주세요." });
+				console.log(`[${session.userKey.slice(0, 8)}] [Pool] 백엔드 초과 — ${cmd.type} 거부 (활성 ${activeBackendCount()}/${MAX_BACKENDS})`);
+				if (cmd.type === "compact") broadcast(session, { type: "response", command: "compact", success: false, error: "최대 백엔드 초과 — 잠시 후 다시 시도해 주세요" });
+				else broadcast(session, { type: "agent_end", error: "최대 백엔드 초과 — 활성 세션이 가득 찼습니다. 잠시 후 다시 시도해 주세요." });
 				return;
 			}
 			session.lastActivity = Date.now(); // 발화 = 활동 — 유휴 회수 임계 갱신
