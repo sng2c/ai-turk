@@ -42,3 +42,4 @@ drafts/
 *.bak.*
 .diag-restart.mjs
 gamebook/
+.last-deploy

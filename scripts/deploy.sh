@@ -38,27 +38,31 @@ fi
 # ── 1. 리포 루트 기준 실행 ──
 cd "$(dirname "$0")/.."
 
-# ── 2. 원격 갱신 확인 ──
+# ── 2. 원격 갱신 확인 — 배포 마커(.last-deploy) 기준 ──
+# HEAD가 아니라 "마지막으로 빌드까지 완료된 커밋" 마커로 판정한다 — 테스트 레드로 pull 후 중단된
+# 배포(HEAD==origin이지만 미빌드)가 다음 주기에 "이미 최신"으로 영구 스킵되는 결함 방지.
 git fetch origin main --quiet
-OLD=$(git rev-parse HEAD)
 NEW=$(git rev-parse origin/main)
-
-if [ "$OLD" = "$NEW" ]; then
+OLD=$(git rev-parse HEAD)
+LAST=$(cat .last-deploy 2>/dev/null || true)
+if [ -n "$LAST" ] && [ "$NEW" = "$LAST" ]; then
   if [ "$AUTO" = 1 ]; then
-    exit 0   # 갱신 없음 — 조용히 종료 (로그 불남김)
+    exit 0   # 이미 배포됨 — 조용히 종료 (로그 불남김)
   fi
-  echo "이미 최신 (${OLD:0:7}) — 배포할 변경 없음"
+  echo "이미 배포됨 (${NEW:0:7}) — 변경 없음"
   exit 0
 fi
 
 # ── 3. fast-forward 풀 (다이버전트면 수동 개입 필요) ──
 if ! git pull --ff-only origin main; then
-  echo "에러: fast-forward 불가 (로컬·원격 다이버전트) — 수동 개입 후 재실행" >&2
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] 에러: fast-forward 불가 (로컬·원격 다이버전트) — 수동 개입 후 재실행" >&2
   exit 1
 fi
 
-# ── 4. 변경 파일 목록 ──
-CHANGED=$(git diff --name-only "$OLD" "$NEW")
+# ── 4. 변경 파일 목록 — 마커(없으면 직전 HEAD) 기준: 중단됐던 배포분까지 포함해야
+#    재시작 판정이 server.ts 누락분을 놓치지 않는다 (BASE..NEW = 미배포 전체) ──
+BASE="${LAST:-$OLD}"
+CHANGED=$(git diff --name-only "$BASE" "$NEW")
 
 # ── 5. 의존성 갱신 — lock이 바뀐 경우에만 ──
 if grep -q "package-lock.json" <<<"$CHANGED"; then
@@ -69,7 +73,7 @@ fi
 # 레드면 여기서 중단 — 러닝 프로세스는 아직 구코드(이전 빌드)로 구동 중이라 무사.
 # 다음 배포 주기(또는 수동 재실행)에 자연 재시도된다.
 if ! npm test; then
-  echo "에러: 테스트 레드 — 배포 중단 (러닝 프로세스는 구코드 유지, 무사)" >&2
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] 에러: 테스트 레드 — 배포 중단 (러닝 프로세스는 구코드 유지·마커 미기록 → 다음 주기 자동 재시도)" >&2
   exit 1
 fi
 
@@ -89,8 +93,9 @@ if grep -Eq "$WATCH" <<<"$CHANGED"; then
   fi
 fi
 
-# ── 9. 완료 로그 ──
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] 배포 완료: ${OLD:0:7} → ${NEW:0:7}"
-echo "  변경 $(wc -l <<<"$CHANGED")건:"
-sed 's/^/    /' <<<"$CHANGED"
+# ── 9. 완료 — 마커 기록 (여기까지 도달해야 "배포됨": pull≠배포 분리의 핵심) ──
+echo "$NEW" > .last-deploy
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 배포 완료: ${BASE:0:7} → ${NEW:0:7}"
+echo "  변경 $(grep -c . <<<"$CHANGED" || true)건:"
+[ -n "$CHANGED" ] && sed 's/^/    /' <<<"$CHANGED"
 echo "  재시작: $RESTART"
