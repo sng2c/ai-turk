@@ -145,6 +145,16 @@ TURK_ENV_FILE=.env.8004 turkctl logs
 
 > `--env` / `TURK_ENV_FILE` 생략 시 기본 `.env` 사용 (포트 3000).
 
+## 배포 (자동화)
+
+`scripts/deploy.sh` — cron이 5분마다 원격 확인 후 자동 배포:
+
+```
+*/5 * * * * cd <repo> && ./scripts/deploy.sh --auto >> deploy.log 2>&1
+```
+
+절차: pull → 의존성 갱신(lockfile 변경시) → **테스트 게이트** (레드면 배포 중단 — 러닝 프로세스는 구코드로 구동 유지) → 빌드 → 서버/설정 파일이 바뀐 경우에만 PM2 재시작 (UI 전용 변경은 빌드 즉시 반영).
+
 ## 더 보기
 
 - [GitHub 저장소](https://github.com/sng2c/ai-turk) (branch: `node-react`)
