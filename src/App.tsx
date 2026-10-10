@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
-	TURK_USER_KEY, resolveUserKey, reflectUserKey, applyUserTitle,
+	TURK_USER_KEY, resolveUserKey, reflectUserKey,
 	emptyState, errState, extractAssistantText, parseTurkJSON,
 	ensurePush, discardPush, Md,
 } from "./lib/turk";
@@ -325,12 +325,7 @@ export default function App() {
 	// 최초 진입 userKey를 URL hash에 반영 — 발급키도 주소로 식별 (#<키> 편집 = 멀티탭 멀티 userKey, 주소 복사 = 공유)
 	useEffect(() => { reflectUserKey(userKeyRef.current); }, []);
 
-	// 유저 식별 타이틀 — 탭 제목(즐겨찾기·공유 제목)을 현재 userKey로 반영 (hash 전환마다 갱신)
-	useEffect(() => {
-		applyUserTitle(userKey);
-		// same-document 전환 후 엔트리 타이틀 재스냅샷 — Chrome 즐겨찾기가 커밋 시점 타이틀을 쓰는 문제 보완
-		history.replaceState(null, "", location.href);
-	}, [userKey]);
+	// 탭 타이틀은 부트 스크립트(index.html)가 "AI Turk"로 고정 (261010 — 루트 즐겨찾기·채널명 타이틀 제거)
 
 	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
 	useEffect(() => {

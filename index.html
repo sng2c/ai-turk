@@ -33,13 +33,8 @@
           if (!k) { k = (crypto.randomUUID && crypto.randomUUID()) || uuidv4Safe(); localStorage.setItem("turk-user-key", k); }
           history.pushState(null, "", "#" + encodeURIComponent(k)); // 주소창·즐겨찾기에 userid 반영 (React 마운트 전)
         }
-        if (k) {
-          var id = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(k) ? k.slice(0, 8) : k; // UUID형만 축약
-          var t = "AI Turk #" + id; // 주소창 해시와 동일 표기 (ukey.ts userTitle과 통일)
-          document.title = t;
-          var m = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-          if (m) m.setAttribute("content", t);
-        }
+        // 탭 타이틀 "AI Turk" 고정 (261010 — 루트 즐겨찾기·채널명 타이틀 제거 — head의 meta도 고정값).
+        // 대화 식별은 드로어 목록과 푸시 별명(AI Turk · <별명>)이 담당.
       } catch (e) {}
     </script>
   </head>

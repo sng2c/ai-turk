@@ -3,7 +3,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { validateTurkResponse } from "./response-schema";
-import { userTitle } from "./ukey";
 
 // ── 응답 검증 — zod 스키마 제거, 공용 JSON Schema(response-schema.ts)로 이원화.
 // 스키마가 1차 게이트(법) — 프롬프트(AGENTS.md)는 보조 교육. 위반 시 오류 문구가
@@ -199,13 +198,5 @@ export function reflectUserKey(key: string): void {
 
 // 초기값 (모듈 로드 1회) — 정적 표시/하위호환. 런타임 전환은 userKey state + resolveUserKey().
 export const TURK_USER_KEY: string = resolveUserKey();
-
-// ── 유저 식별 타이틀 반영 — 탭 제목(document.title)·iOS 북마크 타이틀 meta.
-//    즐겨찾기·공유는 Chrome이 당존 탭 주소(#<userKey> 해시선반영 참조)·타이틀을 사용 —
-//    manifest(A2HS) 오버라이드 기계장치는 제거됨 (설치 기능 미사용).
-export function applyUserTitle(key: string): void {
-	const t = userTitle(key);
-	document.title = t;
-	const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]') as HTMLMetaElement | null;
-	if (apple) apple.content = t;
-}
+// 탭 타이틀은 261010부터 "AI Turk" 고정 — 부트 스크립트(index.html)가 React 마운트 전에
+// 설정하며 대화 식별은 드로어·푸시 별명이 담당 (채널명 타이틀 계열 제거).
