@@ -33,6 +33,13 @@ function turkPlugin(): Plugin {
 
 			wss.on("connection", (ws, req) => core.handleConnection(ws, req));
 
+			// 1c 대화 레지스트리 — prod server.ts와 동일 단일 진원 (core.listConversations())
+			server.middlewares.use("/api/conversations", (_req, res) => {
+				res.setHeader("Content-Type", "application/json");
+				res.setHeader("Cache-Control", "no-cache");
+				res.end(JSON.stringify(core.listConversations()));
+			});
+
 			server.httpServer!.on("close", () => {
 				core.removeAllSessions();
 			});

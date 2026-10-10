@@ -11,6 +11,11 @@
  * dormant(backend=null — 셸·스케줄러 유지)로 회수한다. 재할당 큐 불필요 — start()가 spawn 직후
  * 동기 pi_ready emit + OS stdin 파이프가 부팅 전 명령 버퍼링 (backend.ts 근거).
  *
+ * 대화 레지스트리(1c): 부팅 스윕이 데이터 dir을 스캔해 전 대화의 세션 셸을 복원한다(백엔드 스폰 없음 —
+ * 수요 시점 기동; schedules.json은 Scheduler loadFromFile이 과거 nextRun=delay 0 즉시발화·미래=타이머 부활).
+ * 각 대화의 메타는 <userKey>/conversation.json { title, createdAt, lastActiveAt }로 영속화되고,
+ * listConversations()(GET /api/conversations의 단일 진원)로 목록을 제공한다.
+ *
  * 의존: ws, web-push, env-paths, node:fs/path/os — 신규 의존성 없음.
  */
 
@@ -23,7 +28,7 @@ import envPaths from "env-paths";
 import webpush from "web-push";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, readdirSync } from "node:fs";
 
 const DATA_DIR = envPaths("ai-turk").data;
 
@@ -33,6 +38,19 @@ const DATA_DIR = envPaths("ai-turk").data;
 export function workspacePath(userKey: string): string {
 	const root = process.env.TURK_WORKSPACES_ROOT;
 	return root ? join(root, userKey) : join(DATA_DIR, userKey, "workspace");
+}
+
+// ── 1c 대화 레지스트리 — 데이터 dir 스캔: 상태 파일을 1개라도 보유한 디렉토리만 대화로 판별 ──
+// agent-session-id(세션)·schedules.json(스케줄)·conversation.json(메타) 중 하나라도 있으면 대화.
+// 루트의 파일(vapid.json 등)·상태 파일 없는 빈 디렉토리는 제외. 결과는 알파벳 정렬(스캔 결정성 — 테스트·로그 재현).
+const CONVERSATION_STATE_FILES = ["agent-session-id", "schedules.json", "conversation.json"] as const;
+export function scanConversationDirs(dataDir: string): string[] {
+	try {
+		return readdirSync(dataDir, { withFileTypes: true })
+			.filter((d) => d.isDirectory() && CONVERSATION_STATE_FILES.some((f) => existsSync(join(dataDir, d.name, f))))
+			.map((d) => d.name)
+			.sort();
+	} catch { return []; } // 데이터 dir 미존재 — 신규 설치
 }
 
 // ── 세션 구조 — 유저(브라우저)별 독립 백엔드 + 스케줄러 ───────────────────
@@ -52,6 +70,9 @@ export interface Session {
 	lastResponsePrompt: string | null; // lastResponse가 대답하는 프롬프트 — 응답 상단 짝표시용
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
 	lastActivity: number; // 마지막 활동 타임스탬프 (유휴 백엔드 회수 판정용)
+	title: string | null; // 대화 타이틀 (1c) — 첫 유저 프롬프트 30자, null=미확정 (conversation.json 영속)
+	createdAt: number; // 대화 생성 시각 (1c) — conversation.json에서 복원, 세션 재생성 시에도 보존
+	lastActiveAt: number; // 마지막 대화 활동 (1c) — 접속 확정·프롬프트 발화마다 갱신, 레지스트리 정렬 기준
 	currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
 	parseRetryCount: number; // 서버 자가수정(위반 응답 재시도) 카운터 — 성공·취소·신규 유저입력에서 리셋
 }
@@ -61,6 +82,7 @@ export interface SessionCoreConfig {
 	parseRetries?: number; // 응답 자가수정 재시도 한도 (기본: TURK_PARSE_RETRIES || 2)
 	debug?: boolean; // 진단 로그 (기본: TURK_DEBUG)
 	backendFactory?: (opts: BackendOptions) => Backend; // 백엔드 팩터리 주입 (기본 createBackend — 테스트에서 FakeBackend)
+	scanOnBoot?: boolean; // 부팅 스윕 (1c) — 코어 생성 시 데이터 dir을 스캔해 전 대화 셸을 복원. 기본 true (테스트 오염 방지 옵트아웃용 false)
 }
 
 export interface SessionCore {
@@ -73,6 +95,19 @@ export interface SessionCore {
 	keepAlive(wss: WebSocketServer): void;
 	ensureBackend(session: Session): boolean; // 풀 할당 — 멱등(alive면 no-op). cap 도달 시 유휴 LRU victim 회수 후 할당, victim 없으면 false
 	reclaimSweep(): number; // 유휴 백엔드 회수 스윕 1회 실행 (60s 인터벌 + 테스트·수동 트리거용) — 회수 수 반환
+	listConversations(): ConversationSummary[]; // 대화 레지스트리 목록 (1c) — lastActiveAt 내림차순
+}
+
+// 대화 레지스트리 항목 (1c) — GET /api/conversations 응답 본체
+export interface ConversationSummary {
+	id: string; // userKey
+	title: string | null; // 첫 유저 프롬프트 30자 (미확정 null)
+	createdAt: number;
+	lastActiveAt: number;
+	active: boolean; // 백엔드 alive 여부
+	streaming: boolean; // 응답 생성 중
+	scheduleCount: number; // 등록 스케줄 수 — scheduler.list().data.count
+	backendState: "active" | "dormant" | "starting"; // alive&&ready / 셸만(스폰 없음) / alive+미ready
 }
 
 // ── 영속화 헬퍼 (파일명/위치는 prod 종래 그대로) ───────────────────────────
@@ -143,6 +178,32 @@ function savePushSubscription(userKey: string, sub: any): void {
 }
 function clearPushSubscription(userKey: string): void {
 	try { rmSync(pushPath(userKey), { force: true }); } catch { /* 무시 */ }
+}
+
+// ── conversation.json 영속화 (1c 대화 레지스트리) — 대화 메타. 스키마: { title, createdAt, lastActiveAt } ──
+// title=null(미확정) → 첫 유저 프롬프트 30자로 확정. createdAt은 세션 재생성 시 기존 파일을 만나면 보존(미수정).
+interface ConversationMeta {
+	title: string | null;
+	createdAt: number;
+	lastActiveAt: number;
+}
+function conversationMetaPath(userKey: string): string {
+	return `${DATA_DIR}/${userKey}/conversation.json`;
+}
+function loadConversationMeta(userKey: string): ConversationMeta | null {
+	try {
+		const f = conversationMetaPath(userKey);
+		if (!existsSync(f)) return null;
+		const m = JSON.parse(readFileSync(f, "utf-8"));
+		if (typeof m?.createdAt !== "number" || typeof m?.lastActiveAt !== "number" || (m.title !== null && typeof m.title !== "string")) return null; // 스키마 무효 → 신규 취급
+		return m;
+	} catch { return null; }
+}
+function saveConversationMeta(userKey: string, meta: ConversationMeta): void {
+	try {
+		mkdirSync(`${DATA_DIR}/${userKey}`, { recursive: true });
+		writeFileSync(conversationMetaPath(userKey), JSON.stringify(meta));
+	} catch (err) { console.log(`[${userKey.slice(0, 8)}] [conversation] 저장 실패: ${err instanceof Error ? err.message : err}`); }
 }
 
 // ── 응답 텍스트에서 마지막 assistant 텍스트 추출 ─────────────────────────
@@ -242,6 +303,20 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 
 	const sessions = new Map<string, Session>();
 
+	// ── 1c 부팅 스윕 — 대화 레지스트리 복원: 데이터 dir 스캔 → 전 대화 셸 생성 (백엔드 스폰 없음) ──
+	// createSession의 Scheduler가 schedules.json을 로드해 즉시 부활 — 과거 nextRun은 delay 0 즉시발화,
+	// 미래는 타이머 부활. 셸만 복원하는 이유: 백엔드 수요는 과기 스케줄 발화 지점에서만 발생 (결정 기록 261010).
+	if (cfg?.scanOnBoot !== false) {
+		const keys = scanConversationDirs(DATA_DIR);
+		let restored = 0;
+		for (const key of keys) {
+			if (sessions.has(key)) continue;
+			createSession(key);
+			restored++;
+		}
+		console.log(`[Pool] 부팅 스윕: 대화 ${restored}개 셸 복원`);
+	}
+
 	// 같은 세션(유저) WS 전체에 broadcast — 다중 탭 동기화
 	function broadcast(session: Session, data: Record<string, unknown>): void {
 		if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [WS] 송신: type=${data.type}${data.command ? " command=" + data.command : ""}`);
@@ -249,6 +324,12 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		for (const ws of session.ws) {
 			if (ws.readyState === WebSocket.OPEN) ws.send(msg);
 		}
+	}
+
+	// 1c 대화 메타 갱신 — lastActiveAt=now 파일 저장. 접속 확정(handleConnection)·프롬프트 성공(sendToBackend) 경로에서 호출.
+	function touchConversationMeta(session: Session): void {
+		session.lastActiveAt = Date.now();
+		saveConversationMeta(session.userKey, { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt });
 	}
 
 	// ── 웹 푸시 ────────────────────────────────────────────────────────────
@@ -274,6 +355,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 
 	// backend.send 가로채서 route 추적
 	function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { route?: "user" | "scheduler" | "tool" }): void {
+		const route = (opts?.route ?? cmd.route ?? "user") as "user" | "scheduler" | "tool";
 		// 프롬프트 발화는 백엔드 수요지점(스케줄러 트리거·WS 프롬프트 공용) — 발화 전 멱등 할당.
 		// cap 초과 거부 시: agent_start/isStreaming 설정 없이 에러 agent_end broadcast로 마감.
 		if (cmd.type === "prompt") {
@@ -283,8 +365,10 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 				return;
 			}
 			session.lastActivity = Date.now(); // 발화 = 활동 — 유휴 회수 임계 갱신
+			// 1c 대화 메타 — 성공 경로 한정: lastActiveAt 갱신 + 첫 유저 프롬프트 30자로 타이틀 확정 (거부·scheduler/tool 라우트는 타이틀 불변)
+			if (route === "user" && typeof cmd.userInput === "string" && session.title === null) session.title = cmd.userInput.slice(0, 30);
+			touchConversationMeta(session);
 		}
-		const route = (opts?.route ?? cmd.route ?? "user") as "user" | "scheduler" | "tool";
 		session.currentRoute = route;
 		// 처리중 프롬프트 기록 — 재연결/새로고침 후 get_state로 표시 (user 라우트 순수 입력만)
 		if (cmd.type === "prompt" && route === "user" && typeof cmd.userInput === "string") {
@@ -343,6 +427,28 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		return reclaimed;
 	}
 	setInterval(reclaimSweep, 60_000).unref?.(); // 60s 회수 스윕 — 서버 생명 유지 책임은 listen 쪽
+
+	// ── 1c 대화 레지스트리 — 백엔드 상태 표기 + 목록 ─────────────────────────
+	// dormant(셸만 — 백엔드 null·비alive) / starting(스폰됐지만 ready 전) / active(ready 완료)
+	function backendStateOf(session: Session): "active" | "dormant" | "starting" {
+		if (session.backend?.alive() !== true) return "dormant";
+		return session.backendReady ? "active" : "starting";
+	}
+	// GET /api/conversations 단일 진원 — lastActiveAt 내림차순 (최근 대화 우선)
+	function listConversations(): ConversationSummary[] {
+		const list = Array.from(sessions.values()).map((s) => ({
+			id: s.userKey,
+			title: s.title,
+			createdAt: s.createdAt,
+			lastActiveAt: s.lastActiveAt,
+			active: s.backend?.alive() === true,
+			streaming: s.isStreaming,
+			scheduleCount: s.scheduler.list().data.count,
+			backendState: backendStateOf(s),
+		}));
+		list.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+		return list;
+	}
 
 	// ── 백엔드 시작 (세션별) ────────────────────────────────────────────────
 	function startBackend(session: Session): void {
@@ -454,7 +560,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			// get_state 응답 보강: isStreaming 등 주입
 			const isGetState = ev.type === "response" && ev.command === "get_state";
 			if (isGetState) {
-				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt, lastTurnFailed: session.lastTurnFailed };
+				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt, lastTurnFailed: session.lastTurnFailed, backendState: backendStateOf(session) };
 			}
 			broadcast(session, ev);
 			// 리플레이 — get_state 응답(클라 복원 클리어) 직후에 던져야 클리어에 흡수되지 않음.
@@ -489,6 +595,9 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 
 	// ── 세션 관리 ────────────────────────────────────────────────────────────
 	function createSession(userKey: string): Session {
+		const now = Date.now();
+		const convMeta = loadConversationMeta(userKey);
+		if (!convMeta) saveConversationMeta(userKey, { title: null, createdAt: now, lastActiveAt: now }); // 신규 대화 메타 생성 — 기존 파일 있으면 미수정 (createdAt 보존)
 		const session: Session = {
 			userKey,
 			agentSessionId: loadAgentSessionId(userKey), // 저장된 ID 있으면 복원, 없으면 null(새 세션)
@@ -519,7 +628,10 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			lastPrompt: loadLastPrompt(userKey), // 영속 버퍼에서 복원 — 이전 입력 짝 캡션
 			lastResponsePrompt: loadLastResponse(userKey)?.prompt ?? null,
 			isStreaming: false,
-			lastActivity: Date.now(),
+			lastActivity: now,
+			title: convMeta?.title ?? null, // conversation.json 복원 — 기존 대화면 보존
+			createdAt: convMeta?.createdAt ?? now,
+			lastActiveAt: convMeta?.lastActiveAt ?? now,
 			currentRoute: "user",
 			parseRetryCount: 0,
 			thinkingBuf: "",
@@ -573,6 +685,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			return;
 		}
 		const session = result;
+		touchConversationMeta(session); // 1c — 세션 확정 직후 lastActiveAt 갱신 저장 (재접속도 대화 활동)
 		// 풀 할당 — App이 pi_ready 대기하므로 초기 상태 통지 전에 기동(교착 방지).
 		// 할당 실패(cap 초과)면 pi_starting으로 접속받고, 첫 프롬프트의 sendToBackend 가드가 재시도 → 에러 broadcast.
 		ensureBackend(session);
@@ -672,5 +785,5 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		iv.unref?.(); // 서버 생명 유지 책임은 listen 쪽 — keepalive가 프로세스를 붙잡지 않게 (dev·prod 동일)
 	}
 
-	return { sessions, maxSessions: MAX_BACKENDS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive, ensureBackend, reclaimSweep };
+	return { sessions, maxSessions: MAX_BACKENDS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive, ensureBackend, reclaimSweep, listConversations };
 }

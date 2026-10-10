@@ -111,6 +111,7 @@ function newCore(maxSessions: number) {
 	const backends: FakeBackend[] = [];
 	const core = SC.createSessionCore({
 		maxSessions,
+		scanOnBoot: false, // 1c 부팅 스윕 옵트아웃 — 이전 케이스가 만든 conversation.json을 끌어들이는 크로스 코어 오염 방지
 		backendFactory: (opts: BackendOptions) => { const b = new FakeBackend(opts); backends.push(b); return b; },
 	});
 	const active = () => [...core.sessions.values()].filter((s) => s.backend?.alive()).length;

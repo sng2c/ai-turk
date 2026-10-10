@@ -66,6 +66,13 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		return;
 	}
 
+	if (url.pathname === "/api/conversations") {
+		// 1c 대화 레지스트리 — 목록 단일 진원 core.listConversations() (정적 파일 처리 앞에서 가로채기)
+		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-cache" });
+		res.end(JSON.stringify(core.listConversations()));
+		return;
+	}
+
 	let filePath = join(DIST_DIR, url.pathname === "/" ? "index.html" : url.pathname);
 	// 캐시 정책: 진입점·manifest·파비콘은 항상 재검증(아이콘/manifest 갱신 즉시 반영 — Firefox A2HS가 옛 manifest 캐시로 기본 타일 생성하던 문제),
 	// 해시명 번들·폰트는 1일, PNG 아이콘은 1시간
