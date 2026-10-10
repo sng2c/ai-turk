@@ -25,14 +25,15 @@ exec 9>"$LOCK"
 flock -n 9 || { echo "이미 실행 중" >&2; exit 1; }
 
 # ── 0. 환경 부트스트랩 ──
-# cron은 로그인셸이 아니므로 nvm이 초기화되어 있지 않아 PATH에 npm이 없다.
-# 시스템에 npm이 보이지 않을 때만 nvm을 적재해 기본 노드를 올린다.
-command -v npm >/dev/null 2>&1 || {
+# cron은 로그인셸이 아니므로 nvm을 **항상** 적재한다 — 시스템 npm이 PATH에 있어도
+# 그것은 배포판 구버전 노드일 수 있어 tsx 파싱이 죽는다 (261010 실측 — npm 존재 여부로
+# 갈아타면 구버전으로 빠져 테스트 게이트가 항상 레드). nvm이 없는 환경만 시스템 PATH 사용.
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
   export NVM_DIR="$HOME/.nvm"
   # shellcheck disable=SC1091
   . "$NVM_DIR/nvm.sh"
   nvm use default >/dev/null
-}
+fi
 
 # ── 1. 리포 루트 기준 실행 ──
 cd "$(dirname "$0")/.."

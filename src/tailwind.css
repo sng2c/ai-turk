@@ -128,16 +128,6 @@ body {
 	flex-shrink: 0;
 }
 
-/* 타이틀 옆 백엔드 종류 표시 */
-.turk-backend {
-	font-size: 0.65em;
-	color: var(--muted-foreground);
-	font-weight: 400;
-	margin-left: 0.1em;
-	align-self: center;
-	position: relative;
-	top: -0.1em;
-}
 
 .turk-header h1 .turk-ico {
 	width: 1.6em;
@@ -1081,7 +1071,7 @@ body {
 
 .turk-drawer-pw-msg.ok { color: var(--success); }
 
-/* 드로어 토글 버튼 — 헤더 turk-mode 선두 (스케줄 버튼과 동일 크기·톤) */
+/* 드로어 토글 버튼 — 로고 왼쪽 (261010 이동 — 스케줄 버튼과 동일 크기·톤) */
 .turk-drawer-btn {
 	border-radius: var(--radius-md);
 	background: none;

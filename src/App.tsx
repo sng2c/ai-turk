@@ -81,7 +81,6 @@ export default function App() {
 	const [logoMode, setLogoMode] = useState<"robot" | "alarm" | "tool">("robot");
 	const baseLogoModeRef = useRef<"robot" | "alarm" | "tool">("robot"); // 톨 종료 후 복귀용
 
-	const [backendKind, setBackendKind] = useState<string>("pi");
 	const [sessionId, setSessionId] = useState("");
 	const [currentModel, setCurrentModel] = useState("");
 	const currentModelRef = useRef("");
@@ -356,7 +355,6 @@ export default function App() {
 			case "pi_ready":
 				setPiReady(true);
 				flushPendingFiles(); // 연결 대기 중 선택된 파일 자동 첨부
-				if (typeof msg.backend === "string") setBackendKind(msg.backend);
 				// 웹 푸시 등록 — 캐시가 단일 진원:
 				// ① 캐시가 현재 VAPID 키와 일치 → 동기 즉시 재전송 (SW를 건드리지 않음 — unsubscribe 레이스 없음)
 				// ② 캐시 없음/키 불일치 → 전체 재구독 (in-flight 가드; 성공 시 캐시 갱신 → 이후는 ① 경로)
@@ -1044,9 +1042,9 @@ export default function App() {
 	return (
 		<div className="turk-app" style={!restored || modelChanging ? { pointerEvents: "none" } : undefined}>
 			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
-				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-logo-bot-spin" : "")} />} AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
-				<span className="turk-mode">
 				<button className="turk-drawer-btn" onClick={() => setDrawerOpen((v) => !v)} title="대화 목록"><Menu className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
+				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-logo-bot-spin" : "")} />} AI-Turk</h1>
+				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<button className="turk-model-btn" onClick={() => {
 					if (menuMode.current === "model") {
