@@ -64,6 +64,15 @@ fi
 BASE="${LAST:-$OLD}"
 CHANGED=$(git diff --name-only "$BASE" "$NEW")
 
+# 자기 자신이 이번 범위에 있으면 새 버전으로 재실행 — bash는 스크립트를 버퍼/오프셋으로 실행하므로
+# pull로 deploy.sh가 바뀌어도 그 실행은 계속 구버전으로만 진행한다 (261010 실측: 마커 기록 누락).
+# 재실행 가드(환경변수 1회)로 새 기능이 배포 즉시 적용되게 한다. 아래 무거운 단계(install/test/build)는
+# 두 번째 실행에서만 수행된다.
+if [ "${TURK_DEPLOY_REEXEC:-}" != "1" ] && grep -qx "scripts/deploy.sh" <<<"$CHANGED"; then
+  export TURK_DEPLOY_REEXEC=1
+  exec bash "$0" ${AUTO:+--auto}
+fi
+
 # ── 5. 의존성 갱신 — lock이 바뀐 경우에만 ──
 if grep -q "package-lock.json" <<<"$CHANGED"; then
   npm install --no-audit --no-fund
