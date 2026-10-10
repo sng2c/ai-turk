@@ -8,8 +8,11 @@
  * App의 onHashChange(→ location.reload) 기존 계약을 재사용하며, WS·세션을 절대 건드리지 않는다.
  * (해시가 현재 키와 같으면 App이 리로드를 생략 → 현재 대화 클릭은 노오프, 의도된 동작)
  *
- * AUTH off(dev): /api/me·PATCH/DELETE·/api/passwd 서버가 404 응답(계약) → 계정 섹션은 username 응답이
+ * AUTH off(dev): /api/me·PATCH/DELETE·/api/passwd·/api/env 서버가 404 응답(계약) → 계정 섹션은 username 응답이
  * 없어 자동 숨김, 액션은 실패 후 목록 갱신으로 무해 수렴. dev에서 개별 API가 없는 것은 의도된 위임 계약.
+ *
+ * 환경 모달(Phase 4c): 값은 절대 화면에 표시하지 않는다 — GET /api/env 는 이름 목록만 주고, 값 입력란은
+ * masked(password 스타일). 저장·삭제 후 목록 갱신 + "다음 백엔드 재할당부터 적용" 고정 안내.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -148,6 +151,64 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 		setPwBusy(false);
 	};
 
+	// ── 환경 변수 모달 (Phase 4c) — AUTH on(username 응답)일 때만 풋터 버튼이 렌더되는 기능.
+	// 목록은 이름만, 값은 절대 화면에 표시하지 않는다 (입력란 masked). 서버(env-store)가 규칙·예약·상한 검증의 단일 진원.
+	const [envOpen, setEnvOpen] = useState(false);
+	const [envKeys, setEnvKeys] = useState<string[]>([]); // 이름만 — 값을 다루는 상태는 존재하지 않음
+	const [envKeyInput, setEnvKeyInput] = useState("");
+	const [envValueInput, setEnvValueInput] = useState("");
+	const [envBusy, setEnvBusy] = useState(false);
+	const [envMsg, setEnvMsg] = useState("");
+	const envTitle = convs.find((c) => c.id === userKey)?.title || shortUserKey(userKey); // 모달 제목 — 현재 대화 별명/키
+
+	const refreshEnvKeys = useCallback(async () => {
+		try {
+			const r = await fetch(`/api/env/${encodeURIComponent(userKey)}`);
+			if (!r.ok) return;
+			const j: unknown = await r.json();
+			if (j && typeof j === "object" && Array.isArray((j as { keys?: unknown }).keys)) {
+				setEnvKeys((j as { keys: string[] }).keys.filter((k) => typeof k === "string"));
+			}
+		} catch { /* 무시 — 재오픈·다음 액션이 재시도 */ }
+	}, [userKey]);
+
+	const openEnvModal = () => {
+		setEnvKeyInput(""); setEnvValueInput(""); setEnvMsg("");
+		setEnvOpen(true);
+		refreshEnvKeys();
+	};
+	const closeEnvModal = () => { if (!envBusy) setEnvOpen(false); };
+
+	const submitEnv = async () => {
+		if (envBusy) return;
+		const key = envKeyInput.trim();
+		if (!key) { setEnvMsg("키(KEY)를 입력하세요"); return; }
+		setEnvMsg(""); setEnvBusy(true);
+		try {
+			const r = await fetch(`/api/env/${encodeURIComponent(userKey)}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ key, value: envValueInput }),
+			});
+			const j: any = await r.json().catch(() => ({}));
+			if (r.ok && j.ok) {
+				setEnvKeyInput(""); setEnvValueInput(""); // 값은 저장 성공 즉시 소멸 — 상태에 잔존하지 않는다
+				refreshEnvKeys();
+			} else setEnvMsg(j?.error || "저장 실패");
+		} catch { setEnvMsg("네트워크 오류 — 다시 시도해 주세요"); }
+		setEnvBusy(false);
+	};
+
+	const deleteEnvKey = async (k: string) => {
+		if (envBusy) return;
+		setEnvBusy(true);
+		try {
+			await fetch(`/api/env/${encodeURIComponent(userKey)}/${encodeURIComponent(k)}`, { method: "DELETE" });
+			refreshEnvKeys();
+		} catch { /* 무시 */ }
+		setEnvBusy(false);
+	};
+
 	return (
 		<>
 			{/* 뒷판 딤 — 클릭으로 닫기 */}
@@ -197,6 +258,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 					<footer className="turk-drawer-foot">
 						<span className="turk-drawer-user"><User className="turk-ico" />{me}</span>
 						<button className="turk-drawer-act" onClick={openPwModal}><KeyRound className="turk-ico" />비밀번호 변경</button>
+						<button className="turk-drawer-act" onClick={openEnvModal}><KeyRound className="turk-ico" />환경 변수</button>
 						<button className="turk-drawer-act" onClick={logout}><LogOut className="turk-ico" />로그아웃</button>
 					</footer>
 				)}
@@ -214,6 +276,39 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 							<input type="password" autoComplete="new-password" placeholder="새 비밀번호 확인" value={pwConfirm} onChange={(e) => setPwConfirm(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitPw(); }} />
 							<button className="turk-drawer-pw-btn" onClick={submitPw} disabled={pwBusy || pwMsgOk}>{pwMsgOk ? "변경 완료" : pwBusy ? "변경 중..." : "변경"}</button>
 							<div className={"turk-drawer-pw-msg" + (pwMsgOk ? " ok" : "")} role="alert">{pwMsg}</div>
+						</div>
+					</div>
+				)}
+
+				{/* 환경 변수 모달 (Phase 4c) — 비번 모달 톤 계승. 목록=이름만 · 값 입력 = masked · 적용 시점 고정 안내 */}
+				{envOpen && (
+					<div className="turk-env-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeEnvModal(); }}>
+						<div className="turk-env-card" role="dialog" aria-label="환경 변수 설정">
+							<header className="turk-drawer-pw-head">
+								<span>환경 변수 — {envTitle}</span>
+								<button className="turk-drawer-icon-btn" onClick={closeEnvModal} title="닫기"><X className="turk-ico" /></button>
+							</header>
+							<div className="turk-env-list">
+								{envKeys.length === 0 && <div className="turk-env-empty">등록된 환경 변수가 없습니다</div>}
+								{envKeys.map((k) => (
+									<div key={k} className="turk-env-row">
+										<span className="turk-env-key">{k}</span>
+										<button className="turk-drawer-item-btn" disabled={envBusy} onClick={() => deleteEnvKey(k)} title="삭제"><Trash2 className="turk-ico" /></button>
+									</div>
+								))}
+							</div>
+							<div className="turk-env-add">
+								<input className="turk-env-input" placeholder="KEY (예: NOTION_TOKEN)" maxLength={64} autoComplete="off" value={envKeyInput}
+									onChange={(e) => setEnvKeyInput(e.target.value)}
+									// Enter로 값 입력란으로 자연 이동 — KEY란 Enter도 저장 허용 (값 비어있으면 서버 검증이 안내)
+									onKeyDown={(e) => { if (e.key === "Enter") submitEnv(); }} />
+								<input className="turk-env-input" type="password" autoComplete="off" placeholder="값 — 화면에 표시되지 않습니다" value={envValueInput}
+									onChange={(e) => setEnvValueInput(e.target.value)}
+									onKeyDown={(e) => { if (e.key === "Enter") submitEnv(); }} />
+								<button className="turk-drawer-pw-btn" onClick={submitEnv} disabled={envBusy}>{envBusy ? "저장 중..." : "저장"}</button>
+							</div>
+							<div className="turk-env-note">다음 백엔드 재할당부터 적용</div>
+							<div className="turk-drawer-pw-msg" role="alert">{envMsg}</div>
 						</div>
 					</div>
 				)}

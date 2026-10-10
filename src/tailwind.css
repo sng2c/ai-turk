@@ -1071,6 +1071,90 @@ body {
 
 .turk-drawer-pw-msg.ok { color: var(--success); }
 
+/* 환경변수 모달 (Phase 4c) — 비번 모달(turk-drawer-pw-*) 톤 계승. 값은 절대 화면에 표시하지 않는다(이름 목록·masked 입력 전용) */
+.turk-env-overlay {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.8);
+	z-index: 80;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1rem;
+}
+
+.turk-env-card {
+	width: 100%;
+	max-width: 320px;
+	max-height: 92%;
+	overflow-y: auto;
+	background: #000;
+	color: #fff;
+	font-family: "NeoDunggeunmo", monospace;
+	border: 1px solid #333;
+	border-radius: 8px;
+	padding: 1.1rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
+}
+
+.turk-env-list {
+	border: 1px solid #222;
+	border-radius: 6px;
+	min-height: 40px;
+	max-height: 160px;
+	overflow-y: auto;
+ }
+
+.turk-env-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.15rem 0.4rem;
+	border-bottom: 1px solid #1a1a1a;
+ }
+
+.turk-env-row:last-child { border-bottom: none; }
+
+.turk-env-key {
+	font-size: 0.82rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.turk-env-empty {
+	padding: 0.65rem 0.5rem;
+	text-align: center;
+	font-size: 0.78rem;
+	color: #666;
+ }
+
+.turk-env-add { display: flex; flex-direction: column; gap: 0.45rem; }
+
+/* 입력란은 비번 모달(turk-drawer-pw-card input)과 동일 톤 */
+.turk-env-input {
+	display: block;
+	width: 100%;
+	padding: 12px 14px;
+	background: #111;
+	color: #fff;
+	border: 1px solid #333;
+	border-radius: 8px;
+	font-family: inherit;
+	font-size: 14px;
+ }
+
+.turk-env-input:focus { outline: none; border-color: #666; }
+
+.turk-env-note {
+	font-size: 0.72rem;
+	color: var(--muted-foreground);
+	text-align: center;
+	line-height: 1.4;
+ }
+
 /* 드로어 토글 버튼 — 로고 왼쪽 (261010 이동 — 스케줄 버튼과 동일 크기·톤) */
 .turk-drawer-btn {
 	border-radius: var(--radius-md);

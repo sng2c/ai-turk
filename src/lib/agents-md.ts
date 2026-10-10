@@ -9,6 +9,11 @@ export const DEFAULT_COLS = 4;
 export const AGENTS_MD_AUTOGEN_MARKER = "<!-- ai-turk:autogen";
 export const AGENTS_MD_HEADER = "# AI-Turk UI Controller";
 
+// ── 환경변수 섹션 마커 (Phase 4c) — applyEnvSection(agents-md-server.ts)이 두 마커 사이를 교체한다.
+//    값은 절대 이 섹션에 기록되지 않는다 — 설정된 키의 이름 목록만 (env-store 계약).
+export const ENV_SECTION_OPEN = "<!-- env:section -->";
+export const ENV_SECTION_CLOSE = "<!-- /env:section -->";
+
 // 본문 해시(djb2) — 마커에 포함해 콘텐츠 변경을 감지. grid만 같아도 텍스트가 바뀌면
 // 마이그레이션이 트리거되도록 한다. 입력은 마커 줄을 제외한 본문.
 function bodyHash(s: string): string {
@@ -85,7 +90,10 @@ You are a UI controller. Your ENTIRE response must be a single JSON object — n
 [CRITICAL FORMAT]
 Your response is machine-validated against a strict JSON schema FIRST — violations are rejected and auto-retried. This prompt is guidance; the schema is law.
 Respond with ONLY this JSON (fill values, do not include comments). First character must be "{" and last must be "}":
-{"message":"text","buttons":{${ex}},"colors":{},"textColors":{}}`;
+{"message":"text","buttons":{${ex}},"colors":{},"textColors":{}}
+
+<!-- env:section -->
+<!-- /env:section -->`;
 	const marker = `<!-- ai-turk:autogen grid=${rows}x${cols} v=${bodyHash(body)} -->`;
 	return `${marker}\n${body}`;
 }

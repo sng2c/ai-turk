@@ -44,6 +44,7 @@ export interface BackendOptions {
 	cwd: string;
 	onLog?: (msg: string) => void;
 	userKey?: string; // 세션 ID(pi --session-id) — 영속 세션. Claude 백엔드는 무시.
+	workspaceEnv?: Record<string, string>; // 대화별 환경변수 (Phase 4c) — env-store 판독을 세션 코어가 주입. 값은 로그·이벤트로 노출 금지
 }
 
 // ── 공통: JSONL stdout 파서 ─────────────────────────────────────────
@@ -139,7 +140,9 @@ export class PiBackend extends JsonlBackend {
 		if (gwPrefix) spawnEnv.GATEWAY_TOKEN = userHash ? `${gwPrefix}${userHash}` : (gwFallback || `${gwPrefix}unsessioned`);
 		const args = ["--mode", "rpc", ...sessionArgs, ...(model ? ["--model", model] : []), ...extra];
 		this.log(`[Turk] ${bin} ${args.join(" ")} 시작`);
-		this.attach(spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], cwd: this.opts.cwd, env: { ...process.env, ...spawnEnv } }), "pi");
+		// 병합 순위: process.env < workspaceEnv < attribution(spawnEnv) — 사용자 키는 검증상 계약 키와 절대 겹치지 않지만(예약 키 거부),
+		// 방어적으로도 귀속 계약이 최후 (사용자 키가 계약 키를 덮지 못게)
+		this.attach(spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], cwd: this.opts.cwd, env: { ...process.env, ...this.opts.workspaceEnv, ...spawnEnv } }), "pi");
 		this.emit({ type: "pi_ready", backend: this.kind() });
 	}
 
@@ -174,8 +177,10 @@ export class ClaudeBackend extends JsonlBackend {
 		const model = process.env.TURK_CLAUDE_MODEL || "";
 		// Ollama Anthropic 호환 엔드포인트 — `ollama launch claude --model` 과 동일 환경.
 		const baseUrl = process.env.ANTHROPIC_BASE_URL || "http://localhost:11434";
+		// 병합 순위: process.env < workspaceEnv < 계약 키(ANTHROPIC_*) — pi 백엔드와 동일 (사용자 키가 계약 키를 덮지 못게)
 		const env: Record<string, string> = {
 			...process.env as Record<string, string>,
+			...this.opts.workspaceEnv, // undefined여도 스프레드 무해 — 계약 키(아래)가 항상 최후
 			ANTHROPIC_BASE_URL: baseUrl,
 			ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN || "ollama",
 			// 빈 API_KEY 는 "unset" 취급이므로 명시적으로 비워 subscription 우회.

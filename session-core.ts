@@ -23,7 +23,8 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createBackend, type Backend, type BackendOptions, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
 import { validateTurkResponse } from "./src/lib/response-schema.ts";
-import { ensureAgentsMd } from "./src/lib/agents-md-server.ts";
+import { ensureAgentsMd, applyEnvSection } from "./src/lib/agents-md-server.ts";
+import { loadConversationEnv } from "./env-store.ts"; // Phase 4c — 대화별 환경변수 (fs 전용 저장소, 값은 프로세스 환경으로만)
 import envPaths from "env-paths";
 import webpush from "web-push";
 import { join } from "node:path";
@@ -517,15 +518,20 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 
 	// ── 백엔드 시작 (세션별) ────────────────────────────────────────────────
 	function startBackend(session: Session): void {
+		// Phase 4c — 대화별 환경변수: env.json을 한 번만 판독해 (a) AGENTS.md 이름 목록 갱신 (b) spawn 환경 주입에 같이 쓴다.
+		// 소유권(own만)은 서버 라우트(/api/env/*)가 전담 — 코어는 authorize를 모른다 (Phase 3 own-only 계약 재사용, 주석 고정)
+		const workspaceEnv = loadConversationEnv(session.userKey);
 		try {
 			const agentCwd = workspacePath(session.userKey); // 위치 분리(TURK_WORKSPACES_ROOT) — 미설정 시 현행 경로
 			mkdirSync(agentCwd, { recursive: true });
 			const agentsMdPath = join(agentCwd, "AGENTS.md");
-			ensureAgentsMd(agentsMdPath);
+			ensureAgentsMd(agentsMdPath); // 순서 계약: 템플릿 생성 → 환경변수 섹션 갱신 (마커 존재 보장 후 교체)
+			applyEnvSection(agentsMdPath, Object.keys(workspaceEnv)); // 이름만 기록 — 값은 절대 문서화 금지 / 불변 시 write 없음
 		} catch (e) { console.error(`[Turk] AGENTS.md 생성 실패: ${e}`); }
 		session.backend = createBackendFn({
 			cwd: workspacePath(session.userKey),
 			userKey: session.agentSessionId ?? undefined, // 저장된 agentSessionId 있으면 지정(같은 세션 복원), 없으면 undefined(새 세션). claude는 무시
+			workspaceEnv, // Phase 4c — spawn 환경 병합은 backend.ts 담당 (계약 키 최후 순위) — 로그·브로드캐스트 경로 없음
 			onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
 		});
 		session.backend.onEvent((ev: TurkEvent) => {
