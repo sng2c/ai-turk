@@ -11,7 +11,7 @@
 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync, mkdirSync } from "node:fs";
 import envPaths from "env-paths";
 import { SignJWT } from "jose";
 import type { Backend, BackendOptions, TurkEvent } from "../backend.ts";
@@ -276,6 +276,63 @@ const firstMsg = (ws: any) => ws.sent[0] as Record<string, any> | undefined;
 	ok("F18b 미존재 계정 거부 — false (userKeys·스키마 불변)",
 		A.changePassword("ghost-user-xyz", "x", "abcd") === false
 			&& A.ownedKeysOf("alice").includes("a-key")); // 자격 교체 사이드이펙트 없음
+}
+
+// ╔══════════════ G. 잔여키 정리 (Phase 4a — release·reconcile) ═══════════════
+// dir 준비 — reconcile은 DATA_DIR/<키> 디렉토리 존재 여부만 판정. 고아 dir(g-orphan)은 어느 계정에도 귀속시키지 않는다.
+{
+	mkdirSync(join(DATA, "g-live-a"), { recursive: true });
+	mkdirSync(join(DATA, "g-live-b"), { recursive: true });
+	mkdirSync(join(DATA, "g-orphan"), { recursive: true }); // 소유자 없는 dir — dir 무사·무소권 입증 대상
+	A.saveUsers({
+		accounts: {
+			alice: { ...A.hashPassword("g-alice-pw"), userKeys: ["g-live-a", "g-dead-a"], createdAt: 10 }, // g-dead-a = dir 없음
+			bob: { ...A.hashPassword("g-bob-pw"), userKeys: ["g-live-b", "g-dead-b", "g-b-temp"], createdAt: 20 }, // g-dead-b = dir 없음
+		},
+	});
+
+	// release — 소유 키 제거·저장 반영
+	ok("G19 release 소유 키 — userKeys 제거·저장 반영·타 키 보존",
+		(() => {
+			if (A.releaseConversation("bob", "g-b-temp") !== true) return false;
+			const keys = A.loadUsers().accounts.bob?.userKeys ?? [];
+			return !keys.includes("g-b-temp") && keys.includes("g-live-b") && keys.includes("g-dead-b");
+		})());
+	// release 멱등 — 이미 없는 키도 true (재호출·삭제된 대화 재시도 안전)
+	ok("G20 release 멱등 — 키 없어도 true·장부 불변 (재저장 없음)",
+		(() => {
+			const before = JSON.stringify(A.loadUsers().accounts.bob);
+			return A.releaseConversation("bob", "g-b-temp") === true && JSON.stringify(A.loadUsers().accounts.bob) === before;
+		})());
+	// release 미존재 계정 — false
+	ok("G21 release 미존재 계정 — false", A.releaseConversation("ghost-user-xyz", "g-live-a") === false);
+
+	// reconcile — dir 없는 키만 탈락·dir 있는 소유 유지
+	ok("G22 reconcile — dir 없는 키만 탈락·dir 있는 소유 유지",
+		(() => {
+			const dropped = A.reconcileUsersWithDisk();
+			const loaded = A.loadUsers();
+			return dropped === 2 // dir 없음 = g-dead-a·g-dead-b 뿐 (반환값 = 탈락 수)
+				&& JSON.stringify(loaded.accounts.alice?.userKeys) === JSON.stringify(["g-live-a"])
+				&& JSON.stringify(loaded.accounts.bob?.userKeys) === JSON.stringify(["g-live-b"]);
+		})());
+	ok("G22b reconcile 멱등 — 재호출 탈락 0 (변경 없어 재저장 없음)", A.reconcileUsersWithDisk() === 0);
+
+	// 고아 dir — 소유자 생기지 않고 dir 무사 (단방향 장부 위생 계약)
+	ok("G23 고아 dir — reconcile이 dir을 건드리지 않음·무소권 유지",
+		statSync(join(DATA, "g-orphan")).isDirectory() // dir 삭제·변형 없음
+		&& A.checkConversation("alice", "g-orphan") === "orphan" && A.checkConversation("bob", "g-orphan") === "orphan"); // 어떤 계정에도 귀속 안 됨
+
+	// 회귀 입증 — A claim → release → B 관점 orphan (foreign 오판 차단 결함 해소) → B claim 성공
+	ok("G24 회귀 — claim→release 후 타 계정 관점 orphan → 고아 자동클레임 경로 회복",
+		await (async () => {
+			if (A.claimConversation("alice", "g-handover") !== true) return false;
+			if (A.checkConversation("bob", "g-handover") !== "foreign") return false; // 전제: release 전에는 foreign 차단 (결함 상황 재현)
+			if (A.releaseConversation("alice", "g-handover") !== true) return false;
+			if (A.checkConversation("bob", "g-handover") !== "orphan") return false; // 결함 해소 — foreign 오판 소실
+			if (A.claimConversation("bob", "g-handover") !== true) return false; // B 자동 claim 성공
+			return A.checkConversation("bob", "g-handover") === "own";
+		})());
 }
 
 console.log(`\n${pass}/${pass + fail} 통과`);

@@ -16,7 +16,7 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
-import { createAuthorizer, attemptLogin, clearCookie, changePassword } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경
+import { createAuthorizer, attemptLogin, clearCookie, changePassword, reconcileUsersWithDisk } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경 · reconcileUsersWithDisk는 Phase 4a 부팅 잔여키 대사
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 console.log(`[Turk] __dirname: ${__dirname}`);
@@ -253,6 +253,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		}
 		// DELETE — 셸 제거+dir 소멸 (멱등; removeSession이 session_terminated broadcast·backend stop까지 수행)
 		core.deleteConversation(id);
+		auth?.releaseConversation(user, id); // Phase 4a — 장부 소유 등록 해제: core가 users.json을 모르므로 이 응답 직전에 여기서 해제 (미해제 잔여키는 타 계정 foreign 오판 → 고아 자동클레임 차단 결함의 근원). 동기 소량 — 응답 지연 없음
 		res.writeHead(200, JSONH);
 		res.end(JSON.stringify({ ok: true }));
 		return;
@@ -318,6 +319,14 @@ process.on("SIGINT", () => {
 	wss.close();
 	process.exit(0);
 });
+
+// ── 부팅 잔여키 대사 (Phase 4a) — 삭제된 대화의 소유 등록(users.json 잔여키) 소급 정리 ──
+// 수동 dir 삭제 이력 커버 + 안전망 (신규 삭제분은 DELETE 라우트의 release가 실시간 처리 — 이후 재발분은 부팅마다 자정).
+// dir은 건드리지 않는다 — 고아 dir은 소유 없음 유지. AUTH시에만: 장부(users.json)는 AUTH 전용 자산.
+if (AUTH) {
+	const dropped = reconcileUsersWithDisk();
+	if (dropped > 0) console.log(`[Turk] 잔여키 대사: ${dropped}개 탈락 (삭제된 대화의 소유 등록)`);
+}
 
 // ── 시작 ──────────────────────────────────────────────────────────────────
 server.listen(PORT, HOST, () => {

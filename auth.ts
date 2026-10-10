@@ -8,6 +8,7 @@
  *  - per-IP 레이트리밋 — 실패 10회/15분 초과 차단 (windowMs·maxFails 주입 가능)
  *  - attemptLogin — 미지 사용자·비밀번호 오류 동일 문구 (사용자 열거 방지)
  *  - 대화 소유권 — own/orphan/foreign 판정 · orphan 자동 claim (레거시 마이그레이션 계약)
+ *  - 잔여키 정리 (Phase 4a) — releaseConversation(삭제 시 소유 해제) · reconcileUsersWithDisk(부팅 소급 대사)
  *  - createAuthorizer — session-core에 주입할 계약 객체 (core는 auth 타입을 import하지 않고 구조 일치만)
  *
  * 제약: DATA_DIR은 모듈 로드 시 확정 (env-paths, XDG_DATA_HOME 따름) → 테스트는 XDG 격리 후 동적 import.
@@ -16,7 +17,7 @@
 
 import { SignJWT, jwtVerify } from "jose";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, chmodSync, statSync } from "node:fs";
 import { join } from "node:path";
 import envPaths from "env-paths";
 
@@ -272,6 +273,46 @@ export function ownedKeysOf(username: string): string[] {
 	return acc && Array.isArray(acc.userKeys) ? acc.userKeys : [];
 }
 
+/** 소유 등록 해제 (Phase 4a) — 대화 삭제 직후 장부 잔여키 방지 (server.ts DELETE 라우트 배선).
+ * 계정 미존재 → false. 키가 userKeys에 있으면 제거·저장·true, 없으면 true (멱등 — 이미 정리됨·드로어 재시도 안전).
+ * 이 해제가 없으면 삭제된 대화의 키가 장부에 잔류해 타 계정 재접속 시 checkConversation이 foreign으로 오판 —
+ * 고아 자동클레임 경로가 막히는 결함의 원천 차단. fs를 만지지 않으므로 userKey 형식 검증 불필요 (경로조작 무해). */
+export function releaseConversation(username: string, userKey: string): boolean {
+	const users = loadUsers();
+	const acc: UserAccount | undefined = users.accounts[username];
+	if (!acc) return false;
+	if (Array.isArray(acc.userKeys) && acc.userKeys.includes(userKey)) {
+		acc.userKeys = acc.userKeys.filter((k) => k !== userKey);
+		saveUsers(users);
+	}
+	return true;
+}
+
+/** 장부-디스크 대사 (Phase 4a 부팅 배선) — 삭제된 대화의 잔여 소유 등록 소급 정리.
+ * 단방향 장부 위생 계약: dir은 절대 건드리지 않는다 — dir(`DATA_DIR/<키>`) 없는 키만 장부에서 탈락, 변경시 저장.
+ * 소유자 없는 dir(고아)은 소유 없음 그대로 — 어떤 계정에도 귀속시키지 않고, 지우지도 않는다 (고아 자동클레임 경로 보존).
+ * 형식 위반 키(`../` 등)는 core가 dir 조합을 금지하므로 dir 없음과 동일 취급 — 탈락 (장부 데이터 경로조작 방어).
+ * 반환 = 탈락 키 수 (변경 없으면 0·저장 생략 → 재호출 멱등). */
+export function reconcileUsersWithDisk(): number {
+	const users = loadUsers();
+	let dropped = 0;
+	for (const acc of Object.values(users.accounts)) {
+		if (!Array.isArray(acc.userKeys) || acc.userKeys.length === 0) continue;
+		const kept: string[] = [];
+		for (const key of acc.userKeys) {
+			let dirExists = false;
+			if (verifyUserKeyFormat(key)) {
+				try { dirExists = statSync(join(DATA_DIR, key)).isDirectory(); } catch { dirExists = false; } // 미존재·파일이 놓인 경우도 dir 없음
+			}
+			if (dirExists) kept.push(key);
+			else dropped++;
+		}
+		if (kept.length !== acc.userKeys.length) acc.userKeys = kept;
+	}
+	if (dropped > 0) saveUsers(users);
+	return dropped;
+}
+
 // ── 세션 코어 주입 계약 — session-core는 로컬(CoreAuthorizer) 인터페이스로 구조 일치만 요구 ──
 export interface AuthorizerRequest {
 	url?: string; // ws 핸드셰이크 req(IncomingMessage)는 url·headers 보유
@@ -281,6 +322,7 @@ export interface Authorizer {
 	authorizeRequest(req: AuthorizerRequest): Promise<string | null>;
 	checkConversation(username: string, userKey: string): Ownership;
 	claimConversation(username: string, userKey: string): boolean;
+	releaseConversation(username: string, userKey: string): boolean; // Phase 4a — 소유 해제 (server.ts DELETE 라우트가 소비 — 소유권 판정·claim·해제 삼형제 완결)
 	listOwnedKeys(username: string): string[];
 }
 
@@ -297,6 +339,7 @@ export function createAuthorizer(): Authorizer {
 		},
 		checkConversation,
 		claimConversation,
+		releaseConversation,
 		listOwnedKeys: ownedKeysOf,
 	};
 }
