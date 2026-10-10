@@ -244,6 +244,57 @@ function newCore(maxSessions: number, opts: { scanOnBoot?: boolean } = {}) {
 	ws.close();
 }
 
+// ═══════════════ R6. rename·deleteConversation — Phase 3 대화 관리 API ═══════════════
+{
+	const R6 = newCore(5);
+	const ws = connect(R6.core, "r6-user");
+	wsMessage(ws, { type: "prompt", userInput: "원발화 프롬프트", message: "x" }); // 첫 발화 → 자동 타이틀 확정 경로 통과
+	const cpath = join(DATA, "r6-user", "conversation.json");
+	const NEW_TITLE = "새 이름 (rename 타이틀 테스트)";
+	ok("R6a rename — session.title 갱신 + conversation.json 저장",
+		(() => {
+			const r = R6.core.renameConversation("r6-user", NEW_TITLE);
+			const m = JSON.parse(readFileSync(cpath, "utf-8"));
+			return r === true && (R6.core.sessions.get("r6-user") as any).title === NEW_TITLE && m.title === NEW_TITLE;
+		})());
+	ok("R6b rename 길이 규칙 — 100자 초과 slice·빈 문자열 허용",
+		(() => {
+			if (R6.core.renameConversation("r6-user", "가".repeat(150)) !== true) return false;
+			if ((R6.core.sessions.get("r6-user") as any).title !== "가".repeat(100)) return false;
+			return R6.core.renameConversation("r6-user", "") === true && (R6.core.sessions.get("r6-user") as any).title === "";
+		})());
+	ok("R6c rename 미존재 userKey — false (타이틀 불변)",
+		(() => {
+			const before = (R6.core.sessions.get("r6-user") as any).title;
+			const r = R6.core.renameConversation("r6-missing", "더미");
+			return r === false && (R6.core.sessions.get("r6-user") as any).title === before;
+		})());
+	const fbR6 = R6.backends[0] as FakeBackend;
+	ok("R6d delete — 셸 제거 + session_terminated broadcast + backend stop + 데이터 dir 소멸",
+		(() => {
+			const r = R6.core.deleteConversation("r6-user");
+			const term = ws.sent.find((m: any) => m.type === "session_terminated");
+			return r === true && !R6.core.sessions.has("r6-user") && !!term && ws.readyState === 3
+				&& fbR6.stopCount === 1 && !existsSync(join(DATA, "r6-user"));
+		})());
+	ok("R6e delete 미존재 — 멱등 true", R6.core.deleteConversation("r6-user") === true);
+	ok("R6f delete 형식 가드('../x') — false · 세션 미생성", R6.core.deleteConversation("../x") === false && !R6.core.sessions.has("../x"));
+	// 워크스페이스 분리 — TURK_WORKSPACES_ROOT(DATA_DIR 밖) dir도 소멸
+	const wsRoot = mkdtempSync(join(tmpdir(), "ai-turk-wsroot-"));
+	process.env.TURK_WORKSPACES_ROOT = wsRoot;
+	const R6w = newCore(5);
+	const wsW = connect(R6w.core, "r6-ws-user"); // connect → ensureBackend → startBackend가 workspace mkdir
+	const wsDir = join(wsRoot, "r6-ws-user");
+	ok("R6g delete workspace — TURK_WORKSPACES_ROOT(DATA_DIR 밖) dir 소멸",
+		(() => {
+			const r = R6w.core.deleteConversation("r6-ws-user");
+			return r === true && existsSync(wsDir) === false && !R6w.core.sessions.has("r6-ws-user") && !existsSync(join(DATA, "r6-ws-user"));
+		})());
+	wsW.close();
+	delete process.env.TURK_WORKSPACES_ROOT;
+	rmSync(wsRoot, { recursive: true, force: true });
+}
+
 console.log(`\n${pass}/${pass + fail} 통과`);
 rmSync(TMP_DATA, { recursive: true, force: true }); // 임시 데이터 정리
 process.exit(fail === 0 ? 0 : 1);

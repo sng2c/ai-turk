@@ -15,8 +15,8 @@ import { readFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
-import { createSessionCore } from "./session-core.ts";
-import { createAuthorizer, attemptLogin, clearCookie } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH)
+import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
+import { createAuthorizer, attemptLogin, clearCookie, changePassword } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 console.log(`[Turk] __dirname: ${__dirname}`);
@@ -194,6 +194,27 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		return;
 	}
 
+	// ── 비밀번호 변경 (Phase 3 — AUTH시에만) ───────────────────────────
+	if (url.pathname === "/api/passwd" && req.method === "POST") {
+		if (!AUTH) { res.writeHead(404, JSONH); res.end(JSON.stringify({ error: "인증 비활성" })); return; }
+		const user = auth ? await auth.authorizeRequest(req) : null;
+		if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; }
+		let current = "", next = "";
+		try {
+			const body = JSON.parse(await readBody(req));
+			if (typeof body?.current === "string") current = body.current;
+			if (typeof body?.next === "string") next = body.next;
+		} catch { /* 파싱 실패 — 빈 값으로 진행 (검증 실패 처리) */ }
+		// 길이 규칙 라우트 선검사 — changePassword는 불리언 단일 반환이라 오류 원인을 라우트에서 구분:
+		// 길이 위반이 남으면 나머지 실패는 현재 비번 불일치(또는 세션 도중 삭제된 계정)뿐이다.
+		if (next.length < 4) { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "새 비밀번호는 4자 이상" })); return; }
+		if (!changePassword(user, current, next)) { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "현재 비밀번호가 올바르지 않습니다" })); return; }
+		// JWT는 username 기반 — 비번 변경 후에도 세션 유지 (재로그인 불필요)
+		res.writeHead(200, { ...JSONH, "Cache-Control": "no-store" });
+		res.end(JSON.stringify({ ok: true }));
+		return;
+	}
+
 	if (url.pathname === "/api/conversations") {
 		// 1c 대화 레지스트리 — 목록 단일 진원 core.listConversations() (정적 파일 처리 앞에서 가로채기)
 		// Phase 2 — AUTH시 미인증 401, 인증시 username의 own만 필터 (orphan·foreign 제외)
@@ -206,6 +227,34 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		}
 		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-cache" });
 		res.end(JSON.stringify(core.listConversations()));
+		return;
+	}
+
+	// ── 개별 대화 관리 (Phase 3) — rename(PATCH)·delete(DELETE). AUTH off → 404 (dev 무인증 — vite는 수정 금지,
+	// dev에서 이 API가 없는 것은 의도된 계약). 순서 계약: ①형식검증 → ②쿠키 인증 → ③소유권 own만 (fs rm 경로조작 방어) ──
+	const CONV_PREFIX = "/api/conversations/";
+	if (url.pathname.startsWith(CONV_PREFIX) && (req.method === "PATCH" || req.method === "DELETE")) {
+		if (!AUTH) { res.writeHead(404, JSONH); res.end(JSON.stringify({ error: "인증 비활성" })); return; }
+		let id = "";
+		try { id = decodeURIComponent(url.pathname.slice(CONV_PREFIX.length)); } // URL 파서가 남긴 %인코딩 복원 (한글 키 대응)
+		catch { id = ""; } // 깨진 %시퀀스 — 빈값으로 형식 위반 처리
+		if (!verifyUserKeyFormat(id)) { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "대화 키 형식이 올바르지 않습니다" })); return; } // ① ../ 등 경로조작 차단
+		const user = auth ? await auth.authorizeRequest(req) : null;
+		if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; } // ②
+		if (auth?.checkConversation(user, id) !== "own") { res.writeHead(403, JSONH); res.end(JSON.stringify({ error: "권한 없음" })); return; } // ③ orphan·foreign 배제
+		if (req.method === "PATCH") {
+			let title: unknown = null;
+			try { title = JSON.parse(await readBody(req))?.title; } catch { /* 파싱 실패 — undefined로 진행 (아래 400) */ }
+			if (typeof title !== "string") { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "title 문자열이 필요합니다" })); return; }
+			if (!core.renameConversation(id, title)) { res.writeHead(404, JSONH); res.end(JSON.stringify({ error: "대화를 찾을 수 없습니다" })); return; }
+			res.writeHead(200, JSONH);
+			res.end(JSON.stringify({ ok: true }));
+			return;
+		}
+		// DELETE — 셸 제거+dir 소멸 (멱등; removeSession이 session_terminated broadcast·backend stop까지 수행)
+		core.deleteConversation(id);
+		res.writeHead(200, JSONH);
+		res.end(JSON.stringify({ ok: true }));
 		return;
 	}
 

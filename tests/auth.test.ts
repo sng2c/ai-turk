@@ -250,6 +250,34 @@ const firstMsg = (ws: any) => ws.sent[0] as Record<string, any> | undefined;
 	ok("E15b 무인증 코어 정상 키 — pi_ready (기존 동작 회귀 없음)", firstMsg(wsPlain)?.type === "pi_ready" && F.core.sessions.has("f-normal"));
 }
 
+// ═══════════════ F. 비밀번호 변경 (Phase 3 — C 블록의 users.json 유지: alice·bob) ═══════════════
+{
+	ok("F16 changePassword 현재 비번 오답 거부 — false · 자격 불변",
+		(() => {
+			const before = A.loadUsers().accounts.alice;
+			const r = A.changePassword("alice", "틀린비밀", "새비번1234");
+			const after = A.loadUsers().accounts.alice;
+			return r === false && before.hash === after.hash && before.salt === after.salt;
+		})());
+	ok("F17 changePassword 성공 — 새 비번 로그인 가능 · 구 비번 불가",
+		(await (async () => {
+			if (A.changePassword("alice", "alice-pw", "new-pw-1234") !== true) return false;
+			const reLogin = await A.attemptLogin("alice", "new-pw-1234", "ip-f1");
+			const oldLogin = await A.attemptLogin("alice", "alice-pw", "ip-f2");
+			return reLogin.ok === true && !oldLogin.ok;
+		})()));
+	ok("F18 changePassword next 4자 미만 거부 — false · 자격 불변",
+		(() => {
+			const before = A.loadUsers().accounts.alice;
+			return A.changePassword("alice", "new-pw-1234", "ab") === false
+				&& A.changePassword("alice", "new-pw-1234", "") === false
+				&& A.loadUsers().accounts.alice.hash === before.hash && A.loadUsers().accounts.alice.salt === before.salt;
+		})());
+	ok("F18b 미존재 계정 거부 — false (userKeys·스키마 불변)",
+		A.changePassword("ghost-user-xyz", "x", "abcd") === false
+			&& A.ownedKeysOf("alice").includes("a-key")); // 자격 교체 사이드이펙트 없음
+}
+
 console.log(`\n${pass}/${pass + fail} 통과`);
 rmSync(TMP_DATA, { recursive: true, force: true }); // 임시 데이터 정리
 process.exit(fail === 0 ? 0 : 1);

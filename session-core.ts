@@ -124,6 +124,8 @@ export interface SessionCore {
 	ensureBackend(session: Session): boolean; // 풀 할당 — 멱등(alive면 no-op). cap 도달 시 유휴 LRU victim 회수 후 할당, victim 없으면 false
 	reclaimSweep(): number; // 유휴 백엔드 회수 스윕 1회 실행 (60s 인터벌 + 테스트·수동 트리거용) — 회수 수 반환
 	listConversations(username?: string): ConversationSummary[]; // 대화 레지스트리 목록 (1c) — authorize 주입 시 username의 own만 필터 (orphan·foreign 제외)
+	renameConversation(userKey: string, title: string): boolean; // 대화 이름 변경 (Phase 3) — 세션 셸·conversation.json 동시 갱신. 형식 위반·미존재 → false
+	deleteConversation(userKey: string): boolean; // 대화 삭제 (Phase 3) — 셸 제거(removeSession 재사용) + 데이터·워크스페이스 dir 소멸. 멱등 — 형식 위반만 false
 }
 
 // 대화 레지스트리 항목 (1c) — GET /api/conversations 응답 본체
@@ -481,6 +483,34 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		}));
 		list.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
 		return list;
+	}
+
+	// ── 개별 대화 관리 (Phase 3) — 드로어 항목 PATCH/DELETE의 단일 진원 ──
+	// 이름 변경 — 형식 검증(경로조작 방어) 후 세션 셸의 title을 갱신하고 conversation.json에 저장.
+	// title 규칙: 빈 문자열·100자 이하 허용, 초과분은 slice(0,100) (첫 프롬프트 30자 자동 타이틀과 취지 동일).
+	function renameConversation(userKey: string, title: string): boolean {
+		if (!verifyUserKeyFormat(userKey) || typeof title !== "string") return false;
+		const session = sessions.get(userKey);
+		if (!session) return false; // 미존재 대화 — 레지스트리에 셸이 없는 키
+		session.title = title.length > 100 ? title.slice(0, 100) : title;
+		saveConversationMeta(userKey, { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt });
+		console.log(`[${userKey.slice(0, 8)}] [Registry] 이름 변경: ${session.title}`);
+		return true;
+	}
+
+	// 삭제 — 존재 세션은 removeSession 재사용(session_terminated broadcast·WS close·스케줄 destroy·backend stop이
+	// 전부 이관) 후 데이터 dir(상태파일·conversation.json·schedules.json 통째)를 rm. 멱등 — 셸이 이미 없어도 dir
+	// 소멸·true로 귀결 (드로어 재시도·폴링 레이스에서 안전). workspacePath가 DATA_DIR 밖(TURK_WORKSPACES_ROOT)이면 그것도 제거.
+	function deleteConversation(userKey: string): boolean {
+		if (!verifyUserKeyFormat(userKey)) return false; // rm 경로조작 방어 — server.ts 라우트와 이중 가드
+		removeSession(userKey); // 미존재 셸은 no-op — 멱등 성립
+		try { rmSync(`${DATA_DIR}/${userKey}`, { recursive: true, force: true }); } catch (e) { console.log(`[${userKey.slice(0, 8)}] [Registry] 데이터 dir 삭제 실패: ${e instanceof Error ? e.message : e}`); }
+		try {
+			const wsPath = workspacePath(userKey);
+			if (!wsPath.startsWith(`${DATA_DIR}/`)) rmSync(wsPath, { recursive: true, force: true }); // DATA_DIR 내부면 위 rm이 소멸시킨 뒤라 무해 재시도
+		} catch { /* 무시 */ }
+		console.log(`[${userKey.slice(0, 8)}] [Registry] 대화 삭제 — 목록·스케줄·백엔드 정리`);
+		return true;
 	}
 
 	// ── 백엔드 시작 (세션별) ────────────────────────────────────────────────
@@ -841,5 +871,5 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		iv.unref?.(); // 서버 생명 유지 책임은 listen 쪽 — keepalive가 프로세스를 붙잡지 않게 (dev·prod 동일)
 	}
 
-	return { sessions, maxSessions: MAX_BACKENDS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive, ensureBackend, reclaimSweep, listConversations };
+	return { sessions, maxSessions: MAX_BACKENDS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive, ensureBackend, reclaimSweep, listConversations, renameConversation, deleteConversation };
 }

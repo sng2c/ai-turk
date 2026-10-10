@@ -224,6 +224,21 @@ export async function attemptLogin(username: string, password: string, ip: strin
 	return { ok: true, username, setCookie: issueCookie(token) };
 }
 
+// ── 비밀번호 변경 (Phase 3) — 드로어 계정 섹션의 POST /api/passwd 단일 진원 ──
+// 계정 미존재·현재 비번 불일치·next 길이 4 미만 → false. 성공 시 hashPassword(next)로 교체·저장.
+// 오류 문구 구분(현재 비번 오답 vs 길이 규칙)은 server.ts 라우트가 담당(라우트가 next 길이를 먼저 검사) —
+// 본 함수는 불리언만 반환 (attemptLogin과 달리 열거 방지 대상이 아님: 호출자는 이미 인증된 본인).
+export function changePassword(username: string, current: string, next: string): boolean {
+	const users = loadUsers();
+	const acc: UserAccount | undefined = users.accounts[username];
+	if (!acc) return false;
+	if (!verifyPassword(current, acc)) return false; // scrypt 선검증 — 비일관 타이밍 최소화 (성공 경로와 비용 유사)
+	if (!next || next.length < 4) return false;
+	Object.assign(acc, hashPassword(next)); // salt·hash 교체 — userKeys·createdAt 보존
+	saveUsers(users);
+	return true;
+}
+
 // ── 대화 소유권 — 계정 경계 (userKey ↔ 계정 userKeys) ─────────────────────
 export type Ownership = "own" | "orphan" | "foreign";
 

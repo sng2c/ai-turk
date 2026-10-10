@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey, reflectUserKey, applyUserTitle,
@@ -8,6 +8,7 @@ import {
 } from "./lib/turk";
 import type { TurkState, ToolStatus } from "./lib/turk";
 import { kvSet, kvGet } from "./lib/storage";
+import ConversationDrawer from "./components/ConversationDrawer";
 
 // 모바일(터치) 감지 — 모바일에서는 자동 포커스로 가상 키보드 자동 노출 방지
 const IS_FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(hover: hover) and (pointer: fine)")?.matches === true;
@@ -66,6 +67,9 @@ export default function App() {
 			reader.readAsDataURL(f);
 		}
 	};
+
+	// ── 대화 드로어 (Phase 3) — 열림 상태만 소유. 목록·폴링·비번 모달은 ConversationDrawer 내부 ──
+	const [drawerOpen, setDrawerOpen] = useState(false);
 
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
@@ -770,7 +774,8 @@ export default function App() {
 		};
 		const onTouchStart = (e: TouchEvent) => {
 			const t = e.target as HTMLElement;
-			if (t.closest("input, textarea, .turk-message")) return;
+			// .turk-drawer 예외 — 드로어 영역 터치는 전역 스크롤 하이재크 제외 (Phase 3; 메시지박스 로직은 불변)
+			if (t.closest("input, textarea, .turk-message, .turk-drawer")) return;
 			// 새 터치 시 기존 관성 취소
 			if (inertiaRef.current !== null) { cancelAnimationFrame(inertiaRef.current); inertiaRef.current = null; }
 			const now = performance.now();
@@ -814,7 +819,7 @@ export default function App() {
 		// 마우스 휠/트랙패드 스크롤도 화면 어디서나 출력창에 연동
 		const onWheel = (e: WheelEvent) => {
 			const t = e.target as HTMLElement;
-			if (t.closest("input, textarea")) return; // 입력창은 자체 스크롤 유지
+			if (t.closest("input, textarea, .turk-drawer")) return; // 입력창·드로어는 자체 스크롤 유지
 			const el = messageRef.current;
 			if (!el) return;
 			el.scrollTop += e.deltaY;
@@ -1041,6 +1046,7 @@ export default function App() {
 			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
 				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-logo-bot-spin" : "")} />} AI-Turk<sub className="turk-backend">{backendKind}</sub></h1>
 				<span className="turk-mode">
+				<button className="turk-drawer-btn" onClick={() => setDrawerOpen((v) => !v)} title="대화 목록"><Menu className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<button className="turk-model-btn" onClick={() => {
 					if (menuMode.current === "model") {
@@ -1199,6 +1205,8 @@ export default function App() {
 				</button>
 			</form>
 			{(!restored || modelChanging || loading || !piReady) && <div className="turk-dim-overlay" />}
+			{/* 대화 드로어 (Phase 3) — 조건부 마운트: 폴링·계정 fetch는 close(unmount)와 함께 해제 */}
+			{drawerOpen && <ConversationDrawer userKey={userKey} onClose={() => setDrawerOpen(false)} />}
 		</div>
 	);
 }

@@ -774,3 +774,329 @@ body {
 		max-width: none;
 	}
 }
+
+/* ══ 대화 드로어 (Phase 3) ══════════════════════════════════════════════ */
+/* 로그인 페이지(LOGIN_PAGE) 톤을 따른 순검정(#000) 밀침 — 톤 변수는 상태 색·흰/검 텍스트에만 결합 */
+
+.turk-drawer-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.55);
+	z-index: 70;
+}
+
+.turk-drawer {
+	position: fixed;
+	top: 0;
+	left: 0;
+	bottom: 0;
+	width: min(19rem, 84vw);
+	background: #000;
+	color: #fff;
+	font-family: "NeoDunggeunmo", monospace;
+	z-index: 71;
+	border-right: 1px solid #222;
+	display: flex;
+	flex-direction: column;
+}
+
+.turk-drawer-head {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0.65rem 0.75rem;
+	border-bottom: 1px solid #222;
+	flex-shrink: 0;
+}
+
+.turk-drawer-title {
+	flex: 1 1 auto;
+	font-size: 1rem;
+	letter-spacing: 2px;
+}
+
+.turk-drawer-icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.85rem;
+	height: 1.85rem;
+	padding: 0;
+	background: none;
+	border: none;
+	border-radius: 8px;
+	color: var(--muted-foreground);
+	cursor: pointer;
+	transition: color 0.1s;
+}
+
+@media (hover: hover) {
+	.turk-drawer-icon-btn:hover { color: var(--foreground); }
+}
+
+.turk-drawer-list {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 0.35rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.071rem;
+}
+
+.turk-drawer-empty {
+	padding: 1.1rem 0.5rem;
+	color: var(--muted-foreground);
+	font-size: 0.82rem;
+	line-height: 1.5;
+}
+
+.turk-drawer-row {
+	display: flex;
+	align-items: center;
+	gap: 0.05rem;
+	border-radius: 8px;
+	color: var(--foreground);
+}
+
+@media (hover: hover) {
+	.turk-drawer-row:hover { background: rgba(255, 255, 255, 0.06); }
+}
+
+/* 현재 대화 하이라이트 — 좌측 success 바 + 살짝 밝은 배경 */
+.turk-drawer-row-current {
+	background: #111;
+	box-shadow: inset 0.143rem 0 0 var(--success);
+}
+
+.turk-drawer-item-main {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	background: none;
+	border: none;
+	color: inherit;
+	font-family: inherit;
+	font-size: 0.88rem;
+	line-height: 1.3;
+	text-align: left;
+	cursor: pointer;
+	padding: 0.5rem 0.3rem;
+}
+
+.turk-drawer-item-title {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 배지 — 스케줄 수 · 스트리밍 깜빡임 · 활성 점 (우측 고정) */
+.turk-drawer-badges {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	font-size: 0.62rem;
+}
+
+.turk-drawer-sch { color: var(--warning); line-height: 1; }
+
+.turk-drawer-streaming {
+	color: var(--success);
+	line-height: 1;
+	animation: turk-drawer-blink 0.8s steps(2) infinite;
+}
+
+.turk-dot {
+	display: inline-block;
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 50%;
+	background: var(--success);
+}
+
+.turk-dot-starting { background: var(--warning); }
+
+@keyframes turk-drawer-blink {
+	0% { opacity: 1; }
+	100% { opacity: 0.15; }
+}
+
+.turk-drawer-item-btn {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0.35rem;
+	background: none;
+	border: none;
+	border-radius: 6px;
+	color: var(--muted-foreground);
+	cursor: pointer;
+	transition: color 0.1s;
+}
+
+.turk-drawer-item-btn:disabled { opacity: 0.3; cursor: default; }
+
+@media (hover: hover) {
+	.turk-drawer-item-btn:hover { color: var(--foreground); }
+	.turk-drawer-item-btn.turk-drawer-item-btn-danger:hover { color: var(--destructive); }
+}
+
+/* 이름 변경 인라인 입력 — 로그인 입력 톤 (#111·#333·radius 8) */
+.turk-drawer-rename-input {
+	flex: 1 1 auto;
+	min-width: 0;
+	margin: 0.3rem 0;
+	padding: 0.35rem 0.6rem;
+	background: #111;
+	color: #fff;
+	border: 1px solid #333;
+	border-radius: 8px;
+	font-family: inherit;
+	font-size: 0.88rem;
+}
+
+.turk-drawer-rename-input:focus { outline: none; border-color: #666; }
+
+/* 풋터 계정 섹션 */
+.turk-drawer-foot {
+	flex-shrink: 0;
+	padding: 0.55rem 0.8rem;
+	border-top: 1px solid #222;
+	display: flex;
+	flex-direction: column;
+	gap: 0.2rem;
+}
+
+.turk-drawer-user {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 0.85rem;
+	padding: 0.3rem 0;
+	color: var(--foreground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.turk-drawer-act {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.3rem 0;
+	background: none;
+	border: none;
+	color: var(--muted-foreground);
+	font-family: inherit;
+	font-size: 0.85rem;
+	text-align: left;
+	cursor: pointer;
+	transition: color 0.1s;
+}
+
+@media (hover: hover) {
+	.turk-drawer-act:hover { color: var(--foreground); }
+}
+
+/* 비번 모달 — 드로어 내부 오버레이 (absolute = 드로어 영역만 뒤임) */
+.turk-drawer-pw-overlay {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.8);
+	z-index: 80;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1rem;
+}
+
+.turk-drawer-pw-card {
+	width: 100%;
+	max-width: 320px;
+	background: #000;
+	color: #fff;
+	font-family: "NeoDunggeunmo", monospace;
+	border: 1px solid #333;
+	border-radius: 8px;
+	padding: 1.1rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
+}
+
+.turk-drawer-pw-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 0.4rem;
+	font-size: 1rem;
+	letter-spacing: 1px;
+}
+
+.turk-drawer-pw-card input {
+	display: block;
+	width: 100%;
+	padding: 12px 14px;
+	margin-bottom: 0;
+	background: #111;
+	color: #fff;
+	border: 1px solid #333;
+	border-radius: 8px;
+	font-family: inherit;
+	font-size: 14px;
+}
+
+.turk-drawer-pw-card input:focus { outline: none; border-color: #666; }
+
+.turk-drawer-pw-btn {
+	display: block;
+	width: 100%;
+	padding: 12px;
+	margin-top: 6px;
+	background: #fff;
+	color: #000;
+	border: 0;
+	border-radius: 8px;
+	font-family: inherit;
+	font-size: 15px;
+	cursor: pointer;
+}
+
+.turk-drawer-pw-btn:disabled { opacity: 0.5; cursor: wait; }
+
+.turk-drawer-pw-msg {
+	min-height: 18px;
+	text-align: center;
+	font-size: 12px;
+	color: #ff6b6b; /* 로그인 페이지 #msg와 동일 문구색 */
+	white-space: pre-line;
+	line-height: 1.4;
+}
+
+.turk-drawer-pw-msg.ok { color: var(--success); }
+
+/* 드로어 토글 버튼 — 헤더 turk-mode 선두 (스케줄 버튼과 동일 크기·톤) */
+.turk-drawer-btn {
+	border-radius: var(--radius-md);
+	background: none;
+	border: none;
+	cursor: pointer;
+	font-size: var(--turk-font-size);
+	padding: 0.143rem 0.286rem;
+	color: var(--muted-foreground);
+	line-height: 1;
+	transition: opacity 0.1s;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2em;
+}
+
+@media (hover: hover) {
+	.turk-drawer-btn:hover { opacity: 0.7; }
+}
