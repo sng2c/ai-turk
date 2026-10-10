@@ -780,7 +780,7 @@ body {
 	top: 0;
 	left: 0;
 	bottom: 0;
-	width: min(19rem, 84vw);
+	width: min(24rem, 88vw);
 	background: #000;
 	color: #fff;
 	font-family: "NeoDunggeunmo", monospace;
