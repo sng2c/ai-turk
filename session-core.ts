@@ -591,7 +591,10 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 					}
 				}
 				session.scheduler.drainQueue();
-				if (session.pushSubscription) sendPushNotification(session, ev);
+				// 서버측 푸시 억제 (261010) — session.ws가 살아있으면 "이 대화를 포그라운드로 보는 탭"이 있다는 뜻
+				// (App이 visibilitychange로 백그라운드 진입 시 WS를 능동 종료하는 계약 기반 — 주소창 해시와 무관).
+				// 다른 대화를 보고 있다면 이 대화의 ws는 0 → 푸시 발송 (다른 대화 알림은 받아야 맞음).
+				if (session.pushSubscription && session.ws.size === 0) sendPushNotification(session, ev);
 				// ── 서버 자가수정 주입 (broadcast 후 — 이벤트 순서: agent_end(willRetry) → agent_start(재시도 턴)).
 				//    클라 전담 시절엔 백그라운드(WS 끊김) 턴의 위반 응답이 무보정·무기록으로 유실됨 (261008 #chn —
 				//    최종 응답 message 내 미이스케이프 따옴표 1건 → 출력버퍼 기록 누락). 소진 시 실패 확정 마감.

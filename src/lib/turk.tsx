@@ -179,11 +179,14 @@ function ensureLocalKey(): string {
 	return k;
 }
 // 현재 유효 userKey 계산 — 해시(#뒤 값) 우선: 있으면 그 키, 없으면 기본키(발급/조회 localStorage).
-// 발급키는 진입 시 reflectUserKey로 해시에 반영 — 주소창이 항상 현재 userKey 표시(복사=공유, 편집=전환).
+// 해시 진입은 마지막 대화로 localStorage 기본값을 갱신 (261010) — 루트 즐겨찾기 = 최근 대화 재개.
 export function resolveUserKey(): string {
 	const h = hashUserKey();
-	if (h) return h; // 해시 → 그 키로 초기화 (localStorage 미사용)
-	return ensureLocalKey(); // 없으면 기본키 — 발급(첫 방문) 또는 조회
+	if (h) {
+		try { localStorage.setItem("turk-user-key", h); } catch { /* 무시 */ } // 마지막 대화 갱신 — 부트 스크립트(index.html)와 동일 규칙
+		return h; // 해시 → 그 키로 초기화
+	}
+	return ensureLocalKey(); // 없으면 기본키 — 발급(첫 방문) 또는 조회(=마지막 대화)
 }
 // 현재 userKey를 URL hash에 반영 — 멀티 userKey(탭별 #<이름> 병렬 운영)·공유(주소 복사=세션 진입).
 // pushState — 진짜 히스토리 엔트리 생성. replaceState는 현재 엔트리를 몰래 고치기만 해서 브라우저가

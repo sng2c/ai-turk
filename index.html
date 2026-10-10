@@ -26,7 +26,8 @@
         try { if (h) h = decodeURIComponent(h); } catch (e) {}
         var k;
         if (h) {
-          k = h; // 해시 우선 — 세션 오버라이드(저장 미사용, turk.tsx와 동일)
+          k = h; // 해시 우선 — 세션 오버라이드(딥링크·알림 클릭·드로어 전환)
+          try { localStorage.setItem("turk-user-key", h); } catch (e) {} // 261010 — 해시 진입 = 마지막 대화 갱신 → 루트 즐겨찾기가 최근 대화로 재개 (ChatGPT식)
         } else {
           k = localStorage.getItem("turk-user-key");
           if (!k) { k = (crypto.randomUUID && crypto.randomUUID()) || uuidv4Safe(); localStorage.setItem("turk-user-key", k); }
