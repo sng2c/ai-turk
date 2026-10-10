@@ -293,7 +293,9 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		if (s.isDirectory()) filePath = join(filePath, "index.html");
 		const data = await readFile(filePath);
 		const ext = extname(filePath);
-		res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream", "Cache-Control": STATIC_CACHE[ext] || "no-cache" });
+		// sw.js는 항상 재검증 — 서비스워커 업데이트가 HTTP 캐시로 늦어지면 푸시 동작 변경이 기기에 하루씩 늦게 반영됨
+		const cache = url.pathname === "/sw.js" ? "no-cache" : (STATIC_CACHE[ext] || "no-cache");
+		res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream", "Cache-Control": cache });
 		res.end(data);
 	} catch {
 		try {

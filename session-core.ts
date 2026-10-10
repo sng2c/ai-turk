@@ -370,7 +370,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		const { text, parsed, valid } = parseTurkResponse(ev);
 		if (!text) return;
 		if (!valid || parsed?.silent === true) return;
-		const payload = JSON.stringify({ body: text, sessionId: session.agentSessionId || "", url: "/#" + session.userKey, userKey: session.userKey });
+		const payload = JSON.stringify({ body: text, sessionId: session.agentSessionId || "", url: "/#" + session.userKey, userKey: session.userKey, title: session.title }); // title = 대화 별명 (1c) — sw.js가 푸시 제목으로 우선 사용, null이면 키 표기 폴백
 		webpush.sendNotification(session.pushSubscription, payload)
 			.then(() => console.log(`[${session.userKey.slice(0, 8)}] [Push] 전송 성공`))
 		.catch((err: any) => {
