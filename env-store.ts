@@ -3,9 +3,10 @@
  *
  * 단일 책임: users.json 안의 계정 env 필드(UserAccount.env)와 구 대화 env.json의 마이그레이션.
  * 키의 주인 = 사람 = 계정 — 계정의 모든 대화가 자기 계정의 env를 공유 주입받는다.
- * 값의 유일한 흐름은 주입 계통(session-core → auth.accountEnv → BackendOptions.workspaceEnv →
- * 백엔드 spawn 프로세스 환경)이며, 어떤 응답·목록·로그에도 값을 반환하지 않는다
- * (listAccountEnvKeys는 이름만 — "값 반환 API 존재 금지" 계약. LLM 노출 경로와 구조적으로 분리).
+ * 값의 주요 흐름: 주입 계통(session-core → auth.accountEnv → BackendOptions.workspaceEnv →
+ * 백엔드 spawn 프로세스 환경). 값 열림 경계(261010): **LLM만 잠근다 — 사람(쿠기 계정 = 소유자)은
+ * 열람 허용** → GET /api/env가 값을 반환한다. 모델 컨텍스트만 계약 문단으로 0 유지 (AGENTS.md).
+ * (listAccountEnvKeys는 이름만 — 지시 섹션 생성 전용: 문자열이 모델로 가는 통로이기 때문)
  *
  * 저장: users.json 내부 (별도 파일 아님) — 쓰기·0600·스키마 방어는 auth.ts saveUsers가 단일 진원.
  * 소유권 처리는 서버 라우트(/api/env/*)가 전담: 키의 주인이 계정이므로 쿠키 인증만으로 충분 — userKey 매개변수·소유권 검사 불필요.
@@ -56,10 +57,8 @@ export function loadAccountEnv(username: string): Record<string, string> {
 	return normalizeAccountEnv(acc.env);
 }
 
-/** 계정 env 이름 목록만 반환 — 결정적 순서(정렬). 화면·AGENTS.md·목록은 항상 이름만 (계약). */
-export function listAccountEnvKeys(username: string): string[] {
-	return Object.keys(loadAccountEnv(username)).sort();
-}
+// listAccountEnvKeys는 제거 (261010) — GET이 값 열림으로 전환되고 지시 섹션은 session-core가
+// auth.accountEnv의 키를 Object.keys로 채택 — 이름 전용 경로는 이제 applyEnvSection 내부뿐.
 
 /** upsert — 검증 순서: 계정 존재 → 키 형식·예약 → 값 타입·크기 → 키 수 상한. 기존 키 갱신은 상한과 무관.
  *  username은 쿠키 인증(AUTH)으로 이미 확정된 본인을 서버가 전달한다 — 형식 검사는 env 키에만 집중 (계정 키는 경로로 쓰이지 않음). */

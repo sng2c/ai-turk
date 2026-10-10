@@ -156,7 +156,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 	// 이름의 주인은 계정 — 데이터 소스는 쿠키 계정(env 전체), userKey는 브라우저에서 보내지 않는다.
 	// 목록은 이름만, 값은 절대 화면에 표시하지 않는다 (입력란 masked). 서버(env-store)가 규칙·예약·상한 검증의 단일 진원.
 	const [envOpen, setEnvOpen] = useState(false);
-	const [envKeys, setEnvKeys] = useState<string[]>([]); // 이름만 — 값을 다루는 상태는 존재하지 않음
+	const [envs, setEnvs] = useState<Record<string, string>>({}); // key→value — 소유자 열림 허용 (261010: LLM만 잠금)
 	const [envKeyInput, setEnvKeyInput] = useState("");
 	const [envValueInput, setEnvValueInput] = useState("");
 	const [envBusy, setEnvBusy] = useState(false);
@@ -167,8 +167,11 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 			const r = await fetch("/api/env"); // 쿠키 계정의 env — userKey 매개변수 없음 (계정 스코프 계약)
 			if (!r.ok) return;
 			const j: unknown = await r.json();
-			if (j && typeof j === "object" && Array.isArray((j as { keys?: unknown }).keys)) {
-				setEnvKeys((j as { keys: string[] }).keys.filter((k) => typeof k === "string"));
+			if (j && typeof j === "object" && (j as { env?: unknown }).env && typeof (j as { env?: unknown }).env === "object") {
+				const e = (j as { env: Record<string, unknown> }).env;
+				const clean: Record<string, string> = {};
+				for (const [k, v] of Object.entries(e)) if (typeof k === "string" && typeof v === "string") clean[k] = v;
+				setEnvs(clean);
 			}
 		} catch { /* 무시 — 재오픈·다음 액션이 재시도 */ }
 	}, []);
@@ -291,10 +294,11 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 								<button className="turk-drawer-icon-btn" onClick={closeEnvModal} title="닫기"><X className="turk-ico" /></button>
 							</header>
 							<div className="turk-env-list">
-								{envKeys.length === 0 && <div className="turk-env-empty">등록된 환경 변수가 없습니다</div>}
-								{envKeys.map((k) => (
+								{Object.keys(envs).length === 0 && <div className="turk-env-empty">등록된 환경 변수가 없습니다</div>}
+								{Object.entries(envs).map(([k, v]) => (
 									<div key={k} className="turk-env-row">
 										<span className="turk-env-key">{k}</span>
+										<span className="turk-env-value" title="변경은 동일 키로 다시 저장">{v}</span>
 										<button className="turk-drawer-item-btn" disabled={envBusy} onClick={() => deleteEnvKey(k)} title="삭제"><Trash2 className="turk-ico" /></button>
 									</div>
 								))}

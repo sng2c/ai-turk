@@ -90,11 +90,11 @@ function makeWs(): any {
 	ok("A2 이름 목록 — 정렬·이름만 반환 (값 반환 경로는 주입 계통뿐 계약)",
 		E.setAccountEnv("acct-a", "B_KEY", "dummy-b").ok === true
 		&& E.setAccountEnv("acct-a", "A_KEY", "dummy-a2").ok === true
-		&& JSON.stringify(E.listAccountEnvKeys("acct-a")) === JSON.stringify(["A_KEY", "B_KEY", "NOTION_TOKEN"]));
+		&& JSON.stringify(Object.keys(E.loadAccountEnv("acct-a")).sort()) === JSON.stringify(["A_KEY", "B_KEY", "NOTION_TOKEN"]));
 	ok("A3 upsert 갱신 — 같은 키 덮어씀 (기존 키는 상한과 무관)·목록 무변경",
 		E.setAccountEnv("acct-a", "A_KEY", "dummy-a3").ok === true
 		&& E.loadAccountEnv("acct-a").A_KEY === "dummy-a3"
-		&& E.listAccountEnvKeys("acct-a").length === 3);
+		&& Object.keys(E.loadAccountEnv("acct-a")).length === 3);
 	ok("A4 delete 멱등 + 값 소멸 + 이후 저장 정상",
 		E.deleteAccountEnvKey("acct-a", "A_KEY") === true
 		&& E.deleteAccountEnvKey("acct-a", "A_KEY") === true // 멱등
@@ -103,7 +103,7 @@ function makeWs(): any {
 		&& E.loadAccountEnv("acct-a").SECOND === "dummy-second");
 	ok("A5 미존재 계정 — load {} · list [] · set 거부 · delete false (멱등 계약 예외: 장부에 대상 없음)",
 		Object.keys(E.loadAccountEnv("acct-ghost")).length === 0
-		&& E.listAccountEnvKeys("acct-ghost").length === 0
+		&& Object.keys(E.loadAccountEnv("acct-ghost")).length === 0
 		&& E.setAccountEnv("acct-ghost", "KEY", "v").ok === false
 		&& E.deleteAccountEnvKey("acct-ghost", "KEY") === false);
 	// 스키마 오염 env 필드 — hand-edit 방어 (문자열 쌍만 수용)

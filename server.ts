@@ -16,7 +16,7 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
-import { listAccountEnvKeys, setAccountEnv, deleteAccountEnvKey, isEnvKeyName, migrateConversationEnvToAccounts } from "./env-store.ts"; // 4c-refit — 계정별 환경변수 (이름 목록·upsert·멱듬 삭제·구 대화 env.json 이관 — 값은 주입 계통에만)
+import { loadAccountEnv, setAccountEnv, deleteAccountEnvKey, isEnvKeyName, migrateConversationEnvToAccounts } from "./env-store.ts"; // 4c-refit — 계정별 환경변수 (값 열림=소유자만·upsert·멱듬 삭제·구 대화 env.json 이관 — 모델 컨텍스트로만 값은 0)
 import { createAuthorizer, attemptLogin, clearCookie, changePassword, reconcileUsersWithDisk } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경 · reconcileUsersWithDisk는 Phase 4a 부팅 잔여키 대사
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -208,9 +208,10 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		const user = auth ? await auth.authorizeRequest(req) : null;
 		if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; }
 		if (req.method === "GET") {
-			// 이름 목록만 반환 — 값은 이 API 체계 어디에도 존재하지 않는다
+			// 값 열람 — 소유자(쿠기 계정)에게는 허용 (261010): 사람은 보고, LLM은 못 보는 경계.
+			// 모델 컨텍스트로 가는 문자열(AGENTS.md)은 이름만 (applyEnvSection 경로 유지)
 			res.writeHead(200, { ...JSONH, "Cache-Control": "no-store" });
-			res.end(JSON.stringify({ keys: listAccountEnvKeys(user) }));
+			res.end(JSON.stringify({ env: loadAccountEnv(user) }));
 			return;
 		}
 		if (req.method === "POST") {

@@ -1117,6 +1117,15 @@ body {
 
 .turk-env-row:last-child { border-bottom: none; }
 
+.turk-env-value {
+	color: var(--muted-foreground);
+	font-size: 0.86em;
+	word-break: break-all;
+	user-select: text;
+	flex: 1;
+	min-width: 0;
+}
+
 .turk-env-key {
 	font-size: 0.82rem;
 	overflow: hidden;
