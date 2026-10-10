@@ -210,18 +210,18 @@ ok("C4 값 4KB 경계 — 4096바이트 통과 · 4097 초과 거부 · 한글 �
 		authorize: A.createAuthorizer() as never, // 실 authorizer 전체 경로 — 쿠키 JWT → username → userKey 역색인 → 계정 env
 		backendFactory: (opts: BackendOptions) => { const b = new FakeBackend(opts); backends.push(b); return b; },
 	});
-	const settle = () => sleep(60); // 실 authorizer(jwtVerify 비동기) 정착 대기 — setImmediate로는 부족 (V26 스케줄 실측)
+	const waitFor = async (cond: () => boolean, ms = 3000): Promise<boolean> => { const end = Date.now() + ms; while (Date.now() < end) { if (cond()) return true; await sleep(20); } return cond(); } // 실 authorizer(jwtVerify 비동기) 정착 대기 — 고정 sleep은 부하·노드 버전에 따라 60ms가 밀리는 플레이크(gs2 V24 F1 실측) → 조건 폴링
 	const token = await A.issueToken("acct-core");
 	const ws1 = makeWs();
 	core.handleConnection(ws1, { url: `/ws?u=${encodeURIComponent("envcore-key")}`, headers: { cookie: `turk_auth=${token}` } });
-	await settle();
+	await waitFor(() => backends.length >= 1);
 	const b1 = backends[0];
 	ok("F1 startBackend가 opts.workspaceEnv로 계정 env 전달 — 쿠키 인증된 계정 소유 userKey 경로 · 값 단언",
 		!!b1 && JSON.stringify(b1?.opts.workspaceEnv) === JSON.stringify({ FOO_TOKEN: "dummy-foo-1", BAR_KEY: "dummy-bar-2" })
 		&& b1?.opts.cwd === SC.workspacePath("envcore-key"));
 	const ws2 = makeWs();
 	core.handleConnection(ws2, { url: `/ws?u=${encodeURIComponent("envcore-key-2")}`, headers: { cookie: `turk_auth=${token}` } });
-	await settle();
+	await waitFor(() => backends.length >= 2);
 	ok("F2 같은 계정 두 대화 — 동일 계정 env 공유 주입 (JSON 동등)",
 		backends.length === 2 && JSON.stringify(backends[1]?.opts.workspaceEnv) === JSON.stringify(backends[0]?.opts.workspaceEnv));
 	ok("F3 워크스페이스 AGENTS.md에 계정 env 이름 목록 — 값은 절대 미기록 · 계정 스코프 표기", (() => {
