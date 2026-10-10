@@ -23,6 +23,7 @@ ENV_FILE=""
 ENV_FLAG=""
 CMD=""
 PROD=0
+SUB_ARGS=() # 위치인자 보존 (Phase 2 user 서브커맨드 전달용)
 while [ $# -gt 0 ]; do
   case "$1" in
     --env|-e)
@@ -35,7 +36,11 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     *)
-      CMD="$1"
+      if [ -z "$CMD" ]; then
+        CMD="$1"         # 첫 위치인자 = 명령 (기존 관례)
+      else
+        SUB_ARGS+=("$1") # 이후 위치인자 보존 — user 서브커맨드 전달용
+      fi
       shift
       ;;
   esac
@@ -111,6 +116,7 @@ AI Turk 제어 도구
   build     프로덕션 빌드
   pi        pi RPC 프로세스 상태
   ws        WebSocket 연결 테스트
+  user      계정 관리 — user-cli 위임 (add·passwd·rm·list·claim)
   session   현재 세션 정보 (HTTP)
   help      이 도움말
 
@@ -386,6 +392,10 @@ case "${CMD:-help}" in
   pi)      cmd_pi ;;
   ws)      cmd_ws ;;
   session) cmd_session ;;
+  user)
+    # Phase 2 계정 관리 — user-cli.ts 위임 (add·passwd·rm·list·claim; exit code 전파)
+    npx tsx "$TURK_DIR/user-cli.ts" ${SUB_ARGS[@]+"${SUB_ARGS[@]}"}
+    ;;
   help|--help|-h) usage ;;
   "") usage ;;
   *) echo "알 수 없는 명령: $CMD"; usage; exit 1 ;;

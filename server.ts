@@ -16,6 +16,7 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createSessionCore } from "./session-core.ts";
+import { createAuthorizer, attemptLogin, clearCookie } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH)
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 console.log(`[Turk] __dirname: ${__dirname}`);
@@ -39,9 +40,99 @@ const PORT = parseInt(process.env.TURK_PORT || "3000");
 const HOST = process.env.TURK_HOST || "127.0.0.1";
 const DIST_DIR = join(__dirname, "dist");
 
+// ── Phase 2 인증 (TURK_AUTH=1 — .env 로더 뒤에서 판정; 미설정=기존 무인증 동작 그대로) ──
+const AUTH = !!process.env.TURK_AUTH;
+const auth = AUTH ? createAuthorizer() : null; // authorize 주입 — session-core는 구조 일치만 요구
+
 // ── 세션 코어 (공용) — .env 로드 후 생성 ─────────────────────────────────
-const core = createSessionCore();
+const core = createSessionCore(auth ? { authorize: auth } : {});
 const MAX_SESSIONS = core.maxSessions;
+
+const JSONH = { "Content-Type": "application/json" };
+
+// ── 요청 본문 수집 (작은 JSON 한정 — 64KB 상한 초과 시 파기) ─
+function readBody(req: IncomingMessage): Promise<string> {
+	return new Promise((resolve) => {
+		const chunks: Buffer[] = [];
+		let size = 0;
+		req.on("data", (c: Buffer) => {
+			size += c.length;
+			if (size > 64 * 1024) { req.destroy(); chunks.length = 0; return; }
+			chunks.push(c);
+		});
+		req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+		req.on("error", () => resolve(""));
+	});
+}
+
+// IP 추출 — TURK_TRUST_PROXY=1이면 프록시(Caddy) 뒤 X-Forwarded-For 첫 값, 아니면 소켓 주소 (레이트리밋 키)
+const clientIp = (r: IncomingMessage): string => {
+	if (process.env.TURK_TRUST_PROXY === "1") {
+		const xff = r.headers["x-forwarded-for"];
+		const first = typeof xff === "string" ? xff : Array.isArray(xff) ? xff[0] : "";
+		const ip = first?.split(",")[0]?.trim();
+		if (ip) return ip;
+	}
+	return r.socket?.remoteAddress || "unknown";
+};
+
+// ── 로그인 페이지 (Phase 2) — 의존 0 인라인 템플릿 (픽셀폰트 CDN 링크만).
+// 리다이렉트 금지 — 미인증 경로에서 그 자리 200으로 서빙해 #해시(대화 키) 보존이 계약.
+const LOGIN_PAGE = `<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/neodgm/neodgm-webfont@latest/neodgm/style.css" />
+<title>AI Turk — 로그인</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; color: #fff; font-family: "NeoDunggeunmo", monospace;
+         min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .card { width: 100%; max-width: 320px; }
+  h1 { font-size: 28px; font-weight: normal; text-align: center; margin-bottom: 6px; letter-spacing: 2px; }
+  .sub { text-align: center; font-size: 12px; color: #666; margin-bottom: 28px; }
+  input { display: block; width: 100%; padding: 12px 14px; margin-bottom: 12px;
+          background: #111; color: #fff; border: 1px solid #333; border-radius: 8px;
+          font-family: inherit; font-size: 14px; }
+  input:focus { outline: none; border-color: #666; }
+  button { display: block; width: 100%; padding: 12px; margin-top: 8px;
+           background: #fff; color: #000; border: 0; border-radius: 8px;
+           font-family: inherit; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  #msg { min-height: 18px; text-align: center; font-size: 12px; color: #ff6b6b; margin-top: 14px; white-space: pre-line; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>AI Turk</h1>
+  <div class="sub">계정으로 로그인하세요</div>
+  <form id="form">
+    <input id="u" name="username" autocomplete="username" placeholder="아이디" />
+    <input id="p" name="password" type="password" autocomplete="current-password" placeholder="비밀번호" />
+    <button id="btn" type="submit">로그인</button>
+  </form>
+  <div id="msg" role="alert"></div>
+</div>
+<script>
+  document.getElementById("form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var msg = document.getElementById("msg");
+    var btn = document.getElementById("btn");
+    msg.textContent = ""; btn.disabled = true;
+    try {
+      var r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: document.getElementById("u").value, password: document.getElementById("p").value }) });
+      var j = await r.json();
+      if (r.ok && j.ok) { location.reload(); return; } // 새로고침 — #해시 보존
+      msg.textContent = j.error || "로그인 실패";
+    } catch (err) { msg.textContent = "네트워크 오류 — 다시 시도해 주세요"; }
+    btn.disabled = false;
+  });
+</script>
+</body>
+</html>`;
 
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -66,11 +157,77 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		return;
 	}
 
+	// ── 인증 API (Phase 2 — AUTH시에만 활성) ───────────────────────────
+	if (url.pathname === "/api/login" && req.method === "POST") {
+		if (!AUTH) { res.writeHead(404, JSONH); res.end(JSON.stringify({ error: "인증 비활성" })); return; }
+		let username = "", password = "";
+		try {
+			const body = JSON.parse(await readBody(req));
+			if (typeof body?.username === "string") username = body.username;
+			if (typeof body?.password === "string") password = body.password;
+		} catch { /* 파싱 실패 — 빈 값으로 진행 (검증 실패 처리) */ }
+		const r = await attemptLogin(username, password, clientIp(req));
+		if (r.ok) {
+			// 토큰은 Set-Cookie로만 전달 — 응답 JSON에 노출 금지
+			res.writeHead(200, { ...JSONH, "Set-Cookie": r.setCookie, "Cache-Control": "no-store" });
+			res.end(JSON.stringify({ ok: true, username: r.username }));
+		} else {
+			res.writeHead(r.rateLimited ? 429 : 401, { ...JSONH, "Cache-Control": "no-store" });
+			res.end(JSON.stringify({ error: r.error }));
+		}
+		return;
+	}
+
+	if (url.pathname === "/api/logout" && req.method === "POST") {
+		// 쿠키 클리어 (AUTH 미설정에도 무해 — 항상 응답)
+		res.writeHead(200, { ...JSONH, "Set-Cookie": clearCookie(), "Cache-Control": "no-store" });
+		res.end(JSON.stringify({ ok: true }));
+		return;
+	}
+
+	if (url.pathname === "/api/me") {
+		if (!AUTH) { res.writeHead(200, JSONH); res.end(JSON.stringify({ ok: true, auth: "off" })); return; }
+		const me = auth ? await auth.authorizeRequest(req) : null;
+		if (!me) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; }
+		res.writeHead(200, { ...JSONH, "Cache-Control": "no-store" });
+		res.end(JSON.stringify({ username: me }));
+		return;
+	}
+
 	if (url.pathname === "/api/conversations") {
 		// 1c 대화 레지스트리 — 목록 단일 진원 core.listConversations() (정적 파일 처리 앞에서 가로채기)
+		// Phase 2 — AUTH시 미인증 401, 인증시 username의 own만 필터 (orphan·foreign 제외)
+		if (AUTH) {
+			const user = auth ? await auth.authorizeRequest(req) : null;
+			if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; }
+			res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-cache" });
+			res.end(JSON.stringify(core.listConversations(user)));
+			return;
+		}
 		res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-cache" });
 		res.end(JSON.stringify(core.listConversations()));
 		return;
+	}
+
+	// ── 정적 게이트 (Phase 2, AUTH시) — 공개 예외 외 미인증: 루트=로그인 페이지 자리서빙(#해시 보존), 나머지 401 ──
+	if (AUTH) {
+		const path = url.pathname;
+		const publicStatic = path === "/sw.js" || path === "/favicon.svg" || path.startsWith("/apple-touch-icon")
+			|| path.startsWith("/icon-") || path.startsWith("/push-") || path === "/api/health";
+		if (!publicStatic) {
+			const user = auth ? await auth.authorizeRequest(req) : null;
+			if (!user) {
+				if (path === "/") {
+					// 리다이렉트 금지 — 로그인 후 location.reload()로 #해시(대화 키) 보존
+					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+					res.end(LOGIN_PAGE);
+					return;
+				}
+				res.writeHead(401, JSONH);
+				res.end(JSON.stringify({ error: "인증 필요" }));
+				return;
+			}
+		}
 	}
 
 	let filePath = join(DIST_DIR, url.pathname === "/" ? "index.html" : url.pathname);
@@ -116,6 +273,7 @@ process.on("SIGINT", () => {
 // ── 시작 ──────────────────────────────────────────────────────────────────
 server.listen(PORT, HOST, () => {
 	console.log(`[Turk] AI Turk 서버 http://${HOST}:${PORT} (최대 ${MAX_SESSIONS} 세션)`);
+	if (AUTH) console.log(`[Turk] 인증: 활성 (TURK_AUTH=1) — 미인증 요청은 로그인 페이지로 게이트 [시크릿·토큰 로그 미출력]`);
 	console.log(`[Turk] WebSocket ws://${HOST}:${PORT}/ws?u=<userKey>`);
 	const model = process.env.TURK_BACKEND === "claude"
 		? (process.env.TURK_CLAUDE_MODEL || "기본")

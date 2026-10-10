@@ -40,6 +40,19 @@ export function workspacePath(userKey: string): string {
 	return root ? join(root, userKey) : join(DATA_DIR, userKey, "workspace");
 }
 
+// ── userKey 형식 검증 (Phase 2) — userKey가 DATA_DIR 경로 조합에 직접 쓰이므로 경로조작 차단 ──
+// 빈값·>100자·슬래시·".."·제어문자 거부, 한글·UUID·하이픈 통과. auth.ts에 동일 규칙 쌍둥이 존재
+// (authorize 미주입 무인증 경로에도 항상 적용되도록 core 로컬 복제 — auth import의 모듈 부작용(시크릿 생성) 회피).
+export function verifyUserKeyFormat(key: string): boolean {
+	if (!key || key.length > 100) return false;
+	if (key.includes("/") || key.includes("\\") || key.includes("..")) return false;
+	for (const ch of key) {
+		const c = ch.charCodeAt(0);
+		if (c < 0x20 || c === 0x7f) return false; // 제어문자
+	}
+	return true;
+}
+
 // ── 1c 대화 레지스트리 — 데이터 dir 스캔: 상태 파일을 1개라도 보유한 디렉토리만 대화로 판별 ──
 // agent-session-id(세션)·schedules.json(스케줄)·conversation.json(메타) 중 하나라도 있으면 대화.
 // 루트의 파일(vapid.json 등)·상태 파일 없는 빈 디렉토리는 제외. 결과는 알파벳 정렬(스캔 결정성 — 테스트·로그 재현).
@@ -77,12 +90,27 @@ export interface Session {
 	parseRetryCount: number; // 서버 자가수정(위반 응답 재시도) 카운터 — 성공·취소·신규 유저입력에서 리셋
 }
 
+// ── Phase 2 인증 주입 계약 — server.ts(TURK_AUTH=1)가 auth.ts의 createAuthorizer() 객체를 전달.
+//    core가 auth 모듈을 import하지 않기 위한 로컬 정의 (의존 방향: server→core · server→auth).
+//    auth.ts의 Authorizer와 구조 일치만 요구 — stub 주입으로 단위테스트 가능.
+export interface CoreAuthorizerRequest {
+	url?: string; // ws 핸드셰이크 req(IncomingMessage)는 url·headers 보유
+	headers?: Record<string, string | string[] | undefined>;
+}
+export interface CoreAuthorizer {
+	authorizeRequest(req: CoreAuthorizerRequest): Promise<string | null>; // 쿠키 JWT 검증 → username | null
+	checkConversation(username: string, userKey: string): "own" | "orphan" | "foreign";
+	claimConversation(username: string, userKey: string): boolean;
+	listOwnedKeys(username: string): string[]; // listConversations(username) own-필터용 — users.json 단일 판독
+}
+
 export interface SessionCoreConfig {
 	maxSessions?: number; // 동시 백엔드 상한 (기본: TURK_MAX_BACKENDS || TURK_MAX_SESSIONS || 5) — 필드명 호환 유지(server.ts가 core.maxSessions 소비)
 	parseRetries?: number; // 응답 자가수정 재시도 한도 (기본: TURK_PARSE_RETRIES || 2)
 	debug?: boolean; // 진단 로그 (기본: TURK_DEBUG)
 	backendFactory?: (opts: BackendOptions) => Backend; // 백엔드 팩터리 주입 (기본 createBackend — 테스트에서 FakeBackend)
 	scanOnBoot?: boolean; // 부팅 스윕 (1c) — 코어 생성 시 데이터 dir을 스캔해 전 대화 셸을 복원. 기본 true (테스트 오염 방지 옵트아웃용 false)
+	authorize?: CoreAuthorizer; // Phase 2 인증 (TURK_AUTH=1) — 미주입=기존 무인증 동작 (dev 기본 경로)
 }
 
 export interface SessionCore {
@@ -91,11 +119,11 @@ export interface SessionCore {
 	getOrCreateSession(userKey: string): Session | { error: string };
 	removeSession(userKey: string): void;
 	removeAllSessions(): void;
-	handleConnection(ws: WebSocket, req: { url?: string }): void;
+	handleConnection(ws: WebSocket, req: { url?: string; headers?: Record<string, string | string[] | undefined> }): void;
 	keepAlive(wss: WebSocketServer): void;
 	ensureBackend(session: Session): boolean; // 풀 할당 — 멱등(alive면 no-op). cap 도달 시 유휴 LRU victim 회수 후 할당, victim 없으면 false
 	reclaimSweep(): number; // 유휴 백엔드 회수 스윕 1회 실행 (60s 인터벌 + 테스트·수동 트리거용) — 회수 수 반환
-	listConversations(): ConversationSummary[]; // 대화 레지스트리 목록 (1c) — lastActiveAt 내림차순
+	listConversations(username?: string): ConversationSummary[]; // 대화 레지스트리 목록 (1c) — authorize 주입 시 username의 own만 필터 (orphan·foreign 제외)
 }
 
 // 대화 레지스트리 항목 (1c) — GET /api/conversations 응답 본체
@@ -287,6 +315,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	const IDLE_RECLAIM_MS = envInt(process.env.TURK_IDLE_RECLAIM_SEC, 300) * 1000; // WS 없는 유휴 백엔드 회수 임계 (ms)
 	const createBackendFn = cfg?.backendFactory ?? createBackend; // 백엔드 팩터리 — 테스트 주입용 (기본 createBackend)
 	const SERVER_PARSE_RETRIES = cfg?.parseRetries ?? parseInt(process.env.TURK_PARSE_RETRIES || "2"); // 서버 자가수정 재시도 한도 — 응답 위반(파싱·스키마) 시 원문+에러 되돌려 교정
+	const authorize = cfg?.authorize; // Phase 2 인증·소유권 계약 (미주입=기존 무인증 동작)
 
 	// ── Web Push (VAPID 키 파일 영속화) — 재시작마다 키가 바뀌면 기존 구독 전부 무효(403) → 푸시 실패 ──
 	const vapidPath = join(DATA_DIR, "vapid.json");
@@ -435,8 +464,12 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		return session.backendReady ? "active" : "starting";
 	}
 	// GET /api/conversations 단일 진원 — lastActiveAt 내림차순 (최근 대화 우선)
-	function listConversations(): ConversationSummary[] {
-		const list = Array.from(sessions.values()).map((s) => ({
+	// authorize 주입 + username 지정 시 own만 필터 (자신의 userKeys에 등록된 대화) — orphan·foreign 제외
+	function listConversations(username?: string): ConversationSummary[] {
+		const owned = authorize && username ? new Set(authorize.listOwnedKeys(username)) : null;
+		const list = Array.from(sessions.values())
+			.filter((s) => !owned || owned.has(s.userKey))
+			.map((s) => ({
 			id: s.userKey,
 			title: s.title,
 			createdAt: s.createdAt,
@@ -670,21 +703,26 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	// ── WS 연결·메시지 처리 (prod/dev 공용) ──────────────────────────────────
 	const customCommands = ["restart_pi", "schedule", "push_subscribe", "attach", "ping"];
 
-	function handleConnection(ws: WebSocket, req: { url?: string }): void {
-		const url = new URL(req.url || "/", "http://t"); // url 파서 기반값 — noServer 모드도 full URL이 옴
-		const userKey = url.searchParams.get("u");
-		if (!userKey) {
-			ws.send(JSON.stringify({ type: "session_error", error: "userKey 누락 — 클라이언트 설정 확인 필요" }));
-			ws.close();
-			return;
-		}
+	function denyConnection(ws: WebSocket, message: string): void {
+		ws.send(JSON.stringify({ type: "session_error", error: message }));
+		ws.close();
+	}
+
+	// 연결 이후 공통 진입 (Phase 2) — 형식·인증 게이트 통과 후 세션 확정·소유권·기존 흐름.
+	// authorize 미주입 시 username=null — 기존 무인증 동작 불변.
+	function enterSession(ws: WebSocket, userKey: string, username: string | null): void {
 		const result = getOrCreateSession(userKey);
 		if ("error" in result) {
-			ws.send(JSON.stringify({ type: "session_error", error: result.error }));
-			ws.close();
+			denyConnection(ws, result.error);
 			return;
 		}
 		const session = result;
+		// ④ 소유권 게이트 (authorize 주입 시) — own=진입 / orphan=자동 claim 후 진입 / foreign=거부 (남의 대화)
+		if (authorize && username) {
+			const rel = authorize.checkConversation(username, userKey);
+			if (rel === "foreign") { denyConnection(ws, "권한 없음 — 다른 계정의 대화입니다"); return; }
+			if (rel === "orphan") authorize.claimConversation(username, userKey); // 고아 인수 — 레거시 대화 첫 접속 자동 claim (마이그레이션 계약)
+		}
 		touchConversationMeta(session); // 1c — 세션 확정 직후 lastActiveAt 갱신 저장 (재접속도 대화 활동)
 		// 풀 할당 — App이 pi_ready 대기하므로 초기 상태 통지 전에 기동(교착 방지).
 		// 할당 실패(cap 초과)면 pi_starting으로 접속받고, 첫 프롬프트의 sendToBackend 가드가 재시도 → 에러 broadcast.
@@ -770,6 +808,24 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			session.lastActivity = Date.now();
 			console.log(`[Turk] 종료: ${userKey.slice(0, 8)} code=${code} reason=${reason.toString() || "-"} (남은 WS ${session.ws.size})`);
 		});
+	}
+
+	// ── WS 연결 게이트 (Phase 2) — ①형식검증(authorize 무관 항상) ②인증(authorize 주입 시) → enterSession ──
+	function handleConnection(ws: WebSocket, req: { url?: string; headers?: Record<string, string | string[] | undefined> }): void {
+		const url = new URL(req.url || "/", "http://t"); // url 파서 기반값 — noServer 모드도 full URL이 옴
+		const userKey = url.searchParams.get("u");
+		if (!userKey) { denyConnection(ws, "userKey 누락 — 클라이언트 설정 확인 필요"); return; }
+		// ① userKey 형식 검증 — authorize 유무 무관 항상 (userKey가 DATA_DIR 경로 조합에 직접 쓰이므로 ../ 경로조작 차단)
+		if (!verifyUserKeyFormat(userKey)) { denyConnection(ws, "userKey 형식이 올바르지 않습니다"); return; }
+		// ② 인증 게이트 — authorize 주입 시에만 (TURK_AUTH=1). 쿠키 JWT 검증 → username 또는 접속 거부.
+		if (authorize) {
+			authorize.authorizeRequest(req).then((username) => {
+				if (!username) { denyConnection(ws, "로그인 필요"); return; }
+				enterSession(ws, userKey, username);
+			}).catch(() => denyConnection(ws, "인증 처리 오류")); // 주입 객체 예외에도 소켓 정리 (핸들러 미등록 상태 유실 방지)
+			return;
+		}
+		enterSession(ws, userKey, null); // 무인증(dev·기본) — 동기 진입, 기존 동작 그대로
 	}
 
 	// WS keepalive — 모바일 NAT의 유휴 컷(1005 churn) 방지 + pong 2회 무응답 좀비 소켓 서버측 정리(isAlive)

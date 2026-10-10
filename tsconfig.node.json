@@ -19,5 +19,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts", "server.ts", "session-core.ts", "backend.ts", "scheduler.ts", "src/lib/agents-md-server.ts"]
+  "include": ["vite.config.ts", "server.ts", "session-core.ts", "auth.ts", "user-cli.ts", "backend.ts", "scheduler.ts", "src/lib/agents-md-server.ts", "tests/auth.test.ts"]
 }

@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "start": "tsx server.ts",
     "lint": "oxlint",
-    "test": "tsx tests/response-schema.test.ts && tsx tests/pool.test.ts && tsx tests/registry.test.ts",
+    "test": "tsx tests/response-schema.test.ts && tsx tests/pool.test.ts && tsx tests/registry.test.ts && tsx tests/auth.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -20,6 +20,7 @@
     "clsx": "^2.1.1",
     "cron-parser": "^5.6.1",
     "env-paths": "^4.0.0",
+    "jose": "^6.2.12",
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
