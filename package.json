@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "start": "tsx server.ts",
     "lint": "oxlint",
+    "test": "tsx tests/response-schema.test.ts && tsx tests/pool.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

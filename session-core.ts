@@ -5,11 +5,17 @@
  * 발산 이력: dev측에 서버 자가수정(261008)·스트리밍 리플레이·풀 push payload가 누락돼 있었음 —
  * 이 파일은 prod(server.ts) 동작을 정본으로 수렴한다. 이후 풀(1b)·인증(Phase 2)도 여기에만 얹는다.
  *
+ * 풀 시맨틱(1b): 세션 셸은 불멸(sessions 맵 무상한 — LRU 소멸 경로 제거, 스케줄 유실 결함 해소),
+ * 희소자원=백엔드만 상한(TURK_MAX_BACKENDS) 배분. 수요지점(handleConnection·프롬프트 발화)에서
+ * ensureBackend가 멱등 할당·유휴 LRU 회수를 수행하고, 60s 스윕이 WS 없는 유휴 백엔드를
+ * dormant(backend=null — 셸·스케줄러 유지)로 회수한다. 재할당 큐 불필요 — start()가 spawn 직후
+ * 동기 pi_ready emit + OS stdin 파이프가 부팅 전 명령 버퍼링 (backend.ts 근거).
+ *
  * 의존: ws, web-push, env-paths, node:fs/path/os — 신규 의존성 없음.
  */
 
 import { WebSocket, WebSocketServer } from "ws";
-import { createBackend, type Backend, type TurkEvent } from "./backend.ts";
+import { createBackend, type Backend, type BackendOptions, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
 import { validateTurkResponse } from "./src/lib/response-schema.ts";
 import { ensureAgentsMd } from "./src/lib/agents-md-server.ts";
@@ -21,14 +27,22 @@ import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node
 
 const DATA_DIR = envPaths("ai-turk").data;
 
+// ── 워크스페이스 위치 분리 (261010 B확정) — 상태(DATA_DIR)와 작업물(산출물) 분리, 코드 마이그레이션 없음 ──
+// TURK_WORKSPACES_ROOT 미설정 → 현행 경로 유지(join(DATA_DIR, userKey, "workspace") — 동작 0변경).
+// 설정(절대경로) → join(ROOT, userKey). 호출시점 env 판독 — 테스트에서 동적 스위칭 가능.
+export function workspacePath(userKey: string): string {
+	const root = process.env.TURK_WORKSPACES_ROOT;
+	return root ? join(root, userKey) : join(DATA_DIR, userKey, "workspace");
+}
+
 // ── 세션 구조 — 유저(브라우저)별 독립 백엔드 + 스케줄러 ───────────────────
 export interface Session {
 	userKey: string;
 	thinkingBuf: string; // 턴 내 씽킹 누적 — 재접속 소켓 리플레이용 (줄단위, agent_start 클리어)
 	textBuf: string; // 턴 내 응답 텍스트 누적 — 리플레이용
 	agentSessionId: string | null; // 백엔드 세션 ID (파일 영속, ready 시 get_state로 갱신). null = 새 세션
-	backend: Backend | null;
-	backendReady: boolean;
+	backend: Backend | null; // 풀 회수·dormant 전환 시 null — 수요 시점에 ensureBackend가 재할당
+	backendReady: boolean; // pi_ready 수신 플래그 — 백엔드 교체(크래시·회수) 때마다 리셋
 	scheduler: Scheduler;
 	pushSubscription: any; // 마지막 구독 (1인 — 세션당 1개)
 	ws: Set<WebSocket>; // 같은 유저 다중 탭 — 동일 세션 broadcast. 사생활 탭 = 다른 userKey = 다른 세션
@@ -37,15 +51,16 @@ export interface Session {
 	lastPrompt: string | null; // 처리중 사용자 프롬프트 — 재연결 시 "뭘 기다리는지" 입력창 표시용 (isStreaming과 짝)
 	lastResponsePrompt: string | null; // lastResponse가 대답하는 프롬프트 — 응답 상단 짝표시용
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
-	lastActivity: number; // 마지막 활동 타임스탬프 (LRU 정리용)
+	lastActivity: number; // 마지막 활동 타임스탬프 (유휴 백엔드 회수 판정용)
 	currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
 	parseRetryCount: number; // 서버 자가수정(위반 응답 재시도) 카운터 — 성공·취소·신규 유저입력에서 리셋
 }
 
 export interface SessionCoreConfig {
-	maxSessions?: number; // 동시 세션 상한 (기본: TURK_MAX_SESSIONS || 5)
+	maxSessions?: number; // 동시 백엔드 상한 (기본: TURK_MAX_BACKENDS || TURK_MAX_SESSIONS || 5) — 필드명 호환 유지(server.ts가 core.maxSessions 소비)
 	parseRetries?: number; // 응답 자가수정 재시도 한도 (기본: TURK_PARSE_RETRIES || 2)
 	debug?: boolean; // 진단 로그 (기본: TURK_DEBUG)
+	backendFactory?: (opts: BackendOptions) => Backend; // 백엔드 팩터리 주입 (기본 createBackend — 테스트에서 FakeBackend)
 }
 
 export interface SessionCore {
@@ -56,6 +71,8 @@ export interface SessionCore {
 	removeAllSessions(): void;
 	handleConnection(ws: WebSocket, req: { url?: string }): void;
 	keepAlive(wss: WebSocketServer): void;
+	ensureBackend(session: Session): boolean; // 풀 할당 — 멱등(alive면 no-op). cap 도달 시 유휴 LRU victim 회수 후 할당, victim 없으면 false
+	reclaimSweep(): number; // 유휴 백엔드 회수 스윕 1회 실행 (60s 인터벌 + 테스트·수동 트리거용) — 회수 수 반환
 }
 
 // ── 영속화 헬퍼 (파일명/위치는 prod 종래 그대로) ───────────────────────────
@@ -174,10 +191,40 @@ export function parseTurkResponse(ev: TurkEvent): { text: string; parsed: any | 
 	return { text, parsed: firstParsed, valid: false, errors: lastError ?? "파싱 실패" };
 }
 
+// ── 풀 판정 순수함수 (1b) — now 주입으로 단위테스트 가능 ──────────────────
+// 회수 부정조건: WS 있음(대화 가능성 우선)·isStreaming(백그라운드 응답 생성 중 — 회수=응답 유실)·dormant(이미 backend null — stop 재호출 없음)
+export function shouldReclaim(
+	s: Pick<Session, "ws" | "isStreaming" | "backend" | "lastActivity">,
+	now: number,
+	idleMs: number,
+): boolean {
+	return s.ws.size === 0 && !s.isStreaming && s.backend?.alive() === true && now - s.lastActivity > idleMs;
+}
+
+// 유휴 victim 선택(수요 확보용 스틸) — WS 없음·비스트리밍·alive 중 최오래(lastActivity 최소) 1명 LRU. 없으면 null.
+// 시간 임계 없음: 스틸의 대가는 재기동 수 초(대화 연속성 보존)뿐인 반면, 임계를 두면 최근 유휴들이 만원을 막아
+// 신규 수요가 최대 TURK_IDLE_RECLAIM_SEC 까지 서비스 거부되는 비대칭이 생긴다. 임계는 스윕(시간 주도 회수)에만 속한다.
+export function pickReclaimVictim(sessions: Map<string, Session>): Session | null {
+	let victim: Session | null = null;
+	for (const s of sessions.values()) {
+		if (s.ws.size !== 0 || s.isStreaming || s.backend?.alive() !== true) continue;
+		if (!victim || s.lastActivity < victim.lastActivity) victim = s;
+	}
+	return victim;
+}
+
 // ── 세션 코어 팩터리 ─────────────────────────────────────────────────────
 export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	const DEBUG = cfg?.debug ?? !!process.env.TURK_DEBUG;
-	const MAX_SESSIONS = cfg?.maxSessions ?? parseInt(process.env.TURK_MAX_SESSIONS || "5");
+	// ── 1b 풀 설정 ──
+	const envInt = (v: string | undefined, fallback: number): number => {
+		const n = v === undefined || v === "" ? NaN : parseInt(v, 10);
+		return Number.isFinite(n) ? n : fallback;
+	};
+	// 동시 백엔드 상한 — TURK_MAX_BACKENDS 신설(구 TURK_MAX_SESSIONS 승계), 기본 5.
+	const MAX_BACKENDS = cfg?.maxSessions ?? envInt(process.env.TURK_MAX_BACKENDS, envInt(process.env.TURK_MAX_SESSIONS, 5));
+	const IDLE_RECLAIM_MS = envInt(process.env.TURK_IDLE_RECLAIM_SEC, 300) * 1000; // WS 없는 유휴 백엔드 회수 임계 (ms)
+	const createBackendFn = cfg?.backendFactory ?? createBackend; // 백엔드 팩터리 — 테스트 주입용 (기본 createBackend)
 	const SERVER_PARSE_RETRIES = cfg?.parseRetries ?? parseInt(process.env.TURK_PARSE_RETRIES || "2"); // 서버 자가수정 재시도 한도 — 응답 위반(파싱·스키마) 시 원문+에러 되돌려 교정
 
 	// ── Web Push (VAPID 키 파일 영속화) — 재시작마다 키가 바뀌면 기존 구독 전부 무효(403) → 푸시 실패 ──
@@ -227,6 +274,16 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 
 	// backend.send 가로채서 route 추적
 	function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { route?: "user" | "scheduler" | "tool" }): void {
+		// 프롬프트 발화는 백엔드 수요지점(스케줄러 트리거·WS 프롬프트 공용) — 발화 전 멱등 할당.
+		// cap 초과 거부 시: agent_start/isStreaming 설정 없이 에러 agent_end broadcast로 마감.
+		if (cmd.type === "prompt") {
+			if (!ensureBackend(session)) {
+				console.log(`[${session.userKey.slice(0, 8)}] [Pool] 백엔드 초과 — 프롬프트 거부 (활성 ${activeBackendCount()}/${MAX_BACKENDS})`);
+				broadcast(session, { type: "agent_end", error: "최대 백엔드 초과 — 활성 세션이 가득 찼습니다. 잠시 후 다시 시도해 주세요." });
+				return;
+			}
+			session.lastActivity = Date.now(); // 발화 = 활동 — 유휴 회수 임계 갱신
+		}
 		const route = (opts?.route ?? cmd.route ?? "user") as "user" | "scheduler" | "tool";
 		session.currentRoute = route;
 		// 처리중 프롬프트 기록 — 재연결/새로고침 후 get_state로 표시 (user 라우트 순수 입력만)
@@ -245,16 +302,58 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		session.backend?.send(cmd);
 	}
 
+	// ── 풀 시맨틱 (1b) — 희소자원=백엔드, 세션 셸은 불멸 ──────────────────────
+	// 활성 백엔드 수 — cap 판정용 (dormant·기동 실패 셸은 미집계)
+	function activeBackendCount(): number {
+		let n = 0;
+		for (const s of sessions.values()) if (s.backend?.alive()) n++;
+		return n;
+	}
+
+	// 백엔드 회수 — stop→null→ready=false. 셸·스케줄러·lastResponse 캐시는 유지 (다음 수요에 재할당)
+	function reclaimSession(session: Session, reason: string): void {
+		console.log(`[${session.userKey.slice(0, 8)}] [Pool] 백엔드 회수(${reason}) — dormant 전환 (활성 ${activeBackendCount() - 1}/${MAX_BACKENDS})`);
+		session.backend?.stop();
+		session.backend = null;
+		session.backendReady = false;
+	}
+
+	// 풀 할당 — 멱등(이미 alive면 무동작, 기동 중도 true). cap 도달 시 WS 없는 유휴 victim(최오래 LRU)을
+	// 회수해 슬롯 확보 — victim 없으면 false(거부; 호출부 정책: WS 프롬프트=에러 broadcast / 스케줄러=1m 재등록).
+	function ensureBackend(session: Session): boolean {
+		if (session.backend?.alive()) return true;
+		if (activeBackendCount() >= MAX_BACKENDS) {
+			const victim = pickReclaimVictim(sessions);
+			if (!victim) return false;
+			reclaimSession(victim, "신규 할당용 슬롯 확보");
+		}
+		startBackend(session);
+		return true;
+	}
+
+	// 유휴 백엔드 회수 스윕 1회 — 테스트·수동 트리거용 노출. 회수 수 반환.
+	function reclaimSweep(): number {
+		const now = Date.now();
+		let reclaimed = 0;
+		for (const s of sessions.values()) {
+			if (!shouldReclaim(s, now, IDLE_RECLAIM_MS)) continue;
+			reclaimSession(s, `유휴 ${Math.floor((now - s.lastActivity) / 1000)}s`);
+			reclaimed++;
+		}
+		return reclaimed;
+	}
+	setInterval(reclaimSweep, 60_000).unref?.(); // 60s 회수 스윕 — 서버 생명 유지 책임은 listen 쪽
+
 	// ── 백엔드 시작 (세션별) ────────────────────────────────────────────────
 	function startBackend(session: Session): void {
 		try {
-			const agentCwd = join(DATA_DIR, session.userKey, "workspace");
+			const agentCwd = workspacePath(session.userKey); // 위치 분리(TURK_WORKSPACES_ROOT) — 미설정 시 현행 경로
 			mkdirSync(agentCwd, { recursive: true });
 			const agentsMdPath = join(agentCwd, "AGENTS.md");
 			ensureAgentsMd(agentsMdPath);
 		} catch (e) { console.error(`[Turk] AGENTS.md 생성 실패: ${e}`); }
-		session.backend = createBackend({
-			cwd: join(DATA_DIR, session.userKey, "workspace"),
+		session.backend = createBackendFn({
+			cwd: workspacePath(session.userKey),
 			userKey: session.agentSessionId ?? undefined, // 저장된 agentSessionId 있으면 지정(같은 세션 복원), 없으면 undefined(새 세션). claude는 무시
 			onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
 		});
@@ -275,7 +374,13 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			}
 			if (ev.type === "pi_exit" || ev.type === "pi_error") {
 				session.backendReady = false;
-				scheduleBackendRestart(session); // 비정상 종료 자동 재시작 — 백그라운드 크래시로 세션 벽돌(pi_starting 고정) 방지
+				// 비정상 종료 처리 — WS 있으면 기존 자동 재시작(1.5s, 60s/5회 스로틀 — 백그라운드 크래시 벽돌 방지).
+				// 무WS 크래시는 재시작해도 수신자 없어 복구 불가 — dormant 전환(backend null) 후 수요 시 재할당.
+				if (session.ws.size > 0) scheduleBackendRestart(session);
+				else {
+					session.backend = null;
+					console.log(`[${session.userKey.slice(0, 8)}] [Pool] 무WS 비정상 종료 — dormant 전환 (수요 시 재할당)`);
+				}
 			}
 			// agent_start: 스트리밍 시작
 			if (ev.type === "agent_start") { session.isStreaming = true; session.thinkingBuf = ""; session.textBuf = ""; return; } // pi 것 스킵 — 서버가 이미 합성 전송
@@ -392,6 +497,14 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			scheduler: new Scheduler({
 				onTrigger: (entries) => {
 					console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] onTrigger → 백엔드 주입: ids=${entries.map((e) => e.id).join(",")}`);
+					// 선확인 — cap 초과면 발화 스킵 후 동일 id를 1m 뒤로 재등록 (once-체이닝 계약 재사용: 목록 보존·자가치유·관측 가능)
+					if (!ensureBackend(session)) {
+						for (const e of entries) {
+							const r = session.scheduler.handle({ action: "add", id: e.id, when: "1m", prompt: e.prompt, condition: e.condition });
+							console.log(`[${session.userKey.slice(0, 8)}] [Pool] 백엔드 초과 → 스케줄 1m 재등록: id=${e.id} → ${r.success ? "ok" : `오류: ${r.error}`}`);
+						}
+						return;
+					}
 					const msg = formatTriggerMessage(entries, new Date());
 					sendToBackend(session, { type: "prompt", message: msg }, { route: "scheduler" });
 					broadcast(session, { type: "scheduler_trigger", ids: entries.map((e) => e.id), whens: entries.map((e) => e.when) });
@@ -413,8 +526,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			textBuf: "",
 		};
 		sessions.set(userKey, session);
-		startBackend(session);
-		return session;
+		return session; // 순수 셸 — 백엔드는 수요 시점(handleConnection·프롬프트 발화)에 ensureBackend가 기동
 	}
 
 	function removeSession(userKey: string): void {
@@ -428,25 +540,13 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		sessions.delete(userKey);
 	}
 
-	// 유저 키로 세션 조회/생성. 최대 도달 시 WS 없는 유휴 세션 LRU 강제 종료 → 수용.
+	// 유저 키로 세션 조회/생성 — 셸은 무상한(1b: LRU 소멸 경로 제거 — 스케줄 유실 결함 해소).
+	// 희소자원은 백엔드뿐 — 배분·회수는 ensureBackend·회수 스윕이 담당.
 	function getOrCreateSession(userKey: string): Session | { error: string } {
 		const existing = sessions.get(userKey);
 		if (existing) {
 			existing.lastActivity = Date.now();
 			return existing;
-		}
-		if (sessions.size >= MAX_SESSIONS) {
-			// WS 없는 유휴 세션 중 가장 오래된 것(LRU) 강제 종료
-			let oldest: Session | null = null;
-			for (const s of sessions.values()) {
-				if (s.ws.size === 0 && (!oldest || s.lastActivity < oldest.lastActivity)) oldest = s;
-			}
-			if (oldest) {
-				console.log(`[Turk] LRU 정리: ${oldest.userKey.slice(0, 8)}`);
-				removeSession(oldest.userKey);
-			} else {
-				return { error: `최대 세션 수(${MAX_SESSIONS}) 초과 — 모든 세션 활성 중` };
-			}
 		}
 		return createSession(userKey);
 	}
@@ -473,6 +573,9 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			return;
 		}
 		const session = result;
+		// 풀 할당 — App이 pi_ready 대기하므로 초기 상태 통지 전에 기동(교착 방지).
+		// 할당 실패(cap 초과)면 pi_starting으로 접속받고, 첫 프롬프트의 sendToBackend 가드가 재시도 → 에러 broadcast.
+		ensureBackend(session);
 		session.ws.add(ws);
 		session.lastActivity = Date.now();
 		(ws as any).isAlive = true;
@@ -480,7 +583,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		if (session.isStreaming && (session.thinkingBuf || session.textBuf)) {
 			(ws as any).replayPending = true; // 스트리밍 중 접속 — get_state 응답 직후 줄단위 캐시 전달 예약
 		}
-		console.log(`[Turk] 연결: ${userKey.slice(0, 8)} (세션 ${sessions.size}/${MAX_SESSIONS})`);
+		console.log(`[Turk] 연결: ${userKey.slice(0, 8)} (세션 ${sessions.size} · 백엔드 ${activeBackendCount()}/${MAX_BACKENDS})`);
 
 		// 백엔드 상태 즉시 통지 (새 탭/재연결 동기화)
 		ws.send(JSON.stringify({
@@ -569,5 +672,5 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		iv.unref?.(); // 서버 생명 유지 책임은 listen 쪽 — keepalive가 프로세스를 붙잡지 않게 (dev·prod 동일)
 	}
 
-	return { sessions, maxSessions: MAX_SESSIONS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive };
+	return { sessions, maxSessions: MAX_BACKENDS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive, ensureBackend, reclaimSweep };
 }
