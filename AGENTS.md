@@ -152,9 +152,20 @@ turkctl session    # Query current session info
 turkctl ws        # WebSocket connection test
 turkctl pi        # pi RPC process status
 turkctl build     # Production build → dist/
+turkctl user ...  # Account management (TURK_AUTH=1): add/passwd/rm/list/claim <name> [userKey]
 ```
 
+### Authentication (optional — `TURK_AUTH=1`)
+
+When enabled: username+password login (scrypt + JWT cookie), per-account conversation ownership (hash-based userKey auto-claimed on first visit), in-place login page (URL `#hash` preserved), login rate limiting. Accounts are created via `turkctl user add` (no self-signup). Unauthenticated entry points serve the login page; static assets (sw.js, icons) stay public. Dev (`npm run dev`) skips auth — vite plugin is untouched by design.
+
 > **Principle**: Always use `turkctl` for operation control. Do not use `npm run dev` or `pkill` directly.
+
+### Tests
+
+```
+npm test   # tests/response-schema.test.ts + pool.test.ts + registry.test.ts + auth.test.ts (plain tsx scripts, exit code 1 on failure)
+```
 
 ## Troubleshooting
 
@@ -168,3 +179,4 @@ turkctl build     # Production build → dist/
 | CSS not reflected | HMR cache corruption | `turkctl restart` |
 | Claude backend no response | Ollama not running/model not pulled | `ollama serve` + `ollama pull glm-5.1:cloud` |
 | Claude `Not logged in` | `ANTHROPIC_AUTH_TOKEN` missing | Set `ANTHROPIC_AUTH_TOKEN=ollama` in `.env` |
+| Deleted conversation reappears | Same `#hash` visited after delete | By design — a deleted conversation's key is unclaimed again (new conversation on first visit) |
