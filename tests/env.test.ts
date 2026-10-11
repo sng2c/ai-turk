@@ -72,10 +72,15 @@ function makeWs(): any {
 		OPEN: 1,
 		readyState: 1,
 		sent,
+		handlers,
 		send(raw: string) { sent.push(JSON.parse(raw)); },
 		on(ev: string, cb: (...args: any[]) => void) { (handlers[ev] ??= []).push(cb); },
 	};
 	return ws;
+}
+// 발화 트리거 — 열림 무지간 계약(접속은 스폰 없음)에서 백엔드 기동은 작업 명령뿐이므로 프롬프트로 기동
+function wsPrompt(ws: any): void {
+	for (const cb of ws.handlers.message ?? []) cb(JSON.stringify({ type: "prompt", userInput: "발화", message: "발화" }));
 }
 // ═══════════════ A. 계정 저장소 왕복 — users.json 내부 (L1 순수) ═══════════════
 {
@@ -214,6 +219,8 @@ ok("C4 값 4KB 경계 — 4096바이트 통과 · 4097 초과 거부 · 한글 �
 	const token = await A.issueToken("acct-core");
 	const ws1 = makeWs();
 	core.handleConnection(ws1, { url: `/ws?u=${encodeURIComponent("envcore-key")}`, headers: { cookie: `turk_auth=${token}` } });
+	await waitFor(() => (ws1.handlers.message ?? []).length > 0); // enterSession 등록 대기 — jwtVerify 비동기 then 경로
+	wsPrompt(ws1); // 발화 → 기동 (접속은 뷰어 신호 — 프로세스 수요는 작업 명령만)
 	await waitFor(() => backends.length >= 1);
 	const b1 = backends[0];
 	ok("F1 startBackend가 opts.workspaceEnv로 계정 env 전달 — 쿠키 인증된 계정 소유 userKey 경로 · 값 단언",
@@ -221,6 +228,8 @@ ok("C4 값 4KB 경계 — 4096바이트 통과 · 4097 초과 거부 · 한글 �
 		&& b1?.opts.cwd === SC.workspacePath("envcore-key"));
 	const ws2 = makeWs();
 	core.handleConnection(ws2, { url: `/ws?u=${encodeURIComponent("envcore-key-2")}`, headers: { cookie: `turk_auth=${token}` } });
+	await waitFor(() => (ws2.handlers.message ?? []).length > 0);
+	wsPrompt(ws2);
 	await waitFor(() => backends.length >= 2);
 	ok("F2 같은 계정 두 대화 — 동일 계정 env 공유 주입 (JSON 동등)",
 		backends.length === 2 && JSON.stringify(backends[1]?.opts.workspaceEnv) === JSON.stringify(backends[0]?.opts.workspaceEnv));
@@ -237,6 +246,7 @@ ok("C4 값 4KB 경계 — 4096바이트 통과 · 4097 초과 거부 · 한글 �
 	}); // AUTH off core — authorize 미주입
 	const ws3 = makeWs();
 	coreNoAuth.handleConnection(ws3, { url: `/ws?u=${encodeURIComponent("envcore-anon")}` });
+	wsPrompt(ws3); // 발화 → 기동 — 무인증 경로도 동일 수요 계약
 	ok("F4 AUTH off 코어 — workspaceEnv {} (무인증 경로는 env 없음 계약)",
 		backends[2] && JSON.stringify(backends[2].opts.workspaceEnv) === "{}");
 }

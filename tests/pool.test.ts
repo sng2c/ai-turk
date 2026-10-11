@@ -11,7 +11,7 @@
 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import envPaths from "env-paths";
 import type { Backend, BackendOptions, TurkEvent } from "../backend.ts";
 
@@ -105,6 +105,8 @@ function connect(core: any, userKey: string): any {
 }
 const expectMsg = (ws: any, i: number, type: string) => ws.sent[i]?.type === type;
 const activeCount = (core: any) => [...core.sessions.values()].filter((s: any) => s.backend?.alive()).length;
+// 표준 유저 발화 — 클라 프롬프트 전송 형태(userInput+message) 재현 (B·C·D·F 공용 — 열림 무지간에서 할당 트리거는 발화뿐)
+const sendPrompt = (ws: any, text = "안녕") => wsMessage(ws, { type: "prompt", userInput: text, message: text });
 
 // ── 코어 팩터리 — FakeBackend 주입 + 소유 백엔드 배열 추적 ──
 function newCore(maxSessions: number) {
@@ -149,39 +151,46 @@ function newCore(maxSessions: number) {
 	ok("A6 pickReclaimVictim — 후보 중 최오래 1명만 (임계 없음 — fresh도 후보지만 LRU에서 짐)", v === m.get("idleOld"));
 }
 
-// ═══════════════ B. cap·LRU (maxSessions=5) ═══════════════
+// ═══════════════ B. cap·LRU (maxSessions=5) — 열림 무지간: 접속은 셸만, cap 배분은 발화 수요 시점 ═══════════════
 {
 	const B = newCore(5);
 	const wsAl = connect(B.core, "b-alice");
 	const wsBob = connect(B.core, "b-bob");
 	const wsCa = connect(B.core, "b-carol");
-	connect(B.core, "b-dave");
+	const wsDave = connect(B.core, "b-dave");
 	const wsEve = connect(B.core, "b-eve");
-	ok("B1 5 연결 → 5/5 백엔드 할당 (3/5 중간 단계 포함)", B.backends.length === 5 && B.active() === 5);
+	ok("B1 5 대화 접속 → 스폰 0 (접속은 뷰어 신호 — 프로세스를 부르지 않는다)", B.backends.length === 0 && B.active() === 0);
+	sendPrompt(wsAl); sendPrompt(wsBob); sendPrompt(wsCa); sendPrompt(wsDave); sendPrompt(wsEve);
+	ok("B1b 5 발화 → 5/5 백엔드 할당 (작업 명령만 수요)", B.backends.length === 5 && B.active() === 5);
 
-	// cap-full + 유휴 2개 — carol이 최오래 → victim
+	// cap-full + 유휴 2개 — carol이 최오래 → victim 예정.
+	// FakeBackend는 자동 agent_end가 없어 발화 후 isStreaming=true 잔존 — victim 판정 전 정리(실기는 agent_end로 클리어).
+	(B.core.sessions.get("b-bob") as any).isStreaming = false;
+	(B.core.sessions.get("b-carol") as any).isStreaming = false;
 	wsBob.close();
 	wsCa.close();
 	const sBob = B.core.sessions.get("b-bob") as any;
 	const sCarol = B.core.sessions.get("b-carol") as any;
 	sBob.lastActivity = Date.now() - 310_000;
 	sCarol.lastActivity = Date.now() - 400_000;
-	const wsFrank = connect(B.core, "b-frank"); // 6번째 연결 — 셸은 무상한(LRU remove 제거), 백엔드만 cap 배분
-	ok("B2 cap 초과 → 최오래 유휴 victim(carol) 회수 후 frank 할당",
+	const wsFrank = connect(B.core, "b-frank"); // 6번째 접속 — 셸은 무상한(LRU remove 제거), 백엔드만 cap 배분
+	ok("B2 cap-full 접속 → 스폰 0·스틸 없음 (dormant 셸 + pi_ready 합성)",
+		sCarol.backend !== null && B.backends.length === 5 && B.active() === 5 && expectMsg(wsFrank, 0, "pi_ready"));
+	sendPrompt(wsFrank); // 6번째 발화 — 수요 시점에만 victim 스틸
+	ok("B2b cap 초과 발화 → 최오래 유휴 victim(carol) 회수 후 frank 할당",
 		sCarol.backend === null && sCarol.backendReady === false && (B.backends[2] as FakeBackend).aliveState === false
 		&& (B.backends[5] as FakeBackend).alive() === true && B.active() === 5,
-		`sent=${JSON.stringify(B.backends.map((b) => b.aliveState))}`);
-	ok("B2b victim 회수는 stop 1회 + 셸 보존 (LRU removeSession 경로 제거)",
+		`states=${JSON.stringify(B.backends.map((b) => b.aliveState))}`);
+	ok("B2c victim 회수는 stop 1회 + 셸 보존 (LRU removeSession 경로 제거)",
 		(B.backends[2] as FakeBackend).stopCount === 1 && B.core.sessions.has("b-carol") && B.core.sessions.size === 6);
-	ok("B2c 할당 완료 후 접속 → 초기상태가 pi_ready (ensure가 초기 send 선행)", expectMsg(wsFrank, 0, "pi_ready"));
 
 	// 전면 활성 가정 — bob을 스트리밍 중(백그라운드 응답 생성)으로 만들어 victim 후보 제외
 	// (스틸은 임계 없으므로 최근 유휴만으론 보호되지 않음 — 전면활성 = WS부착 4 + 스트리밍 1)
 	sBob.isStreaming = true;
 	const wsGrace = connect(B.core, "b-grace");
 	const sGrace = B.core.sessions.get("b-grace") as any;
-	ok("B3 5/5 전면활성 → 신규 할당 거부 (pi_starting 접속, 백엔드 없음)",
-		expectMsg(wsGrace, 0, "pi_starting") && sGrace.backend === null && B.backends.length === 6 && B.active() === 5);
+	ok("B3 전면활성 접속 → 셸만(pi_ready 합성)·스폰 없음",
+		expectMsg(wsGrace, 0, "pi_ready") && sGrace.backend === null && B.backends.length === 6 && B.active() === 5);
 
 	// B4 스트리밍 victim 제외 — 최오래(alice, 스트리밍)는 skip, 차오래 유휴(eve) 회수
 	wsAl.close();
@@ -189,9 +198,11 @@ function newCore(maxSessions: number) {
 	const sAlice = B.core.sessions.get("b-alice") as any;
 	const sEve = B.core.sessions.get("b-eve") as any;
 	sAlice.isStreaming = true; // 백그라운드 응답 생성 중 — 회수 금지 부정조건
+	sEve.isStreaming = false; // B1b 발화 잔존 정리 — eve를 victim 후보로 (bob은 스트리밍 유지 — 제외 검증)
 	sAlice.lastActivity = Date.now() - 600_000;
 	sEve.lastActivity = Date.now() - 350_000;
-	connect(B.core, "b-hank");
+	const wsHank = connect(B.core, "b-hank");
+	sendPrompt(wsHank); // 발화 수요 — victim 스틸은 발화 시점
 	ok("B4 스트리밍 세션은 victim 제외 — 차오래 유휴(eve) 회수 후 hank 할당",
 		(B.backends[0] as FakeBackend).aliveState === true && (B.backends[4] as FakeBackend).stopCount === 1
 		&& (B.backends[6] as FakeBackend).alive() === true && B.active() === 5,
@@ -200,7 +211,7 @@ function newCore(maxSessions: number) {
 	// B5 cap-full WS 프롬프트 → agent_end 에러 broadcast
 	orderLog.length = 0;
 	const backendCount = B.backends.length;
-	wsMessage(wsGrace, { type: "prompt", userInput: "안녕", message: "안녕" });
+	sendPrompt(wsGrace);
 	const last = wsGrace.sent[wsGrace.sent.length - 1];
 	ok("B5 cap-full WS 프롬프트 → agent_end 에러 broadcast (agent_start/isStreaming 미설정)",
 		last?.type === "agent_end" && typeof last.error === "string" && last.error.includes("최대 백엔드")
@@ -213,15 +224,20 @@ function newCore(maxSessions: number) {
 {
 	const C = newCore(1);
 	const wsA = connect(C.core, "c-a");
-	const sB = connect(C.core, "c-b"); // cap 도달 — dormant 연결
+	const sB = connect(C.core, "c-b"); // 접속 둘 다 셸만 — 스폰 없음
 	const sBob = C.core.sessions.get("c-b") as any;
-	ok("C0 cap-full 접속 → dormant(pi_starting)", expectMsg(sB, 0, "pi_starting") && sBob.backend === null && C.active() === 1);
+	ok("C0 접속 2개 → 스폰 0 (pi_ready 합성 — 뷰어 신호, dormant 셸)", expectMsg(wsA, 0, "pi_ready") && expectMsg(sB, 0, "pi_ready")
+		&& sBob.backend === null && C.backends.length === 0);
+
+	sendPrompt(wsA); // 발화 → cap 1 할당 (작업 명령만 수요)
+	ok("C0a 발화 → cap 1 할당", C.backends.length === 1 && C.active() === 1);
 
 	// 슬롯 해제 — 수동 회수 스윕 (실 인터벌 60s 대기 금지 — reclaimSweep 직접 호출로 우회)
 	wsA.close();
-	(C.core.sessions.get("c-a") as any).lastActivity = Date.now() - 400_000;
-	C.core.reclaimSweep();
 	const sA = C.core.sessions.get("c-a") as any;
+	sA.isStreaming = false; // 발화 정리 — FakeBackend는 자동 agent_end를 내지 않는다
+	sA.lastActivity = Date.now() - 400_000;
+	C.core.reclaimSweep();
 	ok("C0b 수동 회수 스윕 — 유휴 백엔드 dormant 전환", sA.backend === null && (C.backends[0] as FakeBackend).stopCount === 1 && C.active() === 0);
 
 	// dormant 세션에 WS 프롬프트 → 즉시발화 (sendToBackend 가드가 ensureBackend)
@@ -245,6 +261,7 @@ function newCore(maxSessions: number) {
 
 	// D1 WS 있음 → 1.5s 후 자동 재시작 (짧은 실대기 허용)
 	const ws1 = connect(D.core, "d-one");
+	sendPrompt(ws1); // 발화 → 기동 (접속만으론 스폰 없음)
 	D.backends[0].emitExit();
 	const s1 = D.core.sessions.get("d-one") as any;
 	ok("D1a 크래시 즉시 — ready 해제, 즉시 시작 아님(재시작 스케줄)",
@@ -255,8 +272,10 @@ function newCore(maxSessions: number) {
 		&& s1.backend === D.backends[1] && s1.backendReady === true
 		&& logBuf.some((l) => l.includes("비정상 종료 감지")));
 
-	// D2 WS 없음 → dormant 전환(재시작 안함) → 재접속 시 재할당
+	// D2 WS 없음 → dormant 전환(재시작 안함) → 재접속·재발화 시 재할당
 	const ws2 = connect(D.core, "d-two");
+	sendPrompt(ws2); // 발화 → 기동 [2]
+	(D.core.sessions.get("d-two") as any).isStreaming = false; // 발화 정리 — 크래시 시뮬
 	ws2.close();
 	D.backends[2].emitExit();
 	const s2 = D.core.sessions.get("d-two") as any;
@@ -264,12 +283,16 @@ function newCore(maxSessions: number) {
 	await sleep(1800);
 	ok("D2b 무WS 크래시 — 1.5s 경과에도 재시작 없음", D.backends.length === 3);
 	const ws2b = connect(D.core, "d-two");
-	ok("D2c dormant 재접속 → ensure 재할당(pi_ready)",
-		expectMsg(ws2b, 0, "pi_ready") && D.backends.length === 4 && (D.backends[3] as FakeBackend).alive()
+	ok("D2c dormant 재접속 → 스폰 0·pi_ready 합성 (접속이 프로세스를 부르지 않음 — 회귀)",
+		expectMsg(ws2b, 0, "pi_ready") && D.backends.length === 3 && (D.core.sessions.get("d-two") as any).backend === null);
+	sendPrompt(ws2b);
+	ok("D2d dormant 재개 발화 → ensure 재할당",
+		D.backends.length === 4 && (D.backends[3] as FakeBackend).alive()
 		&& (D.core.sessions.get("d-two") as any).backend === D.backends[3]);
 
 	// D3 6회 연속 크래시 → 스로틀 중단
-	connect(D.core, "d-three");
+	const ws3 = connect(D.core, "d-three");
+	sendPrompt(ws3); // 발화 → 기동 [4]
 	for (let i = 0; i < 6; i++) D.backends[4].emitExit();
 	ok("D3a 6회 연속 크래시 → 재시작 중단 로그", logBuf.some((l) => l.includes("자동 재시작 중단")));
 	await sleep(1800);
@@ -288,6 +311,97 @@ function newCore(maxSessions: number) {
 	ok("E start 직후 ready 동기 emit + send 즉시 기록 (재할당 큐 불필요 근거)",
 		r === true && s.backendReady === true && fake.startCount === 1 && fake.records.length === 1
 		&& fake.opts.cwd === SC.workspacePath("e-solo"));
+}
+
+// ═══════════════ F. 열림 무지간·지연 할당 — 접속은 뷰어 신호, 프로세스는 작업 명령만 부른다 (maxSessions=5) ═══════════════
+{
+	const F = newCore(5);
+	const DATA = envPaths("ai-turk").data; // 세션 코어 모듈과 동일 규칙 — XDG 격리 반영
+	const metaFile = (k: string) => join(DATA, k, "conversation.json");
+
+	// F1 신규 대화 connect — 스폰 0·디스크 0·pi_ready 합성
+	const wsNew = connect(F.core, "f-new");
+	const sF = F.core.sessions.get("f-new") as any;
+	ok("F1a 신규 접속 — 스폰 0 (접속은 뷰어 신호)", F.backends.length === 0 && sF.backend === null && sF.backendReady === false);
+	ok("F1b 접속 즉시 pi_ready 합성 — vapidPublicKey 포함·backend 필드 없음",
+		expectMsg(wsNew, 0, "pi_ready") && typeof wsNew.sent[0].vapidPublicKey === "string" && !("backend" in wsNew.sent[0]));
+	ok("F1c 클릭만 한 대화 — 디스크 0 (conversation.json·dir 미생성)", !existsSync(metaFile("f-new")) && !existsSync(join(DATA, "f-new")));
+
+	// F1d dormant get_state 합성 — sessionId="" → 클라 복원 스킵(빈 그리드) 경로. 필드세트는 라이브 보강(onEvent)과 동일 기준
+	wsMessage(wsNew, { type: "get_state" });
+	const gs = wsNew.sent.find((m: any) => m.command === "get_state");
+	ok("F1d dormant get_state 합성 — 빈 sessionId·dormant, absent 허용 필드 미포함",
+		gs?.success === true && gs.data.sessionId === "" && gs.data.isStreaming === false && gs.data.route === "user"
+		&& gs.data.lastResponse === null && gs.data.backendState === "dormant" && gs.data.isCompacting === false
+		&& !("model" in gs.data) && !("thinkingLevel" in gs.data) && !("messageCount" in gs.data));
+
+	// F2 캐시 없는 get_available_models — 무응답 수용 (서버 재시작 직후 신규 대화 빈 메뉴 — 스폰하지 않는다)
+	const sentAfterF1 = wsNew.sent.length;
+	wsMessage(wsNew, { type: "get_available_models" });
+	ok("F2 캐시 없는 models 요청 — 무응답·스폰 0", wsNew.sent.length === sentAfterF1 && F.backends.length === 0);
+
+	// F3 dormant 첫 prompt — 스폰 1회·prompt 전달·conversation.json 생성(title+createdAt)
+	wsMessage(wsNew, { type: "prompt", userInput: "안녕 터크", message: "안녕 터크" });
+	const fb0 = F.backends[0] as FakeBackend;
+	ok("F3a dormant 첫 prompt — 스폰 1회·prompt 전달", fb0.startCount === 1 && fb0.records.length === 1 && (fb0.records[0] as any).message === "안녕 터크");
+	ok("F3b 첫 발화가 메타 생성 — title(첫 프롬프트 30자)+createdAt 존재", (() => {
+		try {
+			const m = JSON.parse(readFileSync(metaFile("f-new"), "utf-8"));
+			return m.title === "안녕 터크" && typeof m.createdAt === "number" && typeof m.lastActiveAt === "number";
+		} catch { return false; }
+	})());
+
+	// F4 기존 dormant connect — 완전 복원 시뮬 (+접속 스폰 0 회귀)
+	fb0.emit({ type: "response", command: "get_state", success: true, data: { sessionId: "f-sess-1" } } as TurkEvent); // 실 경로 재현 — get_state 응답 → agentSessionId 영속
+	ok("F4a get_state 응답 — agentSessionId 메모리·파일 동시 확정",
+		sF.agentSessionId === "f-sess-1" && existsSync(join(DATA, "f-new", "agent-session-id")));
+	sF.lastResponse = { messages: [{ role: "assistant", content: [{ type: "text", text: "마지막 응답" }] }], stopReason: "end_turn" };
+	sF.isStreaming = false; // 발화 정리 — FakeBackend는 자동 agent_end 없음
+	wsNew.close();
+	sF.lastActivity = Date.now() - 400_000;
+	F.core.reclaimSweep();
+	ok("F4b 회수 스윕 — dormant 전환", sF.backend === null && fb0.stopCount === 1 && F.backends.length === 1);
+	const wsRes = connect(F.core, "f-new");
+	ok("F4c 기존 dormant 재접속 — 스폰 0 (재접속만으론 프로세스 안 부름)", F.backends.length === 1 && sF.backend === null);
+	wsMessage(wsRes, { type: "get_state" });
+	const gs2 = wsRes.sent.find((m: any) => m.command === "get_state");
+	ok("F4d get_state 합성 — 진짜 sessionId·lastResponse 포함(복원 시뮬)",
+		gs2?.success === true && gs2.data.sessionId === "f-sess-1"
+		&& gs2.data.lastResponse?.messages?.[0]?.content?.[0]?.text === "마지막 응답" && gs2.data.backendState === "dormant");
+
+	// F5 set_thinking_level 지연 큐 — dormant 수신(무응답·스폰 0) → 첫 발화 스폰 → 재생이 prompt에 선행
+	wsMessage(wsRes, { type: "set_thinking_level", level: "high" });
+	ok("F5a dormant set_thinking_level — 큐잉(무응답·스폰 0)",
+		sF.pendingThinkingLevel === "high" && F.backends.length === 1
+		&& !wsRes.sent.some((m: any) => m.command === "set_thinking_level"));
+	orderLog.length = 0;
+	wsMessage(wsRes, { type: "prompt", userInput: "이후 발화", message: "이후 발화" });
+	const fb1 = F.backends[1] as FakeBackend;
+	ok("F5b 첫 발화 스폰 + 큐 재생이 prompt에 선행 (pi_ready 동기 emit 근거 — orderLog)",
+		orderLog.indexOf("backend:set_thinking_level") !== -1
+		&& orderLog.indexOf("backend:set_thinking_level") < orderLog.indexOf("backend:prompt")
+		&& (fb1.records[0] as any).type === "set_thinking_level" && (fb1.records[0] as any).level === "high"
+		&& (fb1.records[1] as any).type === "prompt");
+	ok("F5c 큐 재생 후 소멸 — 과거 큐값이 미래 리스폰에 재적용되지 않게", sF.pendingThinkingLevel === undefined);
+
+	// F6 get_available_models 전역 캐시 — 라이브 성공 응답 보관 → dormant 재요청에 합성 재전달(스폰 0)
+	fb1.emit({ type: "response", command: "get_available_models", success: true, data: { models: [{ id: "m1", name: "Model 1", provider: "test" }] } } as TurkEvent);
+	sF.isStreaming = false; // 발화 정리
+	wsRes.close();
+	sF.lastActivity = Date.now() - 400_000;
+	F.core.reclaimSweep();
+	ok("F6a 라이브 응답 캐시 후 dormant 전환", sF.backend === null && fb1.stopCount === 1 && F.backends.length === 2);
+	const wsRes2 = connect(F.core, "f-new");
+	ok("F6b 재접속 — 스폰 0", F.backends.length === 2 && sF.backend === null);
+	wsMessage(wsRes2, { type: "get_available_models" });
+	const mm = wsRes2.sent.find((m: any) => m.command === "get_available_models");
+	ok("F6c dormant models 요청 — 전역 캐시 합성 재전달(스폰 0)",
+		mm?.success === true && (mm.data?.models as any[])?.[0]?.id === "m1" && F.backends.length === 2);
+	const wsOther = connect(F.core, "f-other"); // 다른 대화 shell — 전역 캐시 공유 검증
+	wsMessage(wsOther, { type: "get_available_models" });
+	const mo = wsOther.sent.find((m: any) => m.command === "get_available_models");
+	ok("F6d 캐시는 세션 무관 전역 — 다른 dormant 대화도 동일 합성(스폰 0)",
+		mo?.success === true && (mo.data?.models as any[])?.length === 1 && F.backends.length === 2);
 }
 
 // ═══════════════ workspacePath — 위치 분리 ═══════════════

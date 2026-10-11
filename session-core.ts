@@ -6,10 +6,16 @@
  * 이 파일은 prod(server.ts) 동작을 정본으로 수렴한다. 이후 풀(1b)·인증(Phase 2)도 여기에만 얹는다.
  *
  * 풀 시맨틱(1b): 세션 셸은 불멸(sessions 맵 무상한 — LRU 소멸 경로 제거, 스케줄 유실 결함 해소),
- * 희소자원=백엔드만 상한(TURK_MAX_BACKENDS) 배분. 수요지점(handleConnection·프롬프트 발화)에서
+ * 희소자원=백엔드만 상한(TURK_MAX_BACKENDS) 배분. 수요지점(프롬프트·컴팩트·set_model 발화 + 스케줄러 트리거)에서
  * ensureBackend가 멱등 할당·유휴 LRU 회수를 수행하고, 60s 스윕이 WS 없는 유휴 백엔드를
  * dormant(backend=null — 셸·스케줄러 유지)로 회수한다. 재할당 큐 불필요 — start()가 spawn 직후
  * 동기 pi_ready emit + OS stdin 파이프가 부팅 전 명령 버퍼링 (backend.ts 근거).
+ *
+ * 열림 무지연·지연 할당(261010): WS 접속은 뷰어 신호일 뿐 — 백엔드를 기동하지 않고 pi_ready를 합성해 즉시
+ * 서빙한다(스폰 0·디스크 0). dormant 세션의 get_state는 셸 상태로 합성 응답, get_available_models는
+ * 전역 캐시 재전달, set_thinking_level은 큐잉 — 프로세스 수요는 작업 명령(prompt·compact·set_model +
+ * 스케줄 발화)에만 발생. conversation.json도 첫 발화 성공 경로에서만 생성 — 클릭만 한 대화는 dir 없이
+ * 재시작 시 자연 소멸(장부 자정).
  *
  * 대화 레지스트리(1c): 부팅 스윕이 데이터 dir을 스캔해 전 대화의 세션 셸을 복원한다(백엔드 스폰 없음 —
  * 수요 시점 기동; schedules.json은 Scheduler loadFromFile이 과거 nextRun=delay 0 즉시발화·미래=타이머 부활).
@@ -88,6 +94,7 @@ export interface Session {
 	lastActiveAt: number; // 마지막 대화 활동 (1c) — 접속 확정·프롬프트 발화마다 갱신, 레지스트리 정렬 기준
 	currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
 	parseRetryCount: number; // 서버 자가수정(위반 응답 재시도) 카운터 — 성공·취소·신규 유저입력에서 리셋
+	pendingThinkingLevel?: string; // 열림 무지연 — dormant 동안 수신한 set_thinking_level 큐 (pi_ready 재할당 시 재생 후 소멸)
 }
 
 // ── Phase 2 인증 주입 계약 — server.ts(TURK_AUTH=1)가 auth.ts의 createAuthorizer() 객체를 전달.
@@ -337,6 +344,10 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 
 	const sessions = new Map<string, Session>();
 
+	// ── get_available_models 전역 캐시 (열림 무지연) — 마지막 라이브 성공 응답 1건 보관 → dormant 재요청에
+	//    재전달. 모델 목록은 계정·대화 공통 자원이라 코어 단위 1슬롯 캐시로 족하다 (세션 키 불필요).
+	let modelsCache: TurkEvent | null = null;
+
 	// ── 1c 부팅 스윕 — 대화 레지스트리 복원: 데이터 dir 스캔 → 전 대화 셸 생성 (백엔드 스폰 없음) ──
 	// createSession의 Scheduler가 schedules.json을 로드해 즉시 부활 — 과거 nextRun은 delay 0 즉시발화,
 	// 미래는 타이머 부활. 셸만 복원하는 이유: 백엔드 수요는 과기 스케줄 발화 지점에서만 발생 (결정 기록 261010).
@@ -360,9 +371,13 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		}
 	}
 
-	// 1c 대화 메타 갱신 — lastActiveAt=now 파일 저장. 접속 확정(handleConnection)·프롬프트 성공(sendToBackend) 경로에서 호출.
-	function touchConversationMeta(session: Session): void {
+	// 1c 대화 메타 갱신 — lastActiveAt=now 파일 저장.
+	// 기록 존재 게이트(열림 무지연): 기본은 conversation.json이 이미 존재할 때만 갱신 — 클릭만 한(무발화)
+	// 대화는 디스크 기록 0(dir 자체 미생성)이라 재시작 시 자연 소멸. create=true는 프롬프트 성공 경로(sendToBackend)
+	// 전용 — 첫 발화가 대화의 디스크 시작점(장부 자정). 접속 확정(enterSession) 경로는 게이트 갱신만.
+	function touchConversationMeta(session: Session, create = false): void {
 		session.lastActiveAt = Date.now();
+		if (!create && !existsSync(conversationMetaPath(session.userKey))) return; // 클릭만 한 대화 — 메타 미생성
 		saveConversationMeta(session.userKey, { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt });
 	}
 
@@ -387,13 +402,46 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		});
 	}
 
-	// backend.send 가로채서 route 추적
+	// backend.send 가로채기 — route 추적 + dormant 합성 게이트(열림 무지연) + 백엔드 수요 ensure
 	function sendToBackend(session: Session, cmd: Record<string, unknown>, opts?: { route?: "user" | "scheduler" | "tool" }): void {
 		const route = (opts?.route ?? cmd.route ?? "user") as "user" | "scheduler" | "tool";
-		// 프롬프트·컴팩트는 백엔드 수요지점(스케줄러 트리거·WS 프롬프트·컴팩트 공용) — 발화/실행 전 멱등 할당.
+		// ── dormant 합성·큐잉 — 미기동 세션의 조회성·설정성 명령은 스폰 없이 마감 ("WS는 뷰어 신호,
+		//    프로세스는 작업 명령만 부른다" 계약 — 접속 후 클라가 내 뱉는 get_state/models/thinking이
+		//    백엔드를 깨우지 않는다). 수요지점은 아래 ensure 목록(prompt·compact·set_model·스케줄 발화)만.
+		if (!(session.backend?.alive())) {
+			// get_state 합성 — 캐시된 세션 셸 상태로 응답. 새 대화(agentSessionId null) → sessionId="" →
+			// 클라 복원 스킵(빈 그리드), 기존 대화 → 진짜 agentSessionId + lastResponse로 완전 복원.
+			// 필드 세트는 라이브 get_state 보강 블록(onEvent)과 동일 유지 — 클라 소비 계약 단일 정합.
+			// model·thinkingLevel·messageCount 등은 클라가 가드형 소비(if 존재 검사)이라 absent 허용.
+			if (cmd.type === "get_state") {
+				broadcast(session, {
+					type: "response", command: "get_state", success: true,
+					data: { sessionId: session.agentSessionId ?? "", lastPrompt: session.lastPrompt,
+						isStreaming: session.isStreaming, route: session.currentRoute,
+						lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt,
+						lastTurnFailed: session.lastTurnFailed, backendState: backendStateOf(session), isCompacting: false },
+				});
+				return;
+			}
+			// get_available_models 합성 — 전역 캐시(마지막 라이브 성공 응답) 재전달. 캐시 없음(서버 재시작 직후
+			// 라이브 목록을 1회도 받지 못한 신규 대화)은 무응답 수용 — 클라 현상 유지(빈 메뉴), 드롭다운 재오픈
+			// 등 라이브 경로 응답으로 캐시가 채워지면 이후는 합성. 스폰하지 않는다.
+			if (cmd.type === "get_available_models") {
+				if (modelsCache) broadcast(session, modelsCache);
+				return;
+			}
+			// set_thinking_level 큐잉 — 클라는 전송 즉시 로컬 상태 갱신으로 완료(응답 대기 계약 없음 확인).
+			// 큐는 pi_ready(onEvent)에서 spawn 동기 재생 → 같은 틱 후속 prompt에 선행 보장.
+			if (cmd.type === "set_thinking_level") {
+				session.pendingThinkingLevel = String(cmd.level ?? "");
+				return;
+			}
+		}
+		// 프롬프트·컴팩트·set_model은 백엔드 수요지점(스케줄러 트리거·WS 프롬프트·컴팩트·모델 선택 공용) — 발화/실행 전 멱등 할당.
+		// set_model 가입(열림 무지연): 클라가 모델 선택 후 get_state 응답까지 dim(modelChanging) 유지 계약 — dormant 스폰 필요.
 		// 컴팩트 미게이트는 실장애(261010): dormant 세션에서 무음 소실 → UI '진행 중' 사장.
-		// cap 초과 거부 시: agent_start/isStreaming 설정 없이 에러 응답을 클라가 해듑하는 형태로 마감.
-		if (cmd.type === "prompt" || cmd.type === "compact") {
+		// cap 초과 거부 시: agent_start/isStreaming 설정 없이 에러 응답을 클라가 해듑하는 형태로 마감 (문안 기존 준수).
+		if (cmd.type === "prompt" || cmd.type === "compact" || cmd.type === "set_model") {
 			if (!ensureBackend(session)) {
 				console.log(`[${session.userKey.slice(0, 8)}] [Pool] 백엔드 초과 — ${cmd.type} 거부 (활성 ${activeBackendCount()}/${MAX_BACKENDS})`);
 				if (cmd.type === "compact") broadcast(session, { type: "response", command: "compact", success: false, error: "최대 백엔드 초과 — 잠시 후 다시 시도해 주세요" });
@@ -401,9 +449,12 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 				return;
 			}
 			session.lastActivity = Date.now(); // 발화 = 활동 — 유휴 회수 임계 갱신
-			// 1c 대화 메타 — 성공 경로 한정: lastActiveAt 갱신 + 첫 유저 프롬프트 30자로 타이틀 확정 (거부·scheduler/tool 라우트는 타이틀 불변)
-			if (route === "user" && typeof cmd.userInput === "string" && session.title === null) session.title = cmd.userInput.slice(0, 30);
-			touchConversationMeta(session);
+			// 1c 대화 메타 — 프롬프트 성공 경로 한정 무조건 기록(create=true — 신규 대화 메타 생성도 여기가 유일 시점).
+			// 첫 유저 프롬프트 30자로 타이틀 확정 (거부·scheduler/tool 라우트·set_model은 타이틀·메타 불변)
+			if (cmd.type !== "set_model") {
+				if (route === "user" && typeof cmd.userInput === "string" && session.title === null) session.title = cmd.userInput.slice(0, 30);
+				touchConversationMeta(session, true);
+			}
 		}
 		session.currentRoute = route;
 		// 처리중 프롬프트 기록 — 재연결/새로고침 후 get_state로 표시 (user 라우트 순수 입력만)
@@ -543,6 +594,18 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			if (ev.type === "pi_ready") {
 				session.backendReady = true;
 				(ev as any).vapidPublicKey = VAPID_PUBLIC_KEY;
+				// 지연 큐 재생 — dormant 동안 수신한 set_thinking_level을 재할당(재생성) 직후 1회 재생.
+				// FakeBackend·PiBackend 공통 근거: spawn 직후 동기 pi_ready emit → 이 블록은 startBackend() 호출 틱 안에서
+				// 실행 → sendToBackend의 후속 prompt보다 선행 보장 (stdin 파이프 버퍼링 — backend.ts 재현 불필요).
+				// 재생 후 소멸 — 이후 라이브 변경값이 최신이므로, 과거 큐값이 미래 리스폰마다 재적용되는 부작용 차단.
+				if (session.pendingThinkingLevel) {
+					session.backend?.send({ type: "set_thinking_level", level: session.pendingThinkingLevel });
+					session.pendingThinkingLevel = undefined;
+				}
+			}
+			// get_available_models 전역 캐시 — 성공 응답만 보관 (dormant 재요청 합성 응답원, 실패·위반 응답은 미보관)
+			if (ev.type === "response" && ev.command === "get_available_models" && (ev as any).success) {
+				modelsCache = ev;
 			}
 			// get_state 응답에서 실제 agentSessionId 확인 → 파일 영속 (ready 후 갱신)
 			if (ev.type === "response" && (ev as any).command === "get_state") {
@@ -674,8 +737,10 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	// ── 세션 관리 ────────────────────────────────────────────────────────────
 	function createSession(userKey: string): Session {
 		const now = Date.now();
-		const convMeta = loadConversationMeta(userKey);
-		if (!convMeta) saveConversationMeta(userKey, { title: null, createdAt: now, lastActiveAt: now }); // 신규 대화 메타 생성 — 기존 파일 있으면 미수정 (createdAt 보존)
+		const convMeta = loadConversationMeta(userKey); // 파일 없으면 null — 메모리 createdAt=now로 셸만 생성.
+		// 신규 메타 파일 생성 제거(열림 무지연): 클릭만 한 대화는 dir·conversation.json를 만들지 않는다 —
+		// 첫 발화(sendToBackend 성공 경로 touchConversationMeta create=true)가 유일한 디스크 생성 시점.
+		// 기존 파일 있으면 복원(createdAt·title 보존) — 부팅 스윕·재접속 대화의 정합 유지.
 		const session: Session = {
 			userKey,
 			agentSessionId: loadAgentSessionId(userKey), // 저장된 ID 있으면 복원, 없으면 null(새 세션)
@@ -716,7 +781,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			textBuf: "",
 		};
 		sessions.set(userKey, session);
-		return session; // 순수 셸 — 백엔드는 수요 시점(handleConnection·프롬프트 발화)에 ensureBackend가 기동
+		return session; // 순수 셸 — 백엔드는 수요 시점(프롬프트·컴팩트·set_model 발화 + 스케줄 트리거)에 ensureBackend가 기동 (열림 무지연 — 접속 미기동)
 	}
 
 	function removeSession(userKey: string): void {
@@ -768,10 +833,12 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			if (rel === "foreign") { denyConnection(ws, "권한 없음 — 다른 계정의 대화입니다"); return; }
 			if (rel === "orphan") authorize.claimConversation(username, userKey); // 고아 인수 — 레거시 대화 첫 접속 자동 claim (마이그레이션 계약)
 		}
-		touchConversationMeta(session); // 1c — 세션 확정 직후 lastActiveAt 갱신 저장 (재접속도 대화 활동)
-		// 풀 할당 — App이 pi_ready 대기하므로 초기 상태 통지 전에 기동(교착 방지).
-		// 할당 실패(cap 초과)면 pi_starting으로 접속받고, 첫 프롬프트의 sendToBackend 가드가 재시도 → 에러 broadcast.
-		ensureBackend(session);
+		// 푸터 메타 — conversation.json이 존재할 때만 갱신(touchConversationMeta 내부 existsSync 게이트).
+		// 클릭만 한(무발화) 대화는 존재 불확정이라 디스크 기록 0 — dir 자체 미생성으로 재시작 시 자연 소멸.
+		touchConversationMeta(session); // 1c — 존재 게이트 갱신 (재접속도 대화 활동)
+		// 백엔드 기동 제거(열림 무지연·지연 할당) — 접속은 뷰어 신호일 뿐, 프로세스는 작업 명령만 부른다.
+		// 기동 수요 = sendToBackend ensure 목록(prompt·compact·set_model) + 스케줄러 트리거 발화만. 접속 직후 클라의
+		// pi_ready→get_state는 dormant 합성 응답으로 즉시 마감 — 스폰·지연·교착 없음(뷰어만으로 풀을 잠그지 않게).
 		session.ws.add(ws);
 		session.lastActivity = Date.now();
 		(ws as any).isAlive = true;
@@ -781,11 +848,10 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		}
 		console.log(`[Turk] 연결: ${userKey.slice(0, 8)} (세션 ${sessions.size} · 백엔드 ${activeBackendCount()}/${MAX_BACKENDS})`);
 
-		// 백엔드 상태 즉시 통지 (새 탭/재연결 동기화)
-		ws.send(JSON.stringify({
-			type: session.backendReady ? "pi_ready" : "pi_starting",
-			...(session.backendReady ? { backend: session.backend?.kind(), vapidPublicKey: VAPID_PUBLIC_KEY } : {}),
-		}));
+		// 셸 서빙 준비 신호 — 무조건 pi_ready 합성 (backend 필드 없음, vapidPublicKey만 포함 — 푸시 등록은 셸 단계에서도 가능).
+		// 클라는 pi_ready를 멱등 소비 — 이후 진짜 백엔드가 기동되면 개별 pi_ready가 도착해 동일 경로(pi_ready→get_state)를 탄다.
+		// cap·스폰 조건과 완전 무관 — 접속 자체가 서빙 가능 상태(빈 그리드든 복원이든)라 뜻.
+		ws.send(JSON.stringify({ type: "pi_ready", vapidPublicKey: VAPID_PUBLIC_KEY }));
 
 		ws.on("message", (raw) => {
 			try {

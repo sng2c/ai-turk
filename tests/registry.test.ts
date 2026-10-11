@@ -160,15 +160,14 @@ function newCore(maxSessions: number, opts: { scanOnBoot?: boolean } = {}) {
 	const cpath = join(DATA, "r3-user", "conversation.json");
 	const t1 = Date.now();
 	const ws = connect(R3.core, "r3-user");
-	ok("R3a 신규 접속 → 메타 생성 (title null, createdAt=now)", existsSync(cpath)
-		&& (() => { const m = JSON.parse(readFileSync(cpath, "utf-8")); return m.title === null && typeof m.createdAt === "number" && m.createdAt >= t1 - 5; })());
+	ok("R3a 신규 접속 → 메타 미생성 (열림 무지간 — 첫 발화가 유일한 디스크 생성 시점)", !existsSync(cpath)
+		&& (() => { const s = R3.core.sessions.get("r3-user") as any; return s.title === null && typeof s.createdAt === "number" && s.createdAt >= t1 - 5; })());
 	ok("R3b 세션 반영 — title null", (R3.core.sessions.get("r3-user") as any).title === null);
 
-	// 발화 경로 엄정 검증 — 메타를 과거 값으로 되돌려놓고(메모리+디스크) user 프롬프트로 갱신 관측
+	// 발화 경로 엄정 검증 — 메타를 과거 값으로 되돌려놓고(메모리 — 디스크는 미생성이라 첫 발화가 생성) user 프롬프트로 갱신 관측
 	const T0 = Date.now() - 200_000;
 	const sR3 = R3.core.sessions.get("r3-user") as any;
 	sR3.createdAt = T0; sR3.lastActiveAt = T0; sR3.title = null;
-	writeFileSync(cpath, JSON.stringify({ title: null, createdAt: T0, lastActiveAt: T0 }));
 	const USER_TEXT = "안녕하세요 터크! 첫 대화 타이틀이 되는 아주 긴 프롬프트 문장으로서 30자 절단 지점이 이 근처일 것입니다";
 	wsMessage(ws, { type: "prompt", userInput: USER_TEXT, message: USER_TEXT });
 	const meta = JSON.parse(readFileSync(cpath, "utf-8"));
@@ -233,6 +232,7 @@ function newCore(maxSessions: number, opts: { scanOnBoot?: boolean } = {}) {
 {
 	const R5 = newCore(3);
 	const ws = connect(R5.core, "r5-user");
+	wsMessage(ws, { type: "prompt", userInput: "활성화", message: "활성화" }); // 발화 → 기동 (열림 무지간 — 접속만으론 스폰 없음)
 	(R5.backends[0] as FakeBackend).emit({ type: "response", command: "get_state", data: {} } as TurkEvent);
 	const ev = ws.sent.find((m: any) => m.type === "response" && m.command === "get_state");
 	ok("R5 get_state 보강 — data.backendState=active 주입", ev?.data?.backendState === "active", `ev=${JSON.stringify(ev)}`);
@@ -283,7 +283,8 @@ function newCore(maxSessions: number, opts: { scanOnBoot?: boolean } = {}) {
 	const wsRoot = mkdtempSync(join(tmpdir(), "ai-turk-wsroot-"));
 	process.env.TURK_WORKSPACES_ROOT = wsRoot;
 	const R6w = newCore(5);
-	const wsW = connect(R6w.core, "r6-ws-user"); // connect → ensureBackend → startBackend가 workspace mkdir
+	const wsW = connect(R6w.core, "r6-ws-user");
+	wsMessage(wsW, { type: "prompt", userInput: "발화", message: "x" }); // 발화 → startBackend가 workspace mkdir (열림 무지간 — 접속만으론 미생성)
 	const wsDir = join(wsRoot, "r6-ws-user");
 	ok("R6g delete workspace — TURK_WORKSPACES_ROOT(DATA_DIR 밖) dir 소멸",
 		(() => {
