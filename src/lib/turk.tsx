@@ -31,6 +31,10 @@ export interface ToolStatus {
 // App.tsx의 systemPrompt 주입도 AGENTS.md가 표준이므로 제거됨.
 
 
+// 드래프트 모드 상수 — userKey가 아직 없는 상태(첫 메시지 전). resolveUserKey가 이 값(null)을 반환한다.
+// 첫 메시지가 대화를 생성하며(App.tsx handleSend 드래프트 분기) 실제 UUID 키로 승격된다.
+export const DRAFT_USER_KEY = null;
+
 export function emptyState(rows: number, cols: number): TurkState {
 	return {
 		// 제목(🤖 AI Turk)은 짝박스 위치 — message에는 본문부터
@@ -155,48 +159,49 @@ export async function discardPush(): Promise<void> {
 	} catch { /* 무시 */ }
 }
 
-// ── non-secure context(LAN IP 등) 대응 — crypto.randomUUID가 없으면 Math.random 폴백
-function uuidv4Fallback(): string {
+// ── 유저 구분키 — URL 3상태 계약 (261010 — 새 대화=첫 페이지, 첫 메시지가 대화를 생성):
+//   ① 해시 "new" → 드래프트(null) — localStorage 미접촉 (#new는 첫 메시지 전 대화가 없다는 접속의 유일 표현)
+//   ② 해시 "<key>" → 그 키 + localStorage 갱신 (링크 공유·알림 클릭·드로어 전환 — 기존 계약)
+//   ③ 해시 없음 → localStorage 조회: 있으면 마지막 대화 재개, 없으면 드래프트 — 발급 제거됨
+//      (발급은 첫 메시지 시점 — App.tsx handleSend 드래프트 분기. 부트·여기서 자동 발급하지 않는다)
+//    런타임 hashchange → resolveUserKey() 재호출로 갱신, App.tsx가 풀리로드하여 상태 전환.
+function hashUserKey(): string | null {
+	const h = location.hash.replace(/^#/, "").trim();
+	if (!h) return null;
+	try { return decodeURIComponent(h); } catch { return h; } // 한글 등 인코딩된 해시 → 디코드
+}
+// UUID 폴백 발급 — crypto.randomUUID가 없는 환경용. 드래프트 해소(첫 메시지) 시점의 발급에서만 사용.
+export function uuidv4Fallback(): string {
 	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
 		const r = (Math.random() * 16) | 0;
 		const v = c === "x" ? r : (r & 0x3) | 0x8;
 		return v.toString(16);
 	});
 }
-
-// ── 유저 구분키 — #뒤 값이 있으면 그 키로 세션 오버라이드(링크 공유), 없으면 발급(localStorage) userKey.
-//    저장된 userKey(localStorage) = 기본값. 해시 없음 → 기본키(없으면 발급)로 초기화 + reflectUserKey로 주소창 반영.
-//    런타임 hashchange → resolveUserKey() 재호출로 갱신, App.tsx가 WS 재접속하여 세션 전환.
-function hashUserKey(): string | null {
-	const h = location.hash.replace(/^#/, "").trim();
-	if (!h) return null;
-	try { return decodeURIComponent(h); } catch { return h; } // 한글 등 인코딩된 해시 → 디코드
-}
-function ensureLocalKey(): string {
-	let k = localStorage.getItem("turk-user-key");
-	if (!k) { k = crypto.randomUUID?.() ?? uuidv4Fallback(); localStorage.setItem("turk-user-key", k); }
-	return k;
-}
-// 현재 유효 userKey 계산 — 해시(#뒤 값) 우선: 있으면 그 키, 없으면 기본키(발급/조회 localStorage).
-// 해시 진입은 마지막 대화로 localStorage 기본값을 갱신 (261010) — 루트 즐겨찾기 = 최근 대화 재개.
-export function resolveUserKey(): string {
+// 현재 유효 userKey 계산 — 드래프트(null) 가능. 해시 진입은 마지막 대화로 localStorage 기본값을 갱신 (261010)
+// — 루트 즐겨찾기 = 최근 대화 재개. 부트 스크립트(index.html)와 동일 규칙.
+export function resolveUserKey(): string | null {
 	const h = hashUserKey();
+	if (h === "new") return null; // #new → 드래프트 (localStorage 미접촉)
 	if (h) {
 		try { localStorage.setItem("turk-user-key", h); } catch { /* 무시 */ } // 마지막 대화 갱신 — 부트 스크립트(index.html)와 동일 규칙
 		return h; // 해시 → 그 키로 초기화
 	}
-	return ensureLocalKey(); // 없으면 기본키 — 발급(첫 방문) 또는 조회(=마지막 대화)
+	try { return localStorage.getItem("turk-user-key") || null; } catch { return null; } // 루트: 있으면 재개, 없으면 드래프트
 }
 // 현재 userKey를 URL hash에 반영 — 멀티 userKey(탭별 #<이름> 병렬 운영)·공유(주소 복사=세션 진입).
+// null(드래프트)은 반영할 주소가 없다 — #new·루트 그대로, 아무것도 안 한다.
 // pushState — 진짜 히스토리 엔트리 생성. replaceState는 현재 엔트리를 몰래 고치기만 해서 브라우저가
 // 즐겨찾기에 변경 전 주소를 저장하는 문제가 있었음. pushState는 hashchange를 유발하지 않으므로
 // 자기 키 반영 시 재접속 루프 없음. 뒤로가기로 이전 hash 복귀는 hashchange → onHashChange가 처리(의도된 동작).
-export function reflectUserKey(key: string): void {
+export function reflectUserKey(key: string | null): void {
+	if (!key) return; // 드래프트 — 미반영
 	if (hashUserKey() === key) return;
 	try { history.pushState(null, "", `#${encodeURIComponent(key)}`); } catch { /* 무시 */ }
 }
 
 // 초기값 (모듈 로드 1회) — 정적 표시/하위호환. 런타임 전환은 userKey state + resolveUserKey().
-export const TURK_USER_KEY: string = resolveUserKey();
+// null = 드래프트(첫 메시지 전) — App.tsx가 connect를 게이트하고 첫 메시지로 승격한다.
+export const TURK_USER_KEY: string | null = resolveUserKey();
 // 탭 타이틀은 261010부터 "AI Turk" 고정 — 부트 스크립트(index.html)가 React 마운트 전에
 // 설정하며 대화 식별은 드로어·푸시 별명이 담당 (채널명 타이틀 계열 제거).

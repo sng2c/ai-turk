@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
-	TURK_USER_KEY, resolveUserKey, reflectUserKey,
+	TURK_USER_KEY, resolveUserKey, reflectUserKey, uuidv4Fallback,
 	emptyState, errState, extractAssistantText, parseTurkJSON,
 	ensurePush, discardPush, Md,
 } from "./lib/turk";
@@ -134,12 +134,21 @@ export default function App() {
 		setCanScrollUp(el.scrollTop > 2);
 		setCanScrollDown(el.scrollTop + el.clientHeight < el.scrollHeight - 2);
 	}, []);
-	// 런타임 hash 전환은 풀리로드(onHashChange)라 이 state는 읽기 전용 — 표시·ref 갱신용
-	const [userKey] = useState(TURK_USER_KEY);
-	const userKeyRef = useRef(userKey);
-	userKeyRef.current = userKey; // 매 렌더링 동기화 (hashchange 핸들러에서 즉시 직접 갱신도 병행)
+	// userKey — 가변 상태, null(드래프트) 허용. 첫 메시지가 키를 발급·승격한다 (ChatGPT 모델 — 새 대화=첫 페이지).
+	// 해시 전환은 풀리로드(onHashChange) 계약이라 런타임 재설정은 드래프트→대화 승격(setUserKey)뿐.
+	const [userKey, setUserKey] = useState<string | null>(TURK_USER_KEY);
+	const userKeyRef = useRef<string | null>(userKey);
+	userKeyRef.current = userKey; // 매 렌더링 동기화 (handleSend 드래프트 분기는 렌더 대기 없이 직접 갱신도 병행)
 	const wsRef = useRef<WebSocket | null>(null);
 	const inputRef = useRef<HTMLInputElement>(null);
+	const isDraft = userKey === null; // 드래프트 — 첫 메시지 전까지 대화(userKey·WS) 없음
+	// ── 드래프트 첫 메시지 파이프라인 ──
+	// 초안 슬롯 이름 — userKey null(드래프트)은 "new" 슬롯 공유 (draft:null 금지)
+	const draftSlot = (k: string | null) => `draft:${k ?? "new"}`;
+	const pendingFirstMessageRef = useRef<string | null>(null); // 드래프트 원래 입력 — 첫 pi_ready(셸 합성)에서 플러시
+	const pendingFirstAttachRef = useRef(0); // 첫 메시지에 갈 보류 첨부의 미도착 응답 수 — 0이 되면 전송 (경로 주입 성립)
+	const pendingModelRef = useRef<any>(null); // 드래프트 모델 선택 보류 — 첫 pi_ready 체인에서 set_model
+	const pendingThinkingLevelRef = useRef<string | null>(null); // 드래프트 씽킹 보류 — 첫 pi_ready 체인에서 set_thinking_level
 
 	// ── 입력 초안 지속성 — 백그라운드 탭 폐기/새로고침에도 미전송 초안 보존 ──
 	// 복귀 시 WS 재연결(get_state)은 초안을 보호하지만(userSentRef 가드), 안드로이드가 백그라운드
@@ -152,7 +161,7 @@ export default function App() {
 	// 복원 — userKey 확정 시점(마운트/hash 전환)에 저장 초안 로드. 필드가 이미 채워져 있으면 현 입력 보호.
 	useEffect(() => {
 		draftLoadedRef.current = false;
-		kvGet(`draft:${userKey}`).then((d) => {
+		kvGet(draftSlot(userKey)).then((d) => {
 			if (d && !inputRef.current?.value) { draftEchoRef.current = false; setInput(d); }
 		}).catch(() => { /* 무시 */ }).finally(() => { draftLoadedRef.current = true; });
 	}, [userKey]);
@@ -161,7 +170,7 @@ export default function App() {
 	useEffect(() => {
 		if (!draftLoadedRef.current || draftEchoRef.current) return; // 에코(전송 프롬프트)는 저장 안 함 — 유저 초안만 유지
 		clearTimeout(draftTimerRef.current);
-		draftTimerRef.current = setTimeout(() => { kvSet(`draft:${userKey}`, input).catch(() => { /* 무시 */ }); }, 250);
+		draftTimerRef.current = setTimeout(() => { kvSet(draftSlot(userKey), input).catch(() => { /* 무시 */ }); }, 250);
 		return () => clearTimeout(draftTimerRef.current);
 	}, [input, userKey]);
 	// 즉시 flush — 백그라운드 진입(pagehide/visibilitychange hidden) 순간 타이머를 기다리지 않고 확정 저장
@@ -170,7 +179,7 @@ export default function App() {
 		const flush = () => {
 			if (!draftLoadedRef.current || draftEchoRef.current) return;
 			clearTimeout(draftTimerRef.current);
-			kvSet(`draft:${userKeyRef.current}`, inputValRef.current).catch(() => { /* 무시 */ });
+			kvSet(draftSlot(userKeyRef.current), inputValRef.current).catch(() => { /* 무시 */ });
 		};
 		const onVis = () => { if (document.hidden) flush(); };
 		window.addEventListener("pagehide", flush);
@@ -200,6 +209,9 @@ export default function App() {
 
 	// ── WebSocket 연결 ──────────────────────────────────────────────────
 	const connect = useCallback(() => {
+		// 드래프트 게이트 — 연결 시도 없음 (워치독·onVisible이 호출해도 조용히 no-op).
+		// 단 UI 게이트(입력·버튼·디밍)는 통과해야 첫 메시지를 받을 수 있다 — piReady·restored를 '준비'로 유지.
+		if (!userKeyRef.current) { setConnected(false); setPiReady(true); setRestored(true); return; }
 		// 스테일 소켓 정리 — CONNECTING/OPEN인 이전 소켓 핸들러 분리 후 close (중복 소켓 방지)
 		const stale = wsRef.current;
 		if (stale && stale.readyState !== WebSocket.CLOSED) {
@@ -226,6 +238,7 @@ export default function App() {
 		ws.onclose = (ev) => {
 			setConnected(false);
 			setPiReady(false);
+			if (pendingFirstMessageRef.current != null) pendingFirstAttachRef.current = 0; // 첫 메시지 대기 중 접속 끊김 — 첨부 대기 중단 (다음 연결에서 경로 없이도 전송 — 유실 방지)
 			if (!shouldReconnect.current || pendingReconnectRef.current) return;
 			if (document.hidden) return; // 백그라운드 종료 — 예약 없음. 복귀 시 onVisible이 즉시 신규 연결
 			console.debug(`[WS] 종료 code=${ev.code} — ${reconnectDelay.current}ms 후 재연결`);
@@ -322,8 +335,13 @@ export default function App() {
 		return () => window.removeEventListener("hashchange", onHashChange);
 	}, []);
 
-	// 최초 진입 userKey를 URL hash에 반영 — 발급키도 주소로 식별 (#<키> 편집 = 멀티탭 멀티 userKey, 주소 복사 = 공유)
+	// 최초 진입 userKey를 URL hash에 반영 — 드래프트(null)는 미반영 (#new·루트 그대로, 개인 키 유출 없음)
 	useEffect(() => { reflectUserKey(userKeyRef.current); }, []);
+
+	// 드래프트 — get_state 복원 경로가 없다(WS 없음) → 환영 화면을 직접 주입 (빈 메시지 화면 방지)
+	useEffect(() => {
+		if (!userKeyRef.current) setState(emptyState(rows, cols));
+	}, []);
 
 	// 탭 타이틀은 부트 스크립트(index.html)가 "AI Turk"로 고정 (261010 — 루트 즐겨찾기·채널명 타이틀 제거)
 
@@ -350,6 +368,7 @@ export default function App() {
 			case "pi_ready":
 				setPiReady(true);
 				flushPendingFiles(); // 연결 대기 중 선택된 파일 자동 첨부
+				sendFirstMessage(); // 드래프트 첫 메시지 플러시 — 셸 합성 pi_ready에서 즉시 원래 입력을 첫 프롬프트로 (보류 첨부 응답 대기 중이면 attach 응답에서 전송)
 				// 웹 푸시 등록 — 캐시가 단일 진원:
 				// ① 캐시가 현재 VAPID 키와 일치 → 동기 즉시 재전송 (SW를 건드리지 않음 — unsubscribe 레이스 없음)
 				// ② 캐시 없음/키 불일치 → 전체 재구독 (in-flight 가드; 성공 시 캐시 갱신 → 이후는 ① 경로)
@@ -556,6 +575,11 @@ export default function App() {
 					// 업로드 완료 → 칩 추가 (경로는 서버가 부여)
 					if (msg.success && msg.data?.path) setAttachments((prev) => [...prev, { name: msg.data.name, path: msg.data.path }].slice(-5));
 					else console.warn("[Attach] 업로드 실패:", msg.error);
+					// 드래프트 첫 메시지 대기 중 — 보류 첨부 응답이 하나 도착할 때마다 감쇠 → 전수 도착 시 전송 (경로 주입 성립)
+					if (pendingFirstMessageRef.current != null && pendingFirstAttachRef.current > 0) {
+						pendingFirstAttachRef.current--;
+						sendFirstMessage();
+					}
 				}
 				if (msg.command === "new_session" && msg.success) {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
@@ -670,15 +694,8 @@ export default function App() {
 						const kb = `${b.provider}/${b.name || b.id}`;
 						return ka < kb ? -1 : ka > kb ? 1 : 0;
 					});
-					// 최근 선택 모델 로드 후 렌더 (비동기)
-					kvGet("recentModels").then((s) => {
-						try { recentModelsRef.current = s ? JSON.parse(s) : []; } catch { recentModelsRef.current = []; }
-						// 현재 모델이 위치한 페이지로 이동
-						const curIdx = availableModels.current.findIndex((m: any) =>
-							`${m.provider}/${m.name || m.id}` === currentModelRef.current);
-						modelPage.current = curIdx >= 0 ? Math.floor(curIdx / MODELS_PER_PAGE) : 0;
-						renderModelGrid();
-					});
+					try { localStorage.setItem("turk-models-cache", JSON.stringify(availableModels.current)); } catch { /* 무시 */ } // 드래프트 메뉴용 — WS 없는 첫 페이지가 캐시로 렌더 (서버 왕복 없음)
+					openModelMenu(); // 최근 선택 모델 로드 후 렌더 (비동기)
 				}
 				break;
 
@@ -868,6 +885,108 @@ export default function App() {
 		setState({ message: `**현재 모델:** \`${currentModelRef.current || "—"}\`\n\n페이지 ${page + 1}/${totalPages} — 모델을 선택하세요.${recent}`, buttons, colors, textColors, answerTo: "모델 선택" }); // 제목은 짝박스 위치
 	};
 
+	// 모델 메뉴 공통 마무리 — 최근 선택 로드 → 현재 모델의 페이지 정렬 → 그리드 렌더 (서버 응답·드래프트 캐시 경로 공용)
+	const openModelMenu = () => {
+		kvGet("recentModels").then((s) => {
+			try { recentModelsRef.current = s ? JSON.parse(s) : []; } catch { recentModelsRef.current = []; }
+			// 현재 모델이 위치한 페이지로 이동
+			const curIdx = availableModels.current.findIndex((m: any) =>
+				`${m.provider}/${m.name || m.id}` === currentModelRef.current);
+			modelPage.current = curIdx >= 0 ? Math.floor(curIdx / MODELS_PER_PAGE) : 0;
+			renderModelGrid();
+		});
+	};
+
+	// 드래프트 모델 메뉴 — WS 없음: localStorage 캐시(turk-models-cache — 마지막 get_available_models 응답)로 즉시 렌더.
+	// 캐시 없으면(신규 브라우저·서버 재시작 후 목록을 한 번도 받지 못한 상태) 안내 화면 — 드래프트는 서버에 아무 요청도 날리지 않는다.
+	const openModelMenuFromCache = () => {
+		let cached: any[] | null = null;
+		try {
+			const raw = localStorage.getItem("turk-models-cache");
+			const p = raw ? JSON.parse(raw) : null;
+			if (Array.isArray(p) && p.length) cached = p;
+		} catch { /* 파손 캐시 = 없음 취급 */ }
+		if (!cached) {
+			menuMode.current = "none";
+			setState({ message: "**모델 목록 없음**\n\n대화를 시작한 후 모델 메뉴를 열면 서버에서 목록을 받아 옵니다.", buttons: {}, answerTo: "모델 선택" });
+			return;
+		}
+		availableModels.current = cached;
+		openModelMenu();
+	};
+
+	// ── 프롬프트 본문 구성 (공용) — 첨부 경로 주입 + 스케줄러 피드백 + 현재 일시 prefix ──
+	// sendPrompt(대화 전송)·sendFirstMessage(드래프트 첫 프롬프트)가 같은 구성을 받도록 단일화.
+	// 시스템 지시(그리드/프로토콜)는 AGENTS.md(워크스페이스 CWD에 자동생성)로 백엔드가 자동 읽음.
+	// 따라서 메시지에 systemPrompt를 부착하지 않는다 — 중복 제거 + 복원 회귀 방지.
+	const composePrompt = (userText: string) => {
+		let message = userText;
+		// 첨부 파일 경로 주입 — 에이전트가 자기 read 도구로 읽음 (user 경로 프롬프트만)
+		const files = attachRef.current;
+		if (files.length) {
+			message = `[첨부 파일 — 아래 경로를 read 도구로 읽어 확인하세요]\n${files.map((f) => `- ${f.path}`).join("\n")}\n\n${message}`;
+		}
+		// 스케줄러 피드백(에러/목록)이 대기 중이면 프롬프트 앞에 주입
+		if (schedulerFeedbackRef.current) {
+			message = `${schedulerFeedbackRef.current}\n\n${message}`;
+			schedulerFeedbackRef.current = null;
+		}
+		// 현재 일시 주입 — LLM은 현재 시각을 모르며, 스케줄 when 계산 등에 필요. 매 턴마다 갱신.
+		const now = new Date();
+		const dt = new Intl.DateTimeFormat("ko-KR", {
+			timeZone: "Asia/Seoul",
+			year: "numeric", month: "long", day: "numeric", weekday: "long",
+			hour: "2-digit", minute: "2-digit", hour12: false,
+		}).format(now);
+		return `[현재 일시: ${dt} KST]\n\n${message}`;
+	};
+
+	// ── 드래프트 첫 메시지 플러시 — 셸 pi_ready(합성)에서 즉시 원래 입력을 실제 첫 프롬프트로 ──
+	// 전송 순서 계약: set_model(스폰 수요) → set_thinking_level(dormant 큐잉/직송) → prompt — 같은 핸들러에서
+	// 직렬 전송, stdin 순서로 첫 턴에 반영된다. 보류 첨부(pendingFilesRef)가 있으면 응답(칩=경로)이 전수
+	// 도착한 뒤에 전송해야 sendPrompt와 동일한 [첨부 파일] 경로 주입이 성립한다.
+	const sendFirstMessage = () => {
+		const pfm = pendingFirstMessageRef.current;
+		if (pfm == null || pendingFirstAttachRef.current > 0) return;
+		const ws = wsRef.current;
+		if (!ws || ws.readyState !== WebSocket.OPEN) return;
+		pendingFirstMessageRef.current = null;
+		userSentRef.current = true; // 사용자 전송 — agent_end 시 클리어
+		answerToRef.current = pfm; // 짝표시
+		// 보내는 즉시 초안 소멸 — 전송된 프롬프트는 초안이 아님 (sendPrompt와 동일 관례)
+		draftEchoRef.current = true;
+		clearTimeout(draftTimerRef.current);
+		kvSet("draft:new", "").catch(() => { /* 무시 */ }); // 전송 확정 — 드래프트 슬롯 소멸
+		// 보류 모델 — set_model은 서버 백엔드 수요(스폰) 계약. 이후 get_state(모델 갱신) 응답까지 dim(modelChanging)
+		const pm = pendingModelRef.current;
+		if (pm) {
+			pendingModelRef.current = null;
+			setModelChanging(true);
+			ws.send(JSON.stringify({ type: "set_model", provider: pm.provider, modelId: pm.id }));
+		}
+		// 보류 씽킹 — dormant면 서버 큐잉(pi_ready 재생)·직송이면 그대로 — 어느 쪽이든 prompt에 선행
+		const pt = pendingThinkingLevelRef.current;
+		if (pt != null) {
+			pendingThinkingLevelRef.current = null;
+			ws.send(JSON.stringify({ type: "set_thinking_level", level: pt }));
+		}
+		ws.send(JSON.stringify({ type: "prompt", message: composePrompt(pfm), userInput: pfm, route: "user" })); // userInput: 서버 처리중 표시·타이틀 근거
+	};
+
+	// ── 드래프트 해소 (첫 메시지 → 대화 승격) — 키 발급·주소 승격·첫 메시지 보류·연결 ──
+	const startFromDraft = (text: string) => {
+		const k = crypto.randomUUID?.() ?? uuidv4Fallback();
+		try { localStorage.setItem("turk-user-key", k); } catch { /* 무시 */ } // 드래프트 해소 — 이 시점부터 재개 기준점
+		setUserKey(k);
+		userKeyRef.current = k; // re-render 대기 없이 직접 갱신 — 직후 connect의 WS URL이 이 키로 나간다
+		try { history.pushState(null, "", "#" + encodeURIComponent(k)); } catch { /* 무시 */ } // pushState는 hashchange를 유발하지 않음 — 풀리로드 없음
+		pendingFirstMessageRef.current = text; // 첫 메시지 — 셸 pi_ready(합성)에서 플러시
+		pendingFirstAttachRef.current = pendingFilesRef.current.length; // 보류 첨부 — 응답(칩=경로) 전수 도착 후 전송
+		draftEchoRef.current = true; // 전송 예정 텍스트는 초안이 아님 (에코)
+		setInput(text);
+		connect();
+	};
+
 	// ── 프롬프트 전송 ───────────────────────────────────────────────────
 	const sendPrompt = useCallback((userText: string, route: "user" | "tool" = "user") => {
 		const ws = wsRef.current;
@@ -876,41 +995,29 @@ export default function App() {
 		// 보내는 즉시 초안 소멸 — 전송된 프롬프트는 초안이 아님. 스트리밍 중 폐기→재로드 시 낡은 초안이 부활하는 것 방지.
 		draftEchoRef.current = true;
 		clearTimeout(draftTimerRef.current);
-		kvSet(`draft:${userKeyRef.current}`, "").catch(() => { /* 무시 */ });
+		kvSet(draftSlot(userKeyRef.current), "").catch(() => { /* 무시 */ });
 		// 응답 짝표시 — 이 턴의 응답이 "무엇에 대한 대답"인지 (user: 순수 입력 / tool: 원 질문 승계)
 		if (route === "user") answerToRef.current = userText;
 
-		let message = userText;
-
-		// 첨부 파일 경로 주입 — 에이전트가 자기 read 도구로 읽음 (user 경로 프롬프트만)
 		const files = attachRef.current;
-		if (files.length) {
-			message = `[첨부 파일 — 아래 경로를 read 도구로 읽어 확인하세요]\n${files.map((f) => `- ${f.path}`).join("\n")}\n\n${message}`;
-		}
-
-		// 스케줄러 피드백(에러/목록)이 대기 중이면 프롬프트 앞에 주입
-		if (schedulerFeedbackRef.current) {
-			message = `${schedulerFeedbackRef.current}\n\n${message}`;
-			schedulerFeedbackRef.current = null;
-		}
-
-		// 시스템 지시(그리드/프로토콜)는 AGENTS.md(워크스페이스 CWD에 자동생성)로 백엔드가 자동 읽음.
-		// 따라서 메시지에 systemPrompt를 부착하지 않는다 — 중복 제거 + 복원 회귀 방지.
-
-		// 현재 일시 주입 — LLM은 현재 시각을 모르며, 스케줄 when 계산 등에 필요. 매 턴마다 갱신.
-		const now = new Date();
-		const dt = new Intl.DateTimeFormat("ko-KR", {
-			timeZone: "Asia/Seoul",
-			year: "numeric", month: "long", day: "numeric", weekday: "long",
-			hour: "2-digit", minute: "2-digit", hour12: false,
-		}).format(now);
-		message = `[현재 일시: ${dt} KST]\n\n${message}`;
-
 		if (files.length) setAttachments([]); // 첨부 소비 — 전송 후 클리어
-		ws.send(JSON.stringify({ type: "prompt", message, userInput: userText, route })); // userInput: 서버 처리중 표시용
+		ws.send(JSON.stringify({ type: "prompt", message: composePrompt(userText), userInput: userText, route })); // userInput: 서버 처리중 표시용 — 본문 구성은 composePrompt 공용
 	}, [piReady]);
 
 	const handleSend = (text: string) => {
+		// ── 드래프트 분기 (맨 앞) — userKey 없음: 첫 메시지가 대화를 생성한다 (ChatGPT 모델) ──
+		// 메뉴가 열려 있으면 클릭·입력은 해당 메뉴 분기로 통과 (모델 선택·메뉴 조작은 대화 생성이 아님)
+		if (isDraft && menuMode.current === "none") {
+			if (text === "/model") { // WS 없는 첫 페이지 — 캐시 메뉴 (서버 왕복 없음)
+				prevStateRef.current = state;
+				openModelMenuFromCache();
+				return;
+			}
+			if (text.startsWith("/")) return; // /session·/compact 등 제어 명령 — WS 없는 첫 페이지에서 무의미 (대화 생성도 않음)
+			if (!text) return; // 첨부만 있는 전송 — 첫 대화 생성은 텍스트 기반
+			startFromDraft(text);
+			return;
+		}
 		if (text === "/session") {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
@@ -934,6 +1041,9 @@ export default function App() {
 			if (ws?.readyState === WebSocket.OPEN) {
 				prevStateRef.current = state;
 				ws.send(JSON.stringify({ type: "get_available_models" }));
+			} else if (isDraft) {
+				// 드래프트 — WS 없음: 캐시 메뉴 재렌더 (메뉴 중이면 prevState 보존)
+				openModelMenuFromCache();
 			}
 			return;
 		}
@@ -982,7 +1092,20 @@ export default function App() {
 			const ws = wsRef.current;
 			const model = availableModels.current.find((m: any) =>
 				`${m.provider}/${m.name || m.id}` === text);
-			if (model && ws?.readyState === WebSocket.OPEN) {
+			if (model && isDraft) {
+				// 드래프트 모델 선택 — WS 없음: pendingModelRef로 보류 → 첫 pi_ready 체인에서 set_model (스폰 계약)
+				const key = `${model.provider}/${model.name || model.id}`;
+				pendingModelRef.current = model;
+				// 씽킹 지원 레벨 즉시 반영 (get_state 복원 경로와 동일 식) — 드래프트 토글이 가능해진다
+				supportedThinkingLevelsRef.current = model.thinkingLevelMap ? THINKING_ORDER.filter((k) => (model.thinkingLevelMap as any)[k] != null) : (model.reasoning ? ["off", "high"] : ["off"]);
+				setCurrentModel(key); // 헤더 표시 — 실제 적용은 첫 set_model 이후 get_state가 확정
+				// 최근 선택 모델 목록 갱신 (최신순 최대 3개, 중복 제거)
+				recentModelsRef.current = [key, ...recentModelsRef.current.filter(k => k !== key)].slice(0, 3);
+				kvSet("recentModels", JSON.stringify(recentModelsRef.current));
+				menuMode.current = "none";
+				setState(prevStateRef.current ?? emptyState(DEFAULT_ROWS, DEFAULT_COLS));
+				prevStateRef.current = null;
+			} else if (model && ws?.readyState === WebSocket.OPEN) {
 				setModelChanging(true);
 				ws.send(JSON.stringify({
 					type: "set_model",
@@ -999,6 +1122,8 @@ export default function App() {
 			}
 			return;
 		}
+		// 드래프트로 통과된 입력(컨텍스트 메뉴 닫힘 등) — sendPrompt는 WS가 필요하므로 드래프트 생성으로 승계
+		if (isDraft) { startFromDraft(text); return; }
 		draftEchoRef.current = true;
 		setInput(text);
 		sendPrompt(text);
@@ -1015,9 +1140,19 @@ export default function App() {
 		gridRows.push(row);
 	}
 
-	const statusText = !connected ? "연결 끊김" : !piReady ? "세션 초기화 중" : showThinking ? "사고중" : loading ? "생성중" : "준비";
+	const statusText = isDraft ? "새 대화" : !connected ? "연결 끊김" : !piReady ? "세션 초기화 중" : showThinking ? "사고중" : loading ? "생성중" : "준비";
 
 	const cycleThinking = () => {
+		// 드래프트 토글 — WS 없음: 로컬 표시 갱신 + pendingThinkingLevel 보류 → 첫 pi_ready에서 set_thinking_level로 승계
+		if (isDraft) {
+			const dOrder = supportedThinkingLevelsRef.current;
+			if (dOrder.filter((k) => k !== "off").length === 0) return; // 모델 미선택 — 지원 레벨 미확정 (헤더 NONE)
+			const dIdx = dOrder.indexOf(thinkingLevelRef.current);
+			const dNext = dOrder[(dIdx + 1) % dOrder.length] ?? "off";
+			setThinkingLevel(dNext);
+			pendingThinkingLevelRef.current = dNext;
+			return;
+		}
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN || !piReady) return;
 		// 클라이언트 사이클: model.thinkingLevelMap 기반 지원 레벨 순환
@@ -1031,7 +1166,7 @@ export default function App() {
 		<div className="turk-app" style={!restored || modelChanging ? { pointerEvents: "none" } : undefined}>
 			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
 				<button className="turk-drawer-btn" onClick={() => setDrawerOpen((v) => !v)} title="대화 목록"><Menu className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
-				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (!connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!restored || modelChanging || loading || !piReady ? " turk-logo-bot-spin" : "")} />} AI-Turk</h1>
+				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (isDraft ? "turk-ico-green" : !connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!isDraft && (!restored || modelChanging || loading || !piReady) ? " turk-logo-bot-spin" : "")} />} AI-Turk</h1>
 				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<button className="turk-model-btn" onClick={() => {
@@ -1048,6 +1183,8 @@ export default function App() {
 					const ws = wsRef.current;
 					if (ws?.readyState === WebSocket.OPEN) {
 						ws.send(JSON.stringify({ type: "get_available_models" }));
+					} else if (isDraft) {
+						openModelMenuFromCache(); // 드래프트 — WS 없음: 캐시 메뉴 (서버 왕복 없음)
 					}
 				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: (supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 || thinkingLevel === "off") ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 ? "NONE" : thinkingLevel.toUpperCase()}</button> <button className="turk-new-btn" onClick={() => {
 				if (menuMode.current === "ctx") {
@@ -1089,7 +1226,7 @@ export default function App() {
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
 				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${userKey} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "\"NeoDunggeunmo\", monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
-					{userKey.slice(-6)}|{sessionId ? sessionId.slice(-6) : "—"}
+					{userKey?.slice(-6) ?? "—"}|{sessionId ? sessionId.slice(-6) : "—"}
 				</div>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
 				{canScrollUp && (

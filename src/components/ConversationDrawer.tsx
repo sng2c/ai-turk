@@ -33,7 +33,7 @@ interface ConvSummary {
 }
 
 interface Props {
-	userKey: string; // 현재 대화 — 목록 하이라이트 + 현재 대화 삭제 판정에 사용
+	userKey: string | null; // 현재 대화 — null(드래프트)이면 하이라이트·삭제 탈출 판정 없음 (c.id === null은 항상 false)
 	onClose: () => void;
 }
 
@@ -69,7 +69,8 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 
 	// ── 전환·신규 — 해시 갱신 → App의 hashchange→풀리로드 계약 (신규 전환 코드 없음) ──
 	const switchTo = (id: string) => { location.hash = "#" + encodeURIComponent(id); };
-	const newConversation = () => { location.hash = "#" + crypto.randomUUID(); }; // restart_pi(컨텍스트 리셋)와 무관 — userKey 해시 자체가 새 대화
+	// 새 대화 — 드래프트 진입 (UUID 선발급 제거): #new는 첫 메시지 전 대화가 없다 — 첫 메시지가 대화를 생성
+	const newConversation = () => { location.hash = "#new"; };
 
 	// ── 이름 변경 — 인라인 입력 전환 ──
 	const [renameId, setRenameId] = useState<string | null>(null);
@@ -101,7 +102,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 			await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" });
 		} catch { /* 무시 — 아래 분기가 상태를 결정 */ }
 		if (id === userKey) {
-			location.hash = "#" + crypto.randomUUID(); // 현재 대화 삭제 — 같은 키 재진입(부활) 차단, 풀리로드
+			location.hash = "#new"; // 현재 대화 삭제 — 드래프트로 탈출 (같은 키 재진입 부활 차단·UUID 선발급 없음 — first-message 모델)
 			return;
 		}
 		setBusyId(null);
@@ -242,7 +243,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 							/>
 						</div>
 					) : (
-						<div key={c.id} className={"turk-drawer-row" + (c.id === userKey ? " turk-drawer-row-current" : "")}>
+						<div key={c.id} className={"turk-drawer-row" + (userKey != null && c.id === userKey ? " turk-drawer-row-current" : "")}>
 							<button className="turk-drawer-item-main" onClick={() => switchTo(c.id)} title={c.title || c.id}>
 								<span className="turk-drawer-item-title">{c.title || shortUserKey(c.id)}</span>
 								<span className="turk-drawer-badges">
