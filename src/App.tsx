@@ -1289,7 +1289,9 @@ export default function App() {
 						const col = contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)";
 						// 얇은 링(3.5)+확대(1.35em) + 중앙에 % 숫자 (링과 숫자 통합 — 별도 텍스트 없음)
 						return (<span className="turk-ctx turk-ctx-donut"><svg viewBox="0 0 36 36" className="turk-ctx-ring"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--muted-foreground)" strokeOpacity="0.25" strokeWidth="3.5" /><circle cx="18" cy="18" r="15" fill="none" stroke={col} strokeWidth="3.5" strokeDasharray={`${pct} ${100 - pct}`} pathLength={100} strokeDashoffset={25} strokeLinecap="round" /></svg><span className="turk-ctx-n" style={{ color: col }}>{Math.round(contextPct)}</span></span>);
-					})() : <span className="turk-ctx"><span className="turk-ctx-pct">—</span></span>}
+					})() : (
+						<span className="turk-ctx turk-ctx-donut" title="컨텍스트 사용률 — 아직 측정값 없음 (첫 발화 후 표시)"><svg viewBox="0 0 36 36" className="turk-ctx-ring"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--muted-foreground)" strokeOpacity="0.25" strokeWidth="3.5" /></svg></span>
+					)}
 				</button></span>
 			</header>
 
