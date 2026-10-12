@@ -11,7 +11,7 @@
 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import envPaths from "env-paths";
 import type { Backend, BackendOptions, TurkEvent } from "../backend.ts";
 
@@ -402,6 +402,104 @@ function newCore(maxSessions: number) {
 	const mo = wsOther.sent.find((m: any) => m.command === "get_available_models");
 	ok("F6d 캐시는 세션 무관 전역 — 다른 dormant 대화도 동일 합성(스폰 0)",
 		mo?.success === true && (mo.data?.models as any[])?.length === 1 && F.backends.length === 2);
+}
+
+// ═══════════════ G. 대화별 마지막 모델 — dormant 표시·변경(스폰 0)·재생·영속 ═══════════════
+// 모델은 대화의 속성(프로세스의 속성이 아님): dormant에서도 표시·변경 가능, 서버 재시작 후에도 유지.
+{
+	const G = newCore(5);
+	const DATA = envPaths("ai-turk").data; // 세션 코어 모듈과 동일 규칙 — XDG 격리 반영
+	const metaFile = (k: string) => join(DATA, k, "conversation.json");
+
+	// G1 dormant set_model — 스폰 0·pendingModel 큐·합성 success·lastModel 표시 선행 → 이어진 합성 get_state에 model
+	const wsU = connect(G.core, "g-unborn");
+	const sU = G.core.sessions.get("g-unborn") as any;
+	wsMessage(wsU, { type: "set_model", provider: "test", modelId: "m9" });
+	ok("G1a dormant set_model — 스폰 0 (모델은 대화의 속성 — 프로세스 수요 없음)", G.backends.length === 0 && sU.backend === null);
+	const smResp = wsU.sent.find((m: any) => m.command === "set_model");
+	ok("G1b 합성 success 응답 — 클라 get_state 체인 유발용", smResp?.type === "response" && smResp?.success === true);
+	ok("G1c pendingModel 큐 + lastModel 표시 선행 갱신",
+		sU.pendingModel?.provider === "test" && sU.pendingModel?.modelId === "m9"
+		&& sU.lastModel?.provider === "test" && sU.lastModel?.name === "m9" && sU.lastModel?.id === "m9");
+	ok("G1d 미발화 대화 set_model — 메타·dir 미생성 (디스크 0 계약 — touch exists-게이트)", !existsSync(join(DATA, "g-unborn")));
+	wsMessage(wsU, { type: "get_state" });
+	const gsU = wsU.sent.filter((m: any) => m.command === "get_state").pop();
+	ok("G1e 이어진 합성 get_state — model 포함(표시 확정)", gsU?.data?.model?.id === "m9" && gsU.data?.model?.provider === "test", `sent=${JSON.stringify(wsU.sent.map((m: any) => m.command ?? m.type))}`);
+
+	// G2 스폰(pi_ready) 재생 순서 — set_model → set_thinking_level → prompt (orderLog 단언)
+	wsMessage(wsU, { type: "set_thinking_level", level: "high" }); // dormant 큐잉 — set_model 뒤에 재생되어야 함
+	ok("G2-pre set_thinking_level도 스폰 수요 아님", G.backends.length === 0 && sU.pendingThinkingLevel === "high");
+	orderLog.length = 0;
+	wsMessage(wsU, { type: "prompt", userInput: "재생 발화", message: "재생 발화" });
+	const fbG = G.backends[0] as FakeBackend;
+	ok("G2a 스폰 직후 재생 순서 — set_model → set_thinking_level → prompt (orderLog)",
+		orderLog.indexOf("backend:set_model") !== -1
+		&& orderLog.indexOf("backend:set_model") < orderLog.indexOf("backend:set_thinking_level")
+		&& orderLog.indexOf("backend:set_thinking_level") < orderLog.indexOf("backend:prompt"),
+		`order=${JSON.stringify(orderLog)}`);
+	ok("G2b 재생 set_model 페이로드 — provider·modelId 유지",
+		(fbG.records[0] as any).type === "set_model" && (fbG.records[0] as any).provider === "test" && (fbG.records[0] as any).modelId === "m9",
+		`records=${JSON.stringify(fbG.records.map((r) => r.type))}`);
+
+	// G3 pendingModel 1회 소멸 — 재생 후 다시 dormant → 재발화해도 set_model 재전송 없음
+	ok("G3a 재생 후 pendingModel 소멸", sU.pendingModel === null);
+	sU.isStreaming = false; // FakeBackend는 자동 agent_end 없음 — 발화 잔존 정리 (victim 후보 조건)
+	wsU.close();
+	sU.lastActivity = Date.now() - 400_000;
+	G.core.reclaimSweep();
+	ok("G3b dormant 전환", sU.backend === null && fbG.stopCount === 1);
+	const wsU2 = connect(G.core, "g-unborn"); // 스폰 0 — 셸(pi_ready 합성)만
+	ok("G3c dorm 전환 후 재접속도 스폰 0", G.backends.length === 1 && G.active() === 0);
+	orderLog.length = 0;
+	wsMessage(wsU2, { type: "prompt", userInput: "재스폰 발화", message: "재스폰 발화" });
+	const fbG2 = G.backends[1] as FakeBackend;
+	ok("G3d 재스폰 — pendingModel 1회 소멸 계약(set_model 재전송 없음·prompt만)",
+		fbG2.startCount === 1 && fbG2.records.length === 1 && (fbG2.records[0] as any).type === "prompt"
+		&& !orderLog.includes("backend:set_model") && sU.pendingModel === null,
+		`records=${JSON.stringify(fbG2.records.map((r) => r.type))}`);
+
+	// G4 라이브 get_state model — lastModel 기록 + 메타 model 영속 + 변화시에만 재기록(디스크 터치 최소화)
+	const wsL = connect(G.core, "g-live");
+	wsMessage(wsL, { type: "prompt", userInput: "라이브 대화", message: "라이브 대화" }); // 메타 생성(발화 계약) → 라이브 경로
+	const fbL = G.backends[2] as FakeBackend;
+	fbL.emit({ type: "response", command: "get_state", success: true, data: { sessionId: "g-sess", model: { provider: "pi", name: "GPT-5", id: "gpt-5", thinkingLevelMap: { high: { budget: 999 } } } } } as TurkEvent);
+	const sL = G.core.sessions.get("g-live") as any;
+	ok("G4a 라이브 get_state.model → lastModel 원형 보존(얕은 복사 — 통째)",
+		sL.lastModel.provider === "pi" && sL.lastModel.id === "gpt-5" && sL.lastModel.thinkingLevelMap?.high?.budget === 999);
+	const metaL = JSON.parse(readFileSync(metaFile("g-live"), "utf-8"));
+	ok("G4b 메타 model 필드 영속 + 기존 필드(title·createdAt) 보존",
+		metaL.model?.id === "gpt-5" && metaL.title === "라이브 대화" && typeof metaL.createdAt === "number");
+	// 변화 없음 — 재기록 없음: 참조 동일성 + mtime 불변(= 디스크 터치 0) 단언
+	const same = sL.lastModel;
+	const mt0 = statSync(metaFile("g-live")).mtimeMs;
+	await sleep(10); // mtime 해상도 대비 — 변화 없으면 10ms 경과에도 불변
+	fbL.emit({ type: "response", command: "get_state", success: true, data: { sessionId: "g-sess", model: { provider: "pi", name: "GPT-5", id: "gpt-5", thinkingLevelMap: { high: { budget: 999 } } } } } as TurkEvent);
+	fbL.emit({ type: "response", command: "get_state", success: true, data: { sessionId: "g-sess", model: { provider: "pi", name: "GPT-5", id: "gpt-5", thinkingLevelMap: { high: { budget: 999 } } } } } as TurkEvent);
+	ok("G4c 동일 model 연속 get_state 2회 — 재기록 없음(참조 동일·mtime 불변 = 디스크 터치 0)",
+		sL.lastModel === same && statSync(metaFile("g-live")).mtimeMs === mt0);
+	fbL.emit({ type: "response", command: "get_state", success: true, data: { sessionId: "g-sess", model: { provider: "pi", name: "GPT-X", id: "gpt-x" } } } as TurkEvent);
+	const metaL2 = JSON.parse(readFileSync(metaFile("g-live"), "utf-8"));
+	ok("G4d 모델 변화 → 재기록 — lastModel·메타 동시 갱신",
+		sL.lastModel.id === "gpt-x" && metaL2.model?.id === "gpt-x" && sL.lastModel !== same
+		&& statSync(metaFile("g-live")).mtimeMs !== mt0);
+
+	// G5 부팅 복원 — meta.model → lastModel 적재 → dormant 합성 get_state 반영 (서버 재시작 계약)
+	mkdirSync(join(DATA, "g-restore"), { recursive: true });
+	writeFileSync(metaFile("g-restore"), JSON.stringify({ title: "복원 대화", createdAt: Date.now(), lastActiveAt: Date.now(), model: { provider: "ollama", name: "glm-5.1", id: "glm-5.1:cloud" } }));
+	const restoreBackends: FakeBackend[] = [];
+	const RG = SC.createSessionCore({
+		maxSessions: 5,
+		backendFactory: (o: BackendOptions) => { const b = new FakeBackend(o); restoreBackends.push(b); return b; },
+	}); // scanOnBoot 기본 true — 부팅 스윕이 g-restore 셸 복원
+	const wsR = connect(RG, "g-restore");
+	const sR = RG.sessions.get("g-restore") as any;
+	ok("G5a 부팅 복원 — 스폰 0·meta.model → lastModel 원형 적재",
+		restoreBackends.length === 0 && sR.backend === null
+		&& sR.lastModel?.id === "glm-5.1:cloud" && sR.lastModel?.provider === "ollama" && sR.lastModel?.name === "glm-5.1");
+	wsMessage(wsR, { type: "get_state" });
+	const gsR = wsR.sent.filter((m: any) => m.command === "get_state").pop();
+	ok("G5b 복원 대화 합성 get_state — model 반영(대화 진입 시 마지막 모델 표시)",
+		gsR?.data?.model?.id === "glm-5.1:cloud" && gsR.data?.model?.provider === "ollama");
 }
 
 // ═══════════════ workspacePath — 위치 분리 ═══════════════

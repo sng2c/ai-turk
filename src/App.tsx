@@ -82,7 +82,12 @@ export default function App() {
 	const baseLogoModeRef = useRef<"robot" | "alarm" | "tool">("robot"); // 톨 종료 후 복귀용
 
 	const [sessionId, setSessionId] = useState("");
-	const [currentModel, setCurrentModel] = useState("");
+	// 마지막 표시 모델 — 부팅 시 localStorage(turk-last-model)로 시딩 (드래프트(#new)·서버 재시작 직후 빈 헤더 해소).
+	// 대화 진입은 합성/라이브 get_state.model이 우선 덮고, 드래프트 선택(pendingModel)도 setCurrentModel로 덮음 —
+	// 시딩값이 잠깐 보였다 정정되는 경합은 수용 (표시용 힌트).
+	const [currentModel, setCurrentModel] = useState<string>(() => {
+		try { return localStorage.getItem("turk-last-model") ?? ""; } catch { return ""; }
+	});
 	const currentModelRef = useRef("");
 	currentModelRef.current = currentModel;
 
@@ -197,6 +202,7 @@ export default function App() {
 	// 모델 선택 진입 전 UI 상태(이전 메시지/버튼) 저장용
 	const prevStateRef = useRef<TurkState | null>(null);
 	const availableModels = useRef<any[]>([]);
+	const modelsFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined); // get_available_models 무응답 캐시 폴백 타이머 (응답 도착 시 해제)
 	const modelPage = useRef(0);
 	const recentModelsRef = useRef<string[]>([]); // 최근 선택 모델 (provider/name 최신순 최대 3개)
 	const MODELS_PER_PAGE = DEFAULT_ROWS * DEFAULT_COLS - 3; // 나머지 3칸은 이전/다음/취소
@@ -266,6 +272,7 @@ export default function App() {
 			shouldReconnect.current = false;
 			pendingReconnectRef.current = false;
 			clearTimeout(reconnectTimer.current);
+			clearTimeout(modelsFallbackTimerRef.current); // 폴백 타이머 정리
 			wsRef.current?.close();
 		};
 	}, [connect]);
@@ -623,7 +630,13 @@ export default function App() {
 					// 놓친 성공 정리 — 서버 idle+성공 = 이전 턴 완료. 필드에 낡은 프롬프트가 남으면 중복 전송을 유도하므로 클리어.
 					// userSentRef가 true일 때만(=전송된 프롬프트) — 미전송 신규 초안은 보호 (재연결 블립 시 날아가지 않게)
 					if (!msg.data.isStreaming && (msg.data as any).lastTurnFailed !== true && userSentRef.current) { clearInput(); userSentRef.current = false; }
-					if (msg.data.model) { const m = msg.data.model; setCurrentModel(m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "")); supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null) : (m.reasoning ? ["off", "high"] : ["off"]); }
+					if (msg.data.model) {
+						const m = msg.data.model;
+						const mKey = m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "");
+						setCurrentModel(mKey);
+						try { localStorage.setItem("turk-last-model", mKey); } catch { /* 무시 */ } // 드래프트·재시작 시딩 원료 — 마지막 표시 모델 보존
+						supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null) : (m.reasoning ? ["off", "high"] : ["off"]);
+					}
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);
 					if (msg.data.thinkingLevel === "off") {
@@ -689,6 +702,7 @@ export default function App() {
 					setContextPct(msg.data.contextUsage.percent);
 				}
 				if (msg.command === "get_available_models" && msg.success && msg.data?.models) {
+					clearTimeout(modelsFallbackTimerRef.current); // 폴백 타이머 해제 — 응답 도착 (modelsCache 합성 재전달 포함)
 					availableModels.current = [...msg.data.models].sort((a, b) => {
 						const ka = `${a.provider}/${a.name || a.id}`;
 						const kb = `${b.provider}/${b.name || b.id}`;
@@ -915,6 +929,22 @@ export default function App() {
 		openModelMenu();
 	};
 
+	// ── 대화 모델 메뉴 — 서버 요청 + 캐시 폴백 (서버 재시작 직후 get_available_models 무응답 → 빈 메뉴 해소) ──
+	// 800ms 내 응답(modelsCache 합성 재전달 포함)이 오면 응답 핸들러가 타이머를 해제하고 메뉴를 연다.
+	// 무응답(modelsCache 소실 — 서버 재시작 직후 라이브 목록 수신 전)이면 localStorage 캐시로 즉시 렌더 —
+	// 드래프트 경로(openModelMenuFromCache) 재사용. 폴백 발동 시점에도 '오픈 여부' 기준 이중 오픈 방지.
+	const requestModelsWithFallback = () => {
+		const ws = wsRef.current;
+		if (!ws || ws.readyState !== WebSocket.OPEN) { openModelMenuFromCache(); return; } // WS 없음 — 드래프트 캐시 경로
+		ws.send(JSON.stringify({ type: "get_available_models" }));
+		clearTimeout(modelsFallbackTimerRef.current);
+		modelsFallbackTimerRef.current = setTimeout(() => {
+			modelsFallbackTimerRef.current = undefined;
+			if (menuMode.current === "model") return; // 응답이 이미 메뉴를 열었다 — 이중 오픈 금지
+			openModelMenuFromCache();
+		}, 800);
+	};
+
 	// ── 프롬프트 본문 구성 (공용) — 첨부 경로 주입 + 스케줄러 피드백 + 현재 일시 prefix ──
 	// sendPrompt(대화 전송)·sendFirstMessage(드래프트 첫 프롬프트)가 같은 구성을 받도록 단일화.
 	// 시스템 지시(그리드/프로토콜)는 AGENTS.md(워크스페이스 CWD에 자동생성)로 백엔드가 자동 읽음.
@@ -1040,7 +1070,7 @@ export default function App() {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
 				prevStateRef.current = state;
-				ws.send(JSON.stringify({ type: "get_available_models" }));
+				requestModelsWithFallback(); // 서버 응답 우선 — 800ms 무응답 시 localStorage 캐시 폴백
 			} else if (isDraft) {
 				// 드래프트 — WS 없음: 캐시 메뉴 재렌더 (메뉴 중이면 prevState 보존)
 				openModelMenuFromCache();
@@ -1099,6 +1129,7 @@ export default function App() {
 				// 씽킹 지원 레벨 즉시 반영 (get_state 복원 경로와 동일 식) — 드래프트 토글이 가능해진다
 				supportedThinkingLevelsRef.current = model.thinkingLevelMap ? THINKING_ORDER.filter((k) => (model.thinkingLevelMap as any)[k] != null) : (model.reasoning ? ["off", "high"] : ["off"]);
 				setCurrentModel(key); // 헤더 표시 — 실제 적용은 첫 set_model 이후 get_state가 확정
+				try { localStorage.setItem("turk-last-model", key); } catch { /* 무시 */ } // 시딩 원료 갱신 — 다음 부팅까지 보존
 				// 최근 선택 모델 목록 갱신 (최신순 최대 3개, 중복 제거)
 				recentModelsRef.current = [key, ...recentModelsRef.current.filter(k => k !== key)].slice(0, 3);
 				kvSet("recentModels", JSON.stringify(recentModelsRef.current));
@@ -1182,7 +1213,7 @@ export default function App() {
 					menuMode.current = "model";
 					const ws = wsRef.current;
 					if (ws?.readyState === WebSocket.OPEN) {
-						ws.send(JSON.stringify({ type: "get_available_models" }));
+						requestModelsWithFallback(); // 서버 응답 우선 — 800ms 무응답 시 localStorage 캐시 폴백
 					} else if (isDraft) {
 						openModelMenuFromCache(); // 드래프트 — WS 없음: 캐시 메뉴 (서버 왕복 없음)
 					}
