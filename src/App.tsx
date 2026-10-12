@@ -1215,6 +1215,9 @@ export default function App() {
 			const idx = String(r * cols + c);
 			row.push([idx, state.buttons[idx] ?? ""]);
 		}
+		// 빈 라인 숨김(261012) — 라벨이 하나라도 있는 라인만 그리고, 그리드가 수축한 만큼 출력창(flex)이 흡수해 커진다.
+		// 라벨 라인의 빈 칸은 기존 그대로(그리드 틀 유지·애니메이션 지연도 원 행 인덱스 기준 유지).
+		if (row.every(([, label]) => !label)) continue;
 		gridRows.push(row);
 	}
 
