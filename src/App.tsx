@@ -684,7 +684,7 @@ export default function App() {
 					// ctx 메뉴 모드로 두어 모든 선택(✅ 확인)이 "어떤 선택이든 메뉴 종료" 흐름으로 닫히게 한다
 					// (✅ 확인 = 취소와 동일 — prevState 복원 후 프롬프트 통과 없음).
 					menuMode.current = "ctx";
-					setState({ message: "🔄 **재로드 완료** — AGENTS.md·스킬·설정이 다음 발화부터 반영됩니다.", buttons: { 0: "✅ 확인" }, answerTo: "컨텍스트" });
+					setState({ message: "🔄 **재로드 완료** — AGENTS.md·스킬·설정이 즉시 반영됐습니다 (다음 메시지부터 새 지시사항).", buttons: { 0: "✅ 확인" }, answerTo: "컨텍스트" });
 				}
 				if (msg.command === "set_thinking_level" && msg.success) {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));

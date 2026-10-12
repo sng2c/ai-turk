@@ -917,14 +917,15 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 						console.log(`[${userKey.slice(0, 8)}] [restart_pi] 새 세션 시작 (agentSessionId 클리어)`);
 						setTimeout(() => startBackend(session), 500);
 					} else if (msg.type === "reload") {
-						// /reload — 백엔드만 재기동(세션 유지): pi 부팅 시 AGENTS.md·스킬·설정 재독 + --session-id 재부착.
+						// /reload — 컴팩트형 수요지점: 지금 즉시 fresh 백엔드. 살아있으면 stop 후, dormant면 그대로
+						// ensureBackend가 스폰 — 어느 쪽이든 --session-id 재부착 + AGENTS.md·스킬·설정 재독 완료 상태로 마감.
 						// 세션 상태(agentSessionId·lastResponse·버퍼) 전부 보존 — restart_pi(세션 파괴)와 대조.
-						// 즉시 재스폰 없음 — 다음 prompt가 sendToBackend ensure 목록 경로로 재스폰(지연할당 계약 그대로).
-						// dormant(backend null)면 no-op — success만 응답 (다음 발화에서 어차피 fresh 스폰).
+						// cap-full(LRU victim도 없음)이면 success:false — 컴팩트와 동일한 침묵 실패 계약.
 						if (session.backend) { session.backend.stop(); session.backend = null; }
 						session.backendReady = false;
-						console.log(`[${userKey.slice(0, 8)}] [reload] 백엔드 재기동 요청 — 세션 유지 (${session.agentSessionId ? `agentSessionId=${session.agentSessionId.slice(0, 8)} 보존` : "dormant no-op"})`);
-						broadcast(session, { type: "response", command: "reload", success: true, data: {} });
+						const reloaded = ensureBackend(session);
+						console.log(`[${userKey.slice(0, 8)}] [reload] 백엔드 재기동 (세션 유지·${reloaded ? "즉시 재스폰" : "cap-full 거부"})`);
+						broadcast(session, { type: "response", command: "reload", success: reloaded, data: {} });
 					} else if (msg.type === "schedule") {
 						console.log(`[${userKey.slice(0, 8)}] [Scheduler] 명령 수신: action=${msg.action} id=${msg.id ?? "-"} when=${msg.when ?? "-"}`);
 						const r = session.scheduler.handle(msg);

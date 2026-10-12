@@ -514,32 +514,35 @@ function newCore(maxSessions: number) {
 	sH.lastPrompt = "이전 입력";
 	sH.isStreaming = false; // 발화 정리 — FakeBackend는 자동 agent_end 없음
 
-	// H1 라이브 세션 reload — stop·null·ready 해제, 세션 상태 전부 보존 (restart_pi는 전부 클리어 — H4 대조)
+	// H1 라이브 세션 reload — stop 후 즉시 재스폰(컴팩트형 수요지점), 세션 상태 전부 보존 (restart_pi는 전부 클리어 — H4 대조)
 	wsMessage(wsH, { type: "reload" });
-	ok("H1a 라이브 reload — backend.stop() 1회·backend null·ready 해제 (스폰 즉시 없음 — 수요시점 재스폰 계약)",
-		fbH.stopCount === 1 && sH.backend === null && sH.backendReady === false && H.backends.length === 1);
+	ok("H1a 라이브 reload — stop 1회 + 즉시 재스폰(컴팩트형·backends 2)·새 백엔드 ready",
+		fbH.stopCount === 1 && sH.backend !== null && sH.backend !== fbH && sH.backendReady === true && H.backends.length === 2);
 	ok("H1b 세션 상태 보존 — agentSessionId·lastResponse·lastPrompt 유지 (세션 유지 시맨틱)",
 		sH.agentSessionId === "h-sess-1" && sH.lastResponse?.messages?.[0]?.content?.[0]?.text === "마지막 응답" && sH.lastPrompt === "이전 입력");
 	const rl = wsH.sent.find((m: any) => m.command === "reload");
 	ok("H1c success 응답 브로드캐스트 (dormant도 동일 응답 계약)", rl?.type === "response" && rl?.success === true);
 
-	// H2 dormant reload — stop·스폰 없음·success 응답만 (다음 발화에서 어차피 fresh 스폰)
+	// H2 dormant reload — 컴팩트처럼 할당받아 작동: ensureBackend 스폰 (회수 상태에서도 재로드 완결)
+	(sH as any).backend?.stop();
+	(sH as any).backend = null; (sH as any).backendReady = false; // 회수 시뮬레이션 — dormant 재현
 	const sentBeforeH2 = wsH.sent.length;
 	wsMessage(wsH, { type: "reload" });
 	const rl2 = wsH.sent.filter((m: any) => m.command === "reload").pop();
-	ok("H2 dormant reload — no-op(스톱 0·스폰 0)·success 응답·셸 상태 무훼손",
-		H.backends.length === 1 && fbH.stopCount === 1 && sH.backend === null && sH.agentSessionId === "h-sess-1"
-		&& rl2?.success === true && wsH.sent.length === sentBeforeH2 + 1,
+	ok("H2 dormant reload — 컴팩트형 즉시 스폰(백엔드 1회 추가·ready)·success 응답·세션 보존",
+		H.backends.length === 3 && sH.backend !== null && sH.backendReady === true && sH.agentSessionId === "h-sess-1"
+		&& rl2?.success === true && wsH.sent.length === sentBeforeH2 + 2, // pi_ready(재스폰) + reload 응답
 		`sent=${JSON.stringify(wsH.sent.map((m: any) => m.command ?? m.type))}`);
 
-	// H3 다음 발화 — ensure 경로 재스폰 + agentSessionId 재부착 (spawn opts.userKey = --session-id 값)
+	// H3 다음 발화 — 이미 산 백엔드로 프롬프트 전달 (재스폰 없음 — reload가 이미 완결), spawn 시 세션 ID 재부착 근거
+	const spawnCountBeforeH3 = H.backends.length;
+	const fbH3 = sH.backend as FakeBackend;
 	sendPrompt(wsH);
-	const fbRe = sH.backend as FakeBackend;
-	ok("H3 재스폰 1회 + prompt 전달 — spawn opts.userKey에 세션 ID 재부착 (같은 세션 복원)",
-		H.backends.length === 2 && fbRe.startCount === 1 && fbRe.records.length === 1
-		&& (fbRe.records[0] as any).type === "prompt"
-		&& fbRe.opts.userKey === "h-sess-1" && sH.backendReady === true,
-		`opts.userKey=${String(fbRe.opts.userKey)}`);
+	ok("H3 prompt 전달 — 추가 스폰 없음(산 상태 승계) + 세션 ID 재부착된 스폰",
+		H.backends.length === spawnCountBeforeH3 && fbH3.records.length === 1
+		&& (fbH3.records[0] as any).type === "prompt"
+		&& fbH3.opts.userKey === "h-sess-1" && sH.backendReady === true,
+		`opts.userKey=${String(fbH3.opts.userKey)}`);
 
 	// H4 restart_pi 대조 — 세션 파괴 (agentSessionId·lastResponse 클리어) — reload의 반대 시맨틱
 	const wsR = connect(H.core, "h-restart");
