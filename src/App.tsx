@@ -1196,7 +1196,8 @@ export default function App() {
 	return (
 		<div className="turk-app" style={!restored || modelChanging ? { pointerEvents: "none" } : undefined}>
 			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
-				<button className="turk-drawer-btn" onClick={() => setDrawerOpen((v) => !v)} title="대화 목록"><Menu className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
+				{/* ☰ 드로어 버튼은 내비게이션(뷰어 행위)이라 대기 중 헤더 잠금(pointerEvents:none)에서 제외 — 자식 auto가 부모 none을 덮는다. 모델·씽킹·스케줄 버튼은 진행 턴에 상태변경을 끼워넣지 않도록 잠금 유지. */}
+				<button className="turk-drawer-btn" style={{ pointerEvents: "auto" }} onClick={() => setDrawerOpen((v) => !v)} title="대화 목록"><Menu className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (isDraft ? "turk-ico-green" : !connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!isDraft && (!restored || modelChanging || loading || !piReady) ? " turk-logo-bot-spin" : "")} />} AI-Turk</h1>
 				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
