@@ -895,6 +895,7 @@ body {
 }
 
 .turk-drawer-sch { color: var(--success); display: inline-flex; align-items: center; gap: 0.15em; line-height: 1; } /* 스케줄 배지 — 녹색 시계·개수 나란히(읽기 전용 정보) */
+.turk-sch-badge { display: inline-flex; align-items: center; gap: 0.15em; line-height: 1; font-size: 0.95em; font-weight: inherit; } /* 헤더 시계·개수 — 드로어 배지와 동일 배치 */
 .turk-drawer-sch .turk-ico { width: 1.35em; height: 1.35em; }
 
 .turk-drawer-streaming {
