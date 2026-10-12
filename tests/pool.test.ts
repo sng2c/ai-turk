@@ -369,11 +369,13 @@ function newCore(maxSessions: number) {
 		gs2?.success === true && gs2.data.sessionId === "f-sess-1"
 		&& gs2.data.lastResponse?.messages?.[0]?.content?.[0]?.text === "마지막 응답" && gs2.data.backendState === "dormant");
 
-	// F5 set_thinking_level 지연 큐 — dormant 수신(무응답·스폰 0) → 첫 발화 스폰 → 재생이 prompt에 선행
+	// F5 set_thinking_level 지연 큐 — dormant 수신(합성 success·선행갱신·스폰 0) → 첫 발화 스폰 → 재생이 prompt에 선행
+	const sentF5 = wsRes.sent.length;
 	wsMessage(wsRes, { type: "set_thinking_level", level: "high" });
-	ok("F5a dormant set_thinking_level — 큐잉(무응답·스폰 0)",
-		sF.pendingThinkingLevel === "high" && F.backends.length === 1
-		&& !wsRes.sent.some((m: any) => m.command === "set_thinking_level"));
+	const f5r = wsRes.sent.slice(sentF5).find((m: any) => m.command === "set_thinking_level");
+	ok("F5a dormant set_thinking_level — 큐잉 + 합성 success 응답 + lastThinkingLevel 선행갱신 (스폰 0)",
+		sF.pendingThinkingLevel === "high" && sF.lastThinkingLevel === "high" && F.backends.length === 1
+		&& f5r?.success === true);
 	orderLog.length = 0;
 	wsMessage(wsRes, { type: "prompt", userInput: "이후 발화", message: "이후 발화" });
 	const fb1 = F.backends[1] as FakeBackend;
@@ -546,6 +548,21 @@ function newCore(maxSessions: number) {
 	ok("G7 부팅 복원 — meta.ctxPct 적재 → dormant 합성 재전달",
 		ctxRestoreBackends.length === 0 && sCtxR.lastContextPct === 33.3
 		&& stR?.success === true && stR?.data?.contextUsage?.percent === 33.3);
+
+	// G8 씽킹 레벨 동기화 — 라이브 실측 기록 + dormant 합성 get_state 표시 + 부팅 복원 (모델과 동일 완결)
+	const wsLvl = connect(G.core, "g-lvl");
+	wsMessage(wsLvl, { type: "prompt", userInput: "lvl 대화", message: "lvl 대화" }); // 메타 생성 → 라이브
+	const sLvl = G.core.sessions.get("g-lvl") as any;
+	const fbLvl = sLvl.backend as FakeBackend;
+	fbLvl.emit({ type: "response", command: "get_state", success: true, data: { sessionId: "g-lvl-s", model: { provider: "pi", name: "L", id: "l" }, thinkingLevel: "xhigh" } } as TurkEvent);
+	const metaLvl = JSON.parse(readFileSync(metaFile("g-lvl"), "utf-8"));
+	ok("G8a 라이브 get_state.thinkingLevel → lastThinkingLevel 기록 + 메타 영속",
+		sLvl.lastThinkingLevel === "xhigh" && metaLvl.thinkingLevel === "xhigh");
+	(sLvl as any).backend?.stop(); (sLvl as any).backend = null; (sLvl as any).backendReady = false; // 회수 — dormant
+	wsMessage(wsLvl, { type: "get_state" });
+	const gsLvl = wsLvl.sent.filter((m: any) => m.command === "get_state").pop();
+	ok("G8b dormant 합성 get_state — thinkingLevel 포함(재접속 표시 동기화)",
+		gsLvl?.data?.thinkingLevel === "xhigh" && gsLvl?.data?.model?.id === "l");
 
 }
 

@@ -88,11 +88,13 @@ export default function App() {
 	const [currentModel, setCurrentModel] = useState<string>(() => {
 		try { return localStorage.getItem("turk-last-model") ?? ""; } catch { return ""; }
 	});
+	// 마지막 씽킹 레벨 — 동일 시딩 관례: 드래프트 부팅 표시. 대화 진입은 합성/라이브 get_state.thinkingLevel이 우선 덮음.
+	const seedThinking = (() => { try { return localStorage.getItem("turk-last-thinking") ?? ""; } catch { return ""; } })();
 	const currentModelRef = useRef("");
 	currentModelRef.current = currentModel;
 
-	// 씽킹 레벨 (기본 off) — 모델이 지원하는 레벨만 순환 (cycle_thinking_level)
-	const [thinkingLevel, setThinkingLevel] = useState<string>("off");
+	// 씽킹 레벨 (부팅은 localStorage 시딩 — 드래프트 표시·모델 미지원이면 토글이 정정) — 모델이 지원하는 레벨만 순환 (cycle_thinking_level)
+	const [thinkingLevel, setThinkingLevel] = useState<string>(seedThinking || "off");
 	const [contextPct, setContextPct] = useState<number | null>(null);
 	const thinkingLevelRef = useRef("off");
 	const supportedThinkingLevelsRef = useRef<string[]>(["off"]); // model.thinkingLevelMap 기반 지원 레벨
@@ -639,6 +641,7 @@ export default function App() {
 					}
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);
+					try { localStorage.setItem("turk-last-thinking", msg.data.thinkingLevel); } catch { /* 무시 */ } // 드래프트 시딩 원료 — 마지막 실측 보존
 					if (msg.data.thinkingLevel === "off") {
 						firstThinkingLevelRef.current = null;
 						thinkingCycleHitsRef.current = 0;

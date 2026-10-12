@@ -102,6 +102,7 @@ export interface Session {
 	pendingThinkingLevel?: string; // 열림 무지연 — dormant 동안 수신한 set_thinking_level 큐 (pi_ready 재할당 시 재생 후 소멸)
 	lastModel: Record<string, unknown> | null; // 대화별 마지막 실측 모델 — get_state data.model 원형 보존(JSON 안전 얕은 복사: provider·name·id·thinkingLevelMap·reasoning 등 통째). dormant 합성 get_state 재전달 + conversation.json model 필드 영속 — 모델은 대화의 속성(프로세스와 무관)
 	lastContextPct: number | null; // 대화별 마지막 실측 컨텍스트 사용률(%) — 라이브 get_session_stats에서 변화시에만 기록. dormant 합성 stats 재전달 + conversation.json ctxPct 영속 — dormant 열람 시 헤더 바·메뉴 표시 (마지막 라이브 턴 시점 값)
+	lastThinkingLevel: string | null; // 대화별 마지막 실측 씽킹 레벨 — 라이브 get_state data.thinkingLevel에서 변화시에만 기록. dormant 합성 get_state 재전달 + conversation.json thinkingLevel 영속 + dormant set_thinking_level 선행 갱신 — 모델과 동일 완결
 	pendingModel: { provider: string; modelId: string } | null; // dormant set_model 큐 — pi_ready 재생 1회 소멸 (pendingThinkingLevel과 동일 계약). 표시는 lastModel 선행 갱신이 담당
 }
 
@@ -236,6 +237,7 @@ interface ConversationMeta {
 	lastActiveAt: number;
 	model?: Record<string, unknown> | null; // 대화별 마지막 실측 모델 (선택 — 기능 이전 메타 부재 허용)
 	ctxPct?: number | null; // 대화별 마지막 실측 컨텍스트 사용률(%) (선택 — 부재 허용)
+	thinkingLevel?: string | null; // 대화별 마지막 실측 씽킹 레벨 (선택 — 부재 허용)
 }
 function conversationMetaPath(userKey: string): string {
 	return `${DATA_DIR}/${userKey}/conversation.json`;
@@ -387,7 +389,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	// 전용 — 첫 발화가 대화의 디스크 시작점(장부 자정). 접속 확정(enterSession) 경로는 게이트 갱신만.
 	// 메타 저장 본체 — model(lastModel)은 선택 필드: 존재 시에만 기록 (기존 title·createdAt·lastActiveAt 보존)
 	function metaPayload(session: Session): ConversationMeta {
-		return { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt, ...(session.lastModel ? { model: session.lastModel } : {}), ...(session.lastContextPct != null ? { ctxPct: session.lastContextPct } : {}) };
+		return { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt, ...(session.lastModel ? { model: session.lastModel } : {}), ...(session.lastContextPct != null ? { ctxPct: session.lastContextPct } : {}), ...(session.lastThinkingLevel != null ? { thinkingLevel: session.lastThinkingLevel } : {}) };
 	}
 	function touchConversationMeta(session: Session, create = false): void {
 		session.lastActiveAt = Date.now();
@@ -434,7 +436,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 					data: { sessionId: session.agentSessionId ?? "", lastPrompt: session.lastPrompt,
 						isStreaming: session.isStreaming, route: session.currentRoute,
 						lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt,
-						lastTurnFailed: session.lastTurnFailed, backendState: backendStateOf(session), isCompacting: false, ...(session.lastModel ? { model: session.lastModel } : {}) },
+						lastTurnFailed: session.lastTurnFailed, backendState: backendStateOf(session), isCompacting: false, ...(session.lastModel ? { model: session.lastModel } : {}), ...(session.lastThinkingLevel != null ? { thinkingLevel: session.lastThinkingLevel } : {}) },
 				});
 				return;
 			}
@@ -451,10 +453,15 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 				if (modelsCache) broadcast(session, modelsCache);
 				return;
 			}
-			// set_thinking_level 큐잉 — 클라는 전송 즉시 로컬 상태 갱신으로 완료(응답 대기 계약 없음 확인).
-			// 큐는 pi_ready(onEvent)에서 spawn 동기 재생 → 같은 틱 후속 prompt에 선행 보장.
+			// set_thinking_level 큐잉 — 모델·컨텍스트%와 동일 완결(261012): 합성 success 응답 + lastThinkingLevel
+			// 선행 갱신(표시 확정 — 클라 set→get_state 체인이 합성 get_state.thinkingLevel로 마감). 큐는 pi_ready에서
+			// spawn 동기 재생 → 같은 틱 후속 prompt에 선행 보장 (변경 없음).
 			if (cmd.type === "set_thinking_level") {
-				session.pendingThinkingLevel = String(cmd.level ?? "");
+				const lvl = String(cmd.level ?? "");
+				session.pendingThinkingLevel = lvl;
+				session.lastThinkingLevel = lvl; // 표시 선행 갱신 — dormant 표시·재접속 동기화 원료
+				touchConversationMeta(session); // exists-게이트 — thinkingLevel 필드 추가 기록
+				broadcast(session, { type: "response", command: "set_thinking_level", success: true, data: {} }); // 합성 성공 — 클라 get_state 체인 유발
 				return;
 			}
 			// set_model dormant 큐잉 — 모델은 대화의 속성(프로세스의 속성이 아님): 스폰 없이 변경을 수용해
@@ -762,6 +769,13 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 				session.lastContextPct = statsPct;
 				touchConversationMeta(session); // exists-게이트 — ctxPct 필드 추가 기록, 기존 필드 보존
 			}
+			// lastThinkingLevel 기록 — 라이브 get_state 실측을 대화 속성으로 보존 (동일 관례: 변화시에만).
+			// dormant 합성 get_state의 원료 — 재접속·재시작 표시 동기화.
+			const liveLevel = isGetState && typeof (ev as any).data?.thinkingLevel === "string" ? (ev as any).data.thinkingLevel : undefined;
+			if (liveLevel !== undefined && liveLevel !== session.lastThinkingLevel) {
+				session.lastThinkingLevel = liveLevel;
+				touchConversationMeta(session); // exists-게이트 — thinkingLevel 필드 추가 기록, 기존 필드 보존
+			}
 			broadcast(session, ev);
 			// 리플레이 — get_state 응답(클라 복원 클리어) 직후에 던져야 클리어에 흡수되지 않음.
 			// 신규 소켓(replayPending) 1회 한정 — 기존 탭은 라이브 델타를 이미 받고 있어 중복 배제.
@@ -836,6 +850,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			lastActiveAt: convMeta?.lastActiveAt ?? now,
 			lastModel: convMeta?.model && typeof convMeta.model === "object" && !Array.isArray(convMeta.model) ? convMeta.model : null, // 메타 model 복원 — 원형 그대로 (부재·기형 null). 부팅 스윕·재시작 모두 createSession 경유 적재점
 			lastContextPct: typeof convMeta?.ctxPct === "number" ? convMeta.ctxPct : null, // 메타 ctxPct 복원 — 부재·기형 null
+			lastThinkingLevel: typeof convMeta?.thinkingLevel === "string" ? convMeta.thinkingLevel : null, // 메타 thinkingLevel 복원 — 부재·기형 null
 			pendingModel: null,
 			currentRoute: "user",
 			parseRetryCount: 0,
