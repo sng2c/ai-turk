@@ -679,6 +679,13 @@ export default function App() {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				}
+				if (msg.command === "reload" && msg.success) {
+					// 백엔드 재기동 완료 — ack 화면으로 마감. prevState는 sendReload 캡처분 유지:
+					// ctx 메뉴 모드로 두어 모든 선택(✅ 확인)이 "어떤 선택이든 메뉴 종료" 흐름으로 닫히게 한다
+					// (✅ 확인 = 취소와 동일 — prevState 복원 후 프롬프트 통과 없음).
+					menuMode.current = "ctx";
+					setState({ message: "🔄 **재로드 완료** — AGENTS.md·스킬·설정이 다음 발화부터 반영됩니다.", buttons: { 0: "✅ 확인" }, answerTo: "컨텍스트" });
+				}
 				if (msg.command === "set_thinking_level" && msg.success) {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				}
@@ -1034,6 +1041,17 @@ export default function App() {
 		ws.send(JSON.stringify({ type: "prompt", message: composePrompt(userText), userInput: userText, route })); // userInput: 서버 처리중 표시용 — 본문 구성은 composePrompt 공용
 	}, [piReady]);
 
+	// ── 리로드 — 백엔드만 재기동 (세션 유지): pi 부팅 시 AGENTS.md·스킬·설정 재독 + --session-id 재부착 ──
+	// 타이핑·ctx 버튼 공용. 복원 원료(prevState)는 "최초 진입 화면" — 비었을 때만 현재 화면 캡처
+	// (ctx·모델 메뉴 진입분 보호 — 메뉴 화면이 복원 원료 되는 것 방지).
+	const sendReload = () => {
+		const ws = wsRef.current;
+		if (ws?.readyState === WebSocket.OPEN) {
+			prevStateRef.current ??= state;
+			ws.send(JSON.stringify({ type: "reload" }));
+		}
+	};
+
 	const handleSend = (text: string) => {
 		// ── 드래프트 분기 (맨 앞) — userKey 없음: 첫 메시지가 대화를 생성한다 (ChatGPT 모델) ──
 		// 메뉴가 열려 있으면 클릭·입력은 해당 메뉴 분기로 통과 (모델 선택·메뉴 조작은 대화 생성이 아님)
@@ -1066,6 +1084,13 @@ export default function App() {
 			}
 			return;
 		}
+		if (text === "/reload") {
+			// /reload — 백엔드만 재기동(세션 유지) — /compact 관례: 스트리밍 중 kill 방지 로딩 게이트 + WS 열림 확인.
+			// WS 없음(드래프트·끊김)은 무시 — 드래프트는 앞 분기에서 "/" 명령 차단, /session·/compact 무응답 관례 동일.
+			if (loading) { setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
+			sendReload();
+			return;
+		}
 		if (text === "/model") {
 			const ws = wsRef.current;
 			if (ws?.readyState === WebSocket.OPEN) {
@@ -1080,9 +1105,17 @@ export default function App() {
 		if (menuMode.current === "ctx") {
 			// 컨텍스트 메뉴 — 어떤 선택이든 메뉴 종료 후 처리
 			menuMode.current = "none";
-			if (text === "취소") {
+			if (text === "취소" || text === "✅ 확인") {
+				// 취소 — 원래 화면 복원. "✅ 확인"은 리로드 완료 ack 닫기 — 동일 복원(프롬프트 통과 금지)
 				setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
 				prevStateRef.current = null;
+				return;
+			}
+			if (text === "🔄 리로드") {
+				// 리로드 — 지시사항·스킬을 다시 읽습니다(대화 유지). prevState는 ctx 진입 시 저장한 메인 출력 그대로 —
+				// 완료 ack 화면(✅ 확인) 닫힘 시 복원. loading 게이트(/compact 관례) — 스트리밍 중 kill 방지.
+				if (loading) { prevStateRef.current = null; setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
+				sendReload();
 				return;
 			}
 			prevStateRef.current = null;
@@ -1232,9 +1265,9 @@ export default function App() {
 				const pct = contextPct != null ? `${Math.round(contextPct)}%` : "—";
 				// 모델 선택 메뉴와 동일 레이아웃: 액션 칸 + 마지막 칸 취소(destructive)
 				const btns: Record<string, string> = Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""]));
-				btns["0"] = "🧹 컴팩트"; btns[String(DEFAULT_ROWS * DEFAULT_COLS - 1)] = "취소";
+				btns["0"] = "🧹 컴팩트"; btns["1"] = "🔄 리로드"; btns[String(DEFAULT_ROWS * DEFAULT_COLS - 1)] = "취소";
 				const last = String(DEFAULT_ROWS * DEFAULT_COLS - 1);
-				setState({ message: `**사용률:** \`${pct}\`\n\n컴팩트 — 대화를 유지한 채 오래된 내용을 요약합니다 (컨텍스트 축소·되돌릴 수 없음).`, buttons: btns, colors: { [last]: "destructive" }, textColors: { [last]: "white" }, answerTo: "컨텍스트" }); // 제목은 짝박스 위치
+				setState({ message: `**사용률:** \`${pct}\`\n\n컴팩트 — 대화를 유지한 채 오래된 내용을 요약합니다 (컨텍스트 축소·되돌릴 수 없음).\n\n리로드 — 지시사항·스킬을 다시 읽습니다(대화 유지).`, buttons: btns, colors: { [last]: "destructive" }, textColors: { [last]: "white" }, answerTo: "컨텍스트" }); // 제목은 짝박스 위치
 			}} title={`컨텍스트 ${contextPct ?? "—"}% — 컴팩트`}>
 					{contextPct != null ? (
 						<span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, contextPct))}%`, background: contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)" }} /><span className="turk-ctx-pct">{Math.round(contextPct)}%</span></span></span>
