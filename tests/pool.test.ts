@@ -500,6 +500,53 @@ function newCore(maxSessions: number) {
 	const gsR = wsR.sent.filter((m: any) => m.command === "get_state").pop();
 	ok("G5b 복원 대화 합성 get_state — model 반영(대화 진입 시 마지막 모델 표시)",
 		gsR?.data?.model?.id === "glm-5.1:cloud" && gsR.data?.model?.provider === "ollama");
+	// G6 라이브 get_session_stats — lastContextPct 기록 + 메타 ctxPct 영속 + dormant 합성 (lastModel 관례의 세변째 사례)
+	const wsCtx = connect(G.core, "g-ctx");
+	wsMessage(wsCtx, { type: "prompt", userInput: "ctx 대화", message: "ctx 대화" }); // 메타 생성 → 라이브
+	const sCtx = G.core.sessions.get("g-ctx") as any;
+	const fbCtx = sCtx.backend as FakeBackend;
+	fbCtx.emit({ type: "response", command: "get_session_stats", success: true, data: { contextUsage: { percent: 42.5 } } } as TurkEvent);
+	const metaCtx = JSON.parse(readFileSync(metaFile("g-ctx"), "utf-8"));
+	ok("G6a 라이브 stats → lastContextPct 기록 + 메타 ctxPct 영속",
+		sCtx.lastContextPct === 42.5 && metaCtx.ctxPct === 42.5);
+	const ctxRef = sCtx.lastContextPct;
+	const ctxMtime = statSync(metaFile("g-ctx")).mtimeMs;
+	await sleep(10);
+	fbCtx.emit({ type: "response", command: "get_session_stats", success: true, data: { contextUsage: { percent: 42.5 } } } as TurkEvent);
+	ok("G6b 동일 값 연속 — 재기록 없음(참조 동일·mtime 불변)",
+		sCtx.lastContextPct === ctxRef && statSync(metaFile("g-ctx")).mtimeMs === ctxMtime);
+	fbCtx.emit({ type: "response", command: "get_session_stats", success: true, data: { contextUsage: { percent: 87.3 } } } as TurkEvent);
+	ok("G6c 값 변화 → 재기록", sCtx.lastContextPct === 87.3 && statSync(metaFile("g-ctx")).mtimeMs !== ctxMtime);
+	// 회수 후 dormant 합성 stats — 마지막 실측 재전달 (스폰 없음)
+	(sCtx as any).backend?.stop(); (sCtx as any).backend = null; (sCtx as any).backendReady = false;
+	const sentCtx = wsCtx.sent.length;
+	wsMessage(wsCtx, { type: "get_session_stats" });
+	const st = wsCtx.sent.slice(sentCtx).find((m: any) => m.command === "get_session_stats");
+	ok("G6d dormant stats 합성 — 마지막 실측 재전달·스폰 0",
+		st?.success === true && st?.data?.contextUsage?.percent === 87.3 && sCtx.backend === null);
+	// 실측 이력 없는 dormant — 무응답 (클라 가드 소비 계약 유지)
+	const wsCtxNew = connect(G.core, "g-ctx-new");
+	const sentCtxNew = wsCtxNew.sent.length;
+	wsMessage(wsCtxNew, { type: "get_session_stats" });
+	ok("G6e 실측 이력 없는 dormant — 무응답",
+		!wsCtxNew.sent.slice(sentCtxNew).some((m: any) => m.command === "get_session_stats"));
+
+	// G7 부팅 복원 — meta.ctxPct → lastContextPct 적재 → dormant 합성 재전달 (서버 재시작 계약)
+	mkdirSync(join(DATA, "g-ctx-restore"), { recursive: true });
+	writeFileSync(metaFile("g-ctx-restore"), JSON.stringify({ title: "ctx 복원", createdAt: Date.now(), lastActiveAt: Date.now(), ctxPct: 33.3 }));
+	const ctxRestoreBackends: FakeBackend[] = [];
+	const RCTX = SC.createSessionCore({
+		maxSessions: 5,
+		backendFactory: (o: BackendOptions) => { const b = new FakeBackend(o); ctxRestoreBackends.push(b); return b; },
+	}); // scanOnBoot 기본 true — 부팅 스윕이 g-ctx-restore 셸 복원
+	const wsCtxR = connect(RCTX, "g-ctx-restore");
+	const sCtxR = RCTX.sessions.get("g-ctx-restore") as any;
+	wsMessage(wsCtxR, { type: "get_session_stats" });
+	const stR = wsCtxR.sent.find((m: any) => m.command === "get_session_stats");
+	ok("G7 부팅 복원 — meta.ctxPct 적재 → dormant 합성 재전달",
+		ctxRestoreBackends.length === 0 && sCtxR.lastContextPct === 33.3
+		&& stR?.success === true && stR?.data?.contextUsage?.percent === 33.3);
+
 }
 
 // ═══════════════ H. reload — 백엔드만 재기동(세션 유지): pi 부팅 재독 + --session-id 재부착, restart_pi 대조 ═══════════════
@@ -513,6 +560,7 @@ function newCore(maxSessions: number) {
 	sH.lastResponse = { messages: [{ role: "assistant", content: [{ type: "text", text: "마지막 응답" }] }], stopReason: "end_turn" };
 	sH.lastPrompt = "이전 입력";
 	sH.isStreaming = false; // 발화 정리 — FakeBackend는 자동 agent_end 없음
+
 
 	// H1 라이브 세션 reload — stop 후 즉시 재스폰(컴팩트형 수요지점), 세션 상태 전부 보존 (restart_pi는 전부 클리어 — H4 대조)
 	wsMessage(wsH, { type: "reload" });

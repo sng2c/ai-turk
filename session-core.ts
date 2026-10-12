@@ -101,6 +101,7 @@ export interface Session {
 	parseRetryCount: number; // 서버 자가수정(위반 응답 재시도) 카운터 — 성공·취소·신규 유저입력에서 리셋
 	pendingThinkingLevel?: string; // 열림 무지연 — dormant 동안 수신한 set_thinking_level 큐 (pi_ready 재할당 시 재생 후 소멸)
 	lastModel: Record<string, unknown> | null; // 대화별 마지막 실측 모델 — get_state data.model 원형 보존(JSON 안전 얕은 복사: provider·name·id·thinkingLevelMap·reasoning 등 통째). dormant 합성 get_state 재전달 + conversation.json model 필드 영속 — 모델은 대화의 속성(프로세스와 무관)
+	lastContextPct: number | null; // 대화별 마지막 실측 컨텍스트 사용률(%) — 라이브 get_session_stats에서 변화시에만 기록. dormant 합성 stats 재전달 + conversation.json ctxPct 영속 — dormant 열람 시 헤더 바·메뉴 표시 (마지막 라이브 턴 시점 값)
 	pendingModel: { provider: string; modelId: string } | null; // dormant set_model 큐 — pi_ready 재생 1회 소멸 (pendingThinkingLevel과 동일 계약). 표시는 lastModel 선행 갱신이 담당
 }
 
@@ -234,6 +235,7 @@ interface ConversationMeta {
 	createdAt: number;
 	lastActiveAt: number;
 	model?: Record<string, unknown> | null; // 대화별 마지막 실측 모델 (선택 — 기능 이전 메타 부재 허용)
+	ctxPct?: number | null; // 대화별 마지막 실측 컨텍스트 사용률(%) (선택 — 부재 허용)
 }
 function conversationMetaPath(userKey: string): string {
 	return `${DATA_DIR}/${userKey}/conversation.json`;
@@ -385,7 +387,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	// 전용 — 첫 발화가 대화의 디스크 시작점(장부 자정). 접속 확정(enterSession) 경로는 게이트 갱신만.
 	// 메타 저장 본체 — model(lastModel)은 선택 필드: 존재 시에만 기록 (기존 title·createdAt·lastActiveAt 보존)
 	function metaPayload(session: Session): ConversationMeta {
-		return { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt, ...(session.lastModel ? { model: session.lastModel } : {}) };
+		return { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt, ...(session.lastModel ? { model: session.lastModel } : {}), ...(session.lastContextPct != null ? { ctxPct: session.lastContextPct } : {}) };
 	}
 	function touchConversationMeta(session: Session, create = false): void {
 		session.lastActiveAt = Date.now();
@@ -434,6 +436,12 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 						lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt,
 						lastTurnFailed: session.lastTurnFailed, backendState: backendStateOf(session), isCompacting: false, ...(session.lastModel ? { model: session.lastModel } : {}) },
 				});
+				return;
+			}
+			// get_session_stats 합성 — dormant는 라이브 계산 불가하므로 마지막 실측(lastContextPct) 재전달.
+			// 값은 마지막 라이브 턴 시점 (첫 발화 후 라이브 stats가 갱신). 실측 이력 없으면 무응답 — 클라 가드 소비(현행).
+			if (cmd.type === "get_session_stats" && session.lastContextPct != null) {
+				broadcast(session, { type: "response", command: "get_session_stats", success: true, data: { contextUsage: { percent: session.lastContextPct } } });
 				return;
 			}
 			// get_available_models 합성 — 전역 캐시(마지막 라이브 성공 응답) 재전달. 캐시 없음(서버 재시작 직후
@@ -747,6 +755,13 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 					}
 				}
 			}
+			// lastContextPct 기록 — 라이브 get_session_stats 실측을 대화 속성으로 보존 (lastModel 관례:
+			// 값 변화시에만 기록+메타 갱신 — 매 stats마다 디스크 찍기 방지). dormant 합성 stats의 원료.
+			const statsPct = ev.type === "response" && (ev as any).command === "get_session_stats" && (ev as any).success && typeof (ev as any).data?.contextUsage?.percent === "number" ? (ev as any).data.contextUsage.percent : undefined;
+			if (statsPct !== undefined && statsPct !== session.lastContextPct) {
+				session.lastContextPct = statsPct;
+				touchConversationMeta(session); // exists-게이트 — ctxPct 필드 추가 기록, 기존 필드 보존
+			}
 			broadcast(session, ev);
 			// 리플레이 — get_state 응답(클라 복원 클리어) 직후에 던져야 클리어에 흡수되지 않음.
 			// 신규 소켓(replayPending) 1회 한정 — 기존 탭은 라이브 델타를 이미 받고 있어 중복 배제.
@@ -820,6 +835,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			createdAt: convMeta?.createdAt ?? now,
 			lastActiveAt: convMeta?.lastActiveAt ?? now,
 			lastModel: convMeta?.model && typeof convMeta.model === "object" && !Array.isArray(convMeta.model) ? convMeta.model : null, // 메타 model 복원 — 원형 그대로 (부재·기형 null). 부팅 스윕·재시작 모두 createSession 경유 적재점
+			lastContextPct: typeof convMeta?.ctxPct === "number" ? convMeta.ctxPct : null, // 메타 ctxPct 복원 — 부재·기형 null
 			pendingModel: null,
 			currentRoute: "user",
 			parseRetryCount: 0,
