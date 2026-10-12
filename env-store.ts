@@ -30,7 +30,6 @@ const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
 const RESERVED_PREFIXES = ["GATEWAY_", "TURK_", "NODE_", "ANTHROPIC_", "OPENAI_", "OLLAMA_"] as const;
 const RESERVED_EXACT = new Set(["PATH", "HOME", "SHELL", "PWD", "TMPDIR", "LANG", "TERM"]);
 
-const MAX_KEYS = 20;              // 계정당 키 상한 (대화당 상한이던 4c 수치를 계정 스코프로 승격 — 동일 수치)
 const MAX_VALUE_BYTES = 4 * 1024; // 값 상한 (utf8 바이트 — 문자열만)
 
 /** 키 규칙 + 예약(접두사·정확일치) 검증 — 저장소 내부 검증·DELETE 라우트 세그먼트 검증·마이그레이션 병합의 공용 진원. */
@@ -70,7 +69,6 @@ export function setAccountEnv(username: string, key: string, value: string): { o
 	if (typeof value !== "string") return { ok: false, error: "값은 문자열이어야 합니다" }; // 직접 호출 방어
 	if (Buffer.byteLength(value, "utf8") > MAX_VALUE_BYTES) return { ok: false, error: "값은 4KB 이하여야 합니다" };
 	const env = normalizeAccountEnv(acc.env);
-	if (!(key in env) && Object.keys(env).length >= MAX_KEYS) return { ok: false, error: "계정당 환경변수는 최대 20개입니다" };
 	env[key] = value;
 	acc.env = env;
 	try {
@@ -141,8 +139,7 @@ export function migrateConversationEnvToAccounts(): number {
 		let merged = 0, dropped = 0;
 		for (const [k, v] of Object.entries(oldEnv)) {
 			if (!isEnvKeyName(k) || k in env) continue; // 규칙 위반 제외 · 계정 승리(add-if-absent)
-			if (Object.keys(env).length >= MAX_KEYS) { dropped++; continue; } // 계정 상한 — 초과분 폐기
-			env[k] = v;
+		env[k] = v;
 			merged++; added++;
 		}
 		if (merged > 0) {

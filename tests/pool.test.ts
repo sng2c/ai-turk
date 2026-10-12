@@ -575,6 +575,42 @@ function newCore(maxSessions: number) {
 
 }
 
+// ═══════════════ J. 확인 안 함(unread) — ws 0 턴 마감 표기·접속 해소·영속 ═══════════════
+{
+	const J = newCore(5);
+	const metaUnread = () => JSON.parse(readFileSync(metaFile("j-unread"), "utf-8"));
+
+	const DATA = envPaths("ai-turk").data;
+	const metaFile = (k: string) => join(DATA, k, "conversation.json");
+	// J1 ws 0 턴 마감 — 표기 + meta unread 영속
+	const wsA = connect(J.core, "j-unread");
+	sendPrompt(wsA); // 발화 → 할당 (메타 존재)
+	wsA.sent.length = 0; wsA.close(); // 뷰어 소멸 — ws.size 0
+	const sJ = J.core.sessions.get("j-unread") as any;
+	// FakeBackend 수동 마감: agent_end 이벤트 주입 — ws 0 상태에서
+	void sJ;
+	(J.backends[J.backends.length - 1] as FakeBackend).emit({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "응답" }] }] } as TurkEvent);
+	ok("J1 ws 0 턴 마감 — unread 표기 + meta unread:true", sJ.unread === true && metaUnread().unread === true);
+	// 라이브(WS 붙은) 상태 마감 — 표기 없음
+	sendPrompt(connect(J.core, "j-live"));
+	const sL = J.core.sessions.get("j-live") as any;
+	void sL; // (j-live의 ws는 connect 소유 — close 안 함)
+	(J.backends[J.backends.length - 1] as FakeBackend).emit({ type: "agent_end" } as TurkEvent);
+	ok("J2 뷰어 있는 턴 마감 — unread 미표기", sL.unread === false);
+
+	// J3 접속 해소 — 다시 접속하면 unread=false + meta 재기록 제거
+	connect(J.core, "j-unread"); // 재접속
+	ok("J3 접속 = 확인 — unread 해소 + meta 필드 제거", sJ.unread === false
+		&& !("unread" in metaUnread()));
+
+	// J4 영속 복원 — meta unread:true가 남은 채 재부팅(신규 코어) → 복원
+	mkdirSync(join(envPaths("ai-turk").data, "j-restore"), { recursive: true });
+	writeFileSync(metaFile("j-restore"), JSON.stringify({ title: "재접 대화", createdAt: Date.now(), lastActiveAt: Date.now(), unread: true }));
+	const RJ = SC.createSessionCore({ maxSessions: 5, backendFactory: (o: BackendOptions) => new FakeBackend(o) });
+	const sRJ = RJ.sessions.get("j-restore") as any;
+	ok("J4 부팅 복원 — meta unread:true → unread 셸 상태(접속 전)", sRJ?.unread === true);
+}
+
 // ═══════════════ H. reload — 백엔드만 재기동(세션 유지): pi 부팅 재독 + --session-id 재부착, restart_pi 대조 ═══════════════
 {
 	const H = newCore(5);

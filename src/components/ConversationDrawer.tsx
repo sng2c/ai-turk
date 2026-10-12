@@ -27,6 +27,7 @@ interface ConvSummary {
 	createdAt: number;
 	lastActiveAt: number;
 	active: boolean;
+	unread?: boolean; // 확인 안 함 (노란 좌바 — ws 0 턴 마감)
 	streaming: boolean;
 	scheduleCount: number;
 	backendState: "active" | "dormant" | "starting";
@@ -57,18 +58,24 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 	// ── 계정 섹션 — /api/me의 username 응답일 때만 표시 ──
 	// AUTH off({ok,auth:"off"})·401·SPA fallthrough(비JSON·HTML)·네트워크 실패 전부 숨김
 	const [me, setMe] = useState<string | null>(null);
+	const [authOff, setAuthOff] = useState(false); // AUTH-off 설치(dev 익명) — 비번/로그아웃 숨김 신호
 	useEffect(() => {
 		fetch("/api/me").then(async (r) => {
 			if (!r.ok) return;
 			const j: unknown = await r.json();
-			if (j && typeof j === "object" && typeof (j as { username?: unknown }).username === "string" && (j as { username: string }).username) {
-				setMe((j as { username: string }).username);
+			const jo = j as { username?: unknown; auth?: unknown };
+			if (j && typeof j === "object" && typeof jo.username === "string" && jo.username) {
+				setMe(jo.username);
+				setAuthOff(jo.auth === "off"); // 익명 가상 계정("local") — 도서관은 공유, 비번/세션은 부재
 			}
 		}).catch(() => { /* 무시 — 익명 취급 (dev) */ });
 	}, []);
 
 	// ── 전환·신규 — 해시 갱신 → App의 hashchange→풀리로드 계약 (신규 전환 코드 없음) ──
-	const switchTo = (id: string) => { location.hash = "#" + encodeURIComponent(id); };
+	const switchTo = (id: string) => {
+		if (userKey != null && id === userKey) { location.reload(); return; } // 현재 대화 재클릭 — 강제 새로고침 (재복원·상태 리싱크)
+		location.hash = "#" + encodeURIComponent(id);
+	};
 	// 새 대화 — 드래프트 진입 (UUID 선발급 제거): #new는 첫 메시지 전 대화가 없다 — 첫 메시지가 대화를 생성
 	const newConversation = () => { location.hash = "#new"; };
 
@@ -243,13 +250,13 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 							/>
 						</div>
 					) : (
-						<div key={c.id} className={"turk-drawer-row" + (userKey != null && c.id === userKey ? " turk-drawer-row-current" : "")}>
+						<div key={c.id} className={"turk-drawer-row" + (userKey != null && c.id === userKey ? " turk-drawer-row-current" : c.unread ? " turk-drawer-row-unread" : "")}>
 							<button className="turk-drawer-item-main" onClick={() => switchTo(c.id)} title={c.title || c.id}>
 								<span className="turk-drawer-item-title">{c.title || shortUserKey(c.id)}</span>
 								<span className="turk-drawer-badges">
-									{c.scheduleCount > 0 && <span className="turk-drawer-sch" title="스케줄 활성"><AlarmClock className="turk-ico" />{c.scheduleCount}</span>}
+									{c.scheduleCount > 0 && <span className="turk-drawer-sch" title="스케줄 활성"><AlarmClock className="turk-ico" /></span>}
 									{c.streaming && <span className="turk-drawer-streaming" title="응답 생성 중"><Play className="turk-ico" style={{ width: "1.1em", height: "1.1em", verticalAlign: "-0.1em" }} /></span>}
-									{c.backendState !== "dormant" && <span className={"turk-dot" + (c.backendState === "starting" ? " turk-dot-starting" : "")} title={c.backendState === "starting" ? "기동 중" : "활성"} />}
+									
 								</span>
 							</button>
 							<button className="turk-drawer-item-btn" disabled={busyId === c.id} onClick={() => startRename(c)} title="이름 변경"><Pencil className="turk-ico" /></button>
@@ -262,9 +269,9 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 				{me && (
 					<footer className="turk-drawer-foot">
 						<span className="turk-drawer-user"><User className="turk-ico" />{me}</span>
-						<button className="turk-drawer-act" onClick={openPwModal}><KeyRound className="turk-ico" />비밀번호 변경</button>
+						{!authOff && <button className="turk-drawer-act" onClick={openPwModal}><KeyRound className="turk-ico" />비밀번호 변경</button>}
 						<button className="turk-drawer-act" onClick={openEnvModal}><KeyRound className="turk-ico" />환경 변수</button>
-						<button className="turk-drawer-act" onClick={logout}><LogOut className="turk-ico" />로그아웃</button>
+						{!authOff && <button className="turk-drawer-act" onClick={logout}><LogOut className="turk-ico" />로그아웃</button>}
 					</footer>
 				)}
 

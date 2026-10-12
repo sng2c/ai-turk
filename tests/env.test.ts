@@ -134,16 +134,16 @@ function wsPrompt(ws: any): void {
 		&& E.isEnvKeyName("A".repeat(64)) === true && prefixes.every((k) => E.isEnvKeyName(k) === false) && exacts.every((k) => E.isEnvKeyName(k) === false));
 }
 
-// ═══════════════ C. 제한 — 20개 상한 · 4KB 값 (L1 순수 — 상한은 이제 계당) ═══════════════
+// ═══════════════ C. 제한 — 4KB 값 (L1 순수 — 키 상한은 없음 261012) ═══════════════
 {
 	clearAccounts();
 	addUser("acct-limit");
+	// 상한 없음(261012) — 25개 저장 전부 수용 + 기존 키 갱신도 정상
 	let allOk = true;
-	for (let i = 1; i <= 20; i++) allOk &&= E.setAccountEnv("acct-limit", `KEY_${String(i).padStart(2, "0")}`, `v${i}`).ok === true;
-	ok("C1 20개 저장 성공 — 상한까지 허용", allOk);
-	ok("C2 21번째 키 거부", E.setAccountEnv("acct-limit", "KEY_OVERFLOW", "v").ok === false);
-	ok("C3 기존 키 갱신은 상한과 무관 통과", E.setAccountEnv("acct-limit", "KEY_01", "v-updated").ok === true && E.loadAccountEnv("acct-limit").KEY_01 === "v-updated");
-	addUser("acct-value"); // C4 전용 계정 — acct-limit은 이미 상한 20 (새 키 추가를 방해하므로 값 규칙은 분리 시험)
+	for (let i = 1; i <= 25; i++) allOk &&= E.setAccountEnv("acct-limit", `KEY_${String(i).padStart(2, "0")}`, `v${i}`).ok === true;
+	ok("C1 키 상한 없음 — 25개 저장 전부 수용", allOk && Object.keys(E.loadAccountEnv("acct-limit")).length === 25);
+	ok("C2 기존 키 갱신 정상", E.setAccountEnv("acct-limit", "KEY_01", "v-updated").ok === true && E.loadAccountEnv("acct-limit").KEY_01 === "v-updated");
+	addUser("acct-value"); // 값 규칙은 분리 시험
 ok("C4 값 4KB 경계 — 4096바이트 통과 · 4097 초과 거부 · 한글 멀티바이트 바이트 기준",
 		E.setAccountEnv("acct-value", "VAL_OK", "a".repeat(4096)).ok === true
 		&& E.setAccountEnv("acct-value", "VAL_BIG", "a".repeat(4097)).ok === false

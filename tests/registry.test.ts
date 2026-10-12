@@ -222,8 +222,8 @@ function newCore(maxSessions: number, opts: { scanOnBoot?: boolean } = {}) {
 	const cB: any = R4.core.listConversations().find((c: any) => c.id === "r4-b");
 	ok("R4e backendState dormant + active=false", cB?.backendState === "dormant" && cB?.active === false && cB?.streaming === sB.isStreaming);
 	const keys = Object.keys(R4.core.listConversations()[0]);
-	ok("R4f 응답 스키마 — 8필드 고정 계약",
-		JSON.stringify(keys) === JSON.stringify(["id", "title", "createdAt", "lastActiveAt", "active", "streaming", "scheduleCount", "backendState"]),
+	ok("R4f 응답 스키마 — 9필드 고정 계약 (unread 추가 261012)",
+		JSON.stringify(keys) === JSON.stringify(["id", "title", "createdAt", "lastActiveAt", "active", "streaming", "unread", "scheduleCount", "backendState"]),
 		`got=${JSON.stringify(keys)}`);
 	wsA.close(); wsB.close();
 }

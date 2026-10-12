@@ -102,6 +102,7 @@ export interface Session {
 	pendingThinkingLevel?: string; // 열림 무지연 — dormant 동안 수신한 set_thinking_level 큐 (pi_ready 재할당 시 재생 후 소멸)
 	lastModel: Record<string, unknown> | null; // 대화별 마지막 실측 모델 — get_state data.model 원형 보존(JSON 안전 얕은 복사: provider·name·id·thinkingLevelMap·reasoning 등 통째). dormant 합성 get_state 재전달 + conversation.json model 필드 영속 — 모델은 대화의 속성(프로세스와 무관)
 	lastContextPct: number | null; // 대화별 마지막 실측 컨텍스트 사용률(%) — 라이브 get_session_stats에서 변화시에만 기록. dormant 합성 stats 재전달 + conversation.json ctxPct 영속 — dormant 열람 시 헤더 바·메뉴 표시 (마지막 라이브 턴 시점 값)
+	unread: boolean; // 확인 안 함 — 보는 탭 없이(ws 0) 턴이 끝난 대화. 드로어 노란 좌바. 접속(enterSession) 시 해소 + meta unread 영속
 	lastThinkingLevel: string | null; // 대화별 마지막 실측 씽킹 레벨 — 라이브 get_state data.thinkingLevel에서 변화시에만 기록. dormant 합성 get_state 재전달 + conversation.json thinkingLevel 영속 + dormant set_thinking_level 선행 갱신 — 모델과 동일 완결
 	pendingModel: { provider: string; modelId: string } | null; // dormant set_model 큐 — pi_ready 재생 1회 소멸 (pendingThinkingLevel과 동일 계약). 표시는 lastModel 선행 갱신이 담당
 }
@@ -155,6 +156,7 @@ export interface ConversationSummary {
 	lastActiveAt: number;
 	active: boolean; // 백엔드 alive 여부
 	streaming: boolean; // 응답 생성 중
+	unread: boolean; // 확인 안 함 (ws 0에서 마감된 미열람 턴 존재)
 	scheduleCount: number; // 등록 스케줄 수 — scheduler.list().data.count
 	backendState: "active" | "dormant" | "starting"; // alive&&ready / 셸만(스폰 없음) / alive+미ready
 }
@@ -238,6 +240,7 @@ interface ConversationMeta {
 	model?: Record<string, unknown> | null; // 대화별 마지막 실측 모델 (선택 — 기능 이전 메타 부재 허용)
 	ctxPct?: number | null; // 대화별 마지막 실측 컨텍스트 사용률(%) (선택 — 부재 허용)
 	thinkingLevel?: string | null; // 대화별 마지막 실측 씽킹 레벨 (선택 — 부재 허용)
+	unread?: boolean; // 확인 안 함 (true만 기록 — 해소 시 재기록에서 자연 제거)
 }
 function conversationMetaPath(userKey: string): string {
 	return `${DATA_DIR}/${userKey}/conversation.json`;
@@ -389,7 +392,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	// 전용 — 첫 발화가 대화의 디스크 시작점(장부 자정). 접속 확정(enterSession) 경로는 게이트 갱신만.
 	// 메타 저장 본체 — model(lastModel)은 선택 필드: 존재 시에만 기록 (기존 title·createdAt·lastActiveAt 보존)
 	function metaPayload(session: Session): ConversationMeta {
-		return { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt, ...(session.lastModel ? { model: session.lastModel } : {}), ...(session.lastContextPct != null ? { ctxPct: session.lastContextPct } : {}), ...(session.lastThinkingLevel != null ? { thinkingLevel: session.lastThinkingLevel } : {}) };
+		return { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt, ...(session.lastModel ? { model: session.lastModel } : {}), ...(session.lastContextPct != null ? { ctxPct: session.lastContextPct } : {}), ...(session.lastThinkingLevel != null ? { thinkingLevel: session.lastThinkingLevel } : {}), ...(session.unread ? { unread: true } : {}) };
 	}
 	function touchConversationMeta(session: Session, create = false): void {
 		session.lastActiveAt = Date.now();
@@ -574,6 +577,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			lastActiveAt: s.lastActiveAt,
 			active: s.backend?.alive() === true,
 			streaming: s.isStreaming,
+			unread: s.unread,
 			scheduleCount: s.scheduler.list().data.count,
 			backendState: backendStateOf(s),
 		}));
@@ -679,6 +683,11 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			// agent_end: 스트리밍 종료 + 큐 드레인 + 웹 푸시
 			if (ev.type === "agent_end") {
 				session.isStreaming = false;
+				// 턴 마감 = 대화 활동 — 레지스트리 정렬 기준 즉시 갱신 (라이브·원격(푸시) 공통).
+				// 재시작 후에도 최근 정렬 유지 — touch가 메타 lastActiveAt 영속. 새 턴 없는 대화는 기존 위치 유지(정렬 키 불변).
+				session.lastActiveAt = Date.now();
+				touchConversationMeta(session);
+				if (session.ws.size === 0 && !session.unread) { session.unread = true; console.log(`[${session.userKey.slice(0, 8)}] [Unread] 확인 안 함 표기 (ws 0 턴 마감)`); }
 				if (DEBUG) console.log(`[${session.userKey.slice(0, 8)}] [Scheduler] agent_end 도착 — drainQueue 호출`);
 				// 응답 실패 명시 정의 — agent_end.error → 실패 플래그. lastResponse는 성공분만 캐시
 				const aborted = Array.isArray((ev as any).messages) && (ev as any).messages.some((m: any) => m.role === "assistant" && m.stopReason === "aborted");
@@ -851,6 +860,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			lastModel: convMeta?.model && typeof convMeta.model === "object" && !Array.isArray(convMeta.model) ? convMeta.model : null, // 메타 model 복원 — 원형 그대로 (부재·기형 null). 부팅 스윕·재시작 모두 createSession 경유 적재점
 			lastContextPct: typeof convMeta?.ctxPct === "number" ? convMeta.ctxPct : null, // 메타 ctxPct 복원 — 부재·기형 null
 			lastThinkingLevel: typeof convMeta?.thinkingLevel === "string" ? convMeta.thinkingLevel : null, // 메타 thinkingLevel 복원 — 부재·기형 null
+			unread: convMeta?.unread === true, // 메타 unread 복원
 			pendingModel: null,
 			currentRoute: "user",
 			parseRetryCount: 0,
@@ -910,9 +920,10 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			if (rel === "foreign") { denyConnection(ws, "권한 없음 — 다른 계정의 대화입니다"); return; }
 			if (rel === "orphan") authorize.claimConversation(username, userKey); // 고아 인수 — 레거시 대화 첫 접속 자동 claim (마이그레이션 계약)
 		}
-		// 푸터 메타 — conversation.json이 존재할 때만 갱신(touchConversationMeta 내부 existsSync 게이트).
-		// 클릭만 한(무발화) 대화는 존재 불확정이라 디스크 기록 0 — dir 자체 미생성으로 재시작 시 자연 소멸.
-		touchConversationMeta(session); // 1c — 존재 게이트 갱신 (재접속도 대화 활동)
+		// 접속 = 확인 — unread(true)일 때만 해소·메타 재기록(payload에 false 미포함 → 필드 자연 제거).
+		// 열람만 한 접속은 lastActiveAt 미갱신 — "대화 없이 열기만 한 대화는 그 자리 유지"(261012).
+		// 클릭만 한(무발화) 대화는 메타 존재 불확정 → 디스크 기록 0 유지.
+		if (session.unread) { session.unread = false; touchConversationMeta(session); }
 		// 백엔드 기동 제거(열림 무지연·지연 할당) — 접속은 뷰어 신호일 뿐, 프로세스는 작업 명령만 부른다.
 		// 기동 수요 = sendToBackend ensure 목록(prompt·compact) + 스케줄러 트리거 발화만. 접속 직후 클라의
 		// pi_ready→get_state는 dormant 합성 응답으로 즉시 마감 — 스폰·지연·교착 없음(뷰어만으로 풀을 잠그지 않게).

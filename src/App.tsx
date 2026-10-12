@@ -81,7 +81,6 @@ export default function App() {
 	const [logoMode, setLogoMode] = useState<"robot" | "alarm" | "tool">("robot");
 	const baseLogoModeRef = useRef<"robot" | "alarm" | "tool">("robot"); // 톨 종료 후 복귀용
 
-	const [sessionId, setSessionId] = useState("");
 	// 드래프트(#new) 모델 시딩 — 1순위: 시작시 지정 계약(서버 TURK_PI_MODEL — pi_ready.defaultModel로 캐시).
 	// 새 대화의 실제 시작 모델이 이 값이므로 표시=진실. 미수집(최초 방문 등)은 2순위 마지막 사용 모델 → 빈값.
 	// 대화 진입은 합성/라이브 get_state.model이 우선 덮고, 드래프트 직접 선택(pendingModel)도 setCurrentModel로 덮음.
@@ -609,7 +608,6 @@ export default function App() {
 				if (msg.command === "get_state" && msg.success && msg.data) {
 					if (pendingModelUpdateRef.current) { pendingModelUpdateRef.current = false; setModelChanging(false); } // 모델 변경 완료 — 지원 레벨/컨텍스트 갱신됨
 					if (msg.data.sessionId) {
-						setSessionId(msg.data.sessionId);
 						// 응답 실패 명시 — 마지막 턴 실패 시 실패 화면 (입력 유지).
 						// 단 서버가 이미 다음 턴을 스트리밍 중이면 실패 화면 생략 (이전 턴의 실패 — dim 우선)
 						if ((msg.data as any).lastTurnFailed === true && msg.data.isStreaming !== true) {
@@ -1267,7 +1265,7 @@ export default function App() {
 					} else if (isDraft) {
 						openModelMenuFromCache(); // 드래프트 — WS 없음: 캐시 메뉴 (서버 왕복 없음)
 					}
-				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> <button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: (supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 || thinkingLevel === "off") ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 ? "NONE" : thinkingLevel.toUpperCase()}</button> <button className="turk-new-btn" onClick={() => {
+				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> {!!(supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0) ? null : (<button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: (supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 || thinkingLevel === "off") ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{((({ off: "--", none: "--", minimal: "MI", low: "LO", medium: "ME", high: "HI", xhigh: "XH", max: "MA" } as Record<string, string>)[thinkingLevel]) ?? thinkingLevel.slice(0, 2))}</button>)} <button className="turk-new-btn" onClick={() => {
 				if (menuMode.current === "ctx") {
 					// 토글 닫기
 					menuMode.current = "none";
@@ -1285,9 +1283,13 @@ export default function App() {
 				const last = String(DEFAULT_ROWS * DEFAULT_COLS - 1);
 				setState({ message: `**사용률:** \`${pct}\`\n\n컴팩트 — 대화를 유지한 채 오래된 내용을 요약합니다 (컨텍스트 축소·되돌릴 수 없음).\n\n리로드 — 지시사항·스킬을 다시 읽습니다(대화 유지).`, buttons: btns, colors: { [last]: "destructive" }, textColors: { [last]: "white" }, answerTo: "컨텍스트" }); // 제목은 짝박스 위치
 			}} title={`컨텍스트 ${contextPct ?? "—"}% — 컴팩트`}>
-					{contextPct != null ? (
-						<span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, contextPct))}%`, background: contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)" }} /><span className="turk-ctx-pct">{Math.round(contextPct)}%</span></span></span>
-						) : <span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: "0%" }} /><span className="turk-ctx-pct">—</span></span></span>}
+					{contextPct != null ? (() => {
+						// 도넛 링 — SVG 원호(2πr×pct) + 중앙 % — 배터리 바와 다른 형식, 게이지만 링으로
+						const pct = Math.min(100, Math.max(0, contextPct));
+						const col = contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)";
+						// 얇은 링(3.5)+확대(1.35em) + 중앙에 % 숫자 (링과 숫자 통합 — 별도 텍스트 없음)
+						return (<span className="turk-ctx turk-ctx-donut"><svg viewBox="0 0 36 36" className="turk-ctx-ring"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--muted-foreground)" strokeOpacity="0.25" strokeWidth="3.5" /><circle cx="18" cy="18" r="15" fill="none" stroke={col} strokeWidth="3.5" strokeDasharray={`${pct} ${100 - pct}`} pathLength={100} strokeDashoffset={25} strokeLinecap="round" /></svg><span className="turk-ctx-n" style={{ color: col }}>{Math.round(contextPct)}</span></span>);
+					})() : <span className="turk-ctx"><span className="turk-ctx-pct">—</span></span>}
 				</button></span>
 			</header>
 
@@ -1306,9 +1308,6 @@ export default function App() {
 			</div>
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
-				<div className="turk-session-debug" onClick={() => navigator.clipboard?.writeText(`userKey: ${userKey} | agentSessionId: ${sessionId}`)} style={{ position: "absolute", top: "0.25rem", right: "0.4rem", fontSize: "10px", opacity: 0.4, fontFamily: "\"NeoDunggeunmo\", monospace", lineHeight: 1, cursor: "pointer", userSelect: "none", zIndex: 5 }}>
-					{userKey?.slice(-6) ?? "—"}|{sessionId ? sessionId.slice(-6) : "—"}
-				</div>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
 				{canScrollUp && (
 					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로"><ChevronUp className="turk-ico" /></button>

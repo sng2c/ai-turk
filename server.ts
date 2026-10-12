@@ -9,6 +9,7 @@
  * 프로덕션: npm start (이 파일이 dist/ + WebSocket + 백엔드)
  */
 
+import { randomBytes } from "node:crypto";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -17,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
 import { loadAccountEnv, setAccountEnv, deleteAccountEnvKey, isEnvKeyName, migrateConversationEnvToAccounts } from "./env-store.ts"; // 4c-refit — 계정별 환경변수 (값 열림=소유자만·upsert·멱듬 삭제·구 대화 env.json 이관 — 모델 컨텍스트로만 값은 0)
-import { createAuthorizer, attemptLogin, clearCookie, changePassword, reconcileUsersWithDisk } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경 · reconcileUsersWithDisk는 Phase 4a 부팅 잔여키 대사
+import { createAuthorizer, attemptLogin, clearCookie, changePassword, reconcileUsersWithDisk, loadUsers, saveUsers } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경 · reconcileUsersWithDisk는 Phase 4a 부팅 잔여키 대사
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 console.log(`[Turk] __dirname: ${__dirname}`);
@@ -43,10 +44,29 @@ const DIST_DIR = join(__dirname, "dist");
 
 // ── Phase 2 인증 (TURK_AUTH=1 — .env 로더 뒤에서 판정; 미설정=기존 무인증 동작 그대로) ──
 const AUTH = !!process.env.TURK_AUTH;
+const ANON_ACCOUNT = "local"; // AUTH-off 설치의 가상 계정 — 익명 전원이 이 계정의 도서관(env)을 공유. 소유권은 dev 기존 계약(자유) 유지
 const auth = AUTH ? createAuthorizer() : null; // authorize 주입 — session-core는 구조 일치만 요구
+if (!AUTH) {
+	// 익명 계정 보증 — users.json에 "local" 없으면 무비번 계정 생성 (로그인 불가 = 익명성 유지, env 컨테이너로만 존재)
+	const users = loadUsers() ?? { accounts: {} };
+	if (!users.accounts[ANON_ACCOUNT]) {
+		users.accounts[ANON_ACCOUNT] = { salt: randomBytes(16).toString("hex"), hash: randomBytes(64).toString("hex"), userKeys: [], env: {}, createdAt: Date.now() };
+		saveUsers(users);
+		console.log(`[Turk] 익명 도서관 계정 보증: ${ANON_ACCOUNT}`);
+	}
+}
 
 // ── 세션 코어 (공용) — .env 로드 후 생성 ─────────────────────────────────
-const core = createSessionCore(auth ? { authorize: auth } : {});
+const anonAuth = AUTH ? null : {
+	// 익명 저자자 — 구조 일치(Authorizer). 소유권 판정은 전부 own(dev 자유 계약), env는 "local" 계정 단일 스코프.
+	authorizeRequest: async () => ANON_ACCOUNT,
+	checkConversation: () => "own" as const,
+	claimConversation: () => true,
+	releaseConversation: () => true,
+	listOwnedKeys: () => [] as string[],
+	accountEnv: () => loadAccountEnv(ANON_ACCOUNT),
+};
+const core = createSessionCore({ authorize: (auth ?? anonAuth) as NonNullable<typeof anonAuth> });
 const MAX_SESSIONS = core.maxSessions;
 
 const JSONH = { "Content-Type": "application/json" };
@@ -194,7 +214,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 	const ENV_PATH = "/api/env";
 	const ENV_PREFIX = "/api/env/";
 	if (url.pathname === ENV_PATH || url.pathname.startsWith(ENV_PREFIX)) {
-		if (!AUTH) { res.writeHead(404, JSONH); res.end(JSON.stringify({ error: "인증 비활성" })); return; }
+		// AUTH-off도 허용(261012) — 익명 가상 계정(ANON_ACCOUNT) 단일 스코프. AUTH-on은 쿠키 계정 스코프.
+		const anonUser = AUTH ? null : ANON_ACCOUNT;
 		// ① GET·POST는 정확 경로만 / DELETE 세그먼트는 env 키 규칙·예약 검증 (전체 세그먼트가 곧 하나의 키 — 슬래시 불허)
 		let envKey = "";
 		if (req.method === "DELETE") {
@@ -204,8 +225,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 			res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "경로 형식이 올바르지 않습니다" })); return;
 		}
 		if (req.method === "DELETE" && !isEnvKeyName(envKey)) { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "환경변수 키 형식이 올바르지 않습니다" })); return; }
-		// ② 쿠키 인증 — 성공하면 username이 곧 저장소 스코프
-		const user = auth ? await auth.authorizeRequest(req) : null;
+		// ② 스코프 확정 — AUTH-on: 쿠키 계정 / AUTH-off: 익명 가상 계정(보증됨)
+		const user = anonUser ?? (auth ? await auth.authorizeRequest(req) : null);
 		if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; }
 		if (req.method === "GET") {
 			// 값 열람 — 소유자(쿠기 계정)에게는 허용 (261010): 사람은 보고, LLM은 못 보는 경계.
@@ -232,7 +253,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 	}
 
 	if (url.pathname === "/api/me") {
-		if (!AUTH) { res.writeHead(200, JSONH); res.end(JSON.stringify({ ok: true, auth: "off" })); return; }
+		if (!AUTH) { res.writeHead(200, JSONH); res.end(JSON.stringify({ ok: true, auth: "off", username: ANON_ACCOUNT })); return; } // username — 드로어 도서관(환경 모달) 렌더 원료. auth:"off" = 비번/로그아웃 숨김 신호
 		const me = auth ? await auth.authorizeRequest(req) : null;
 		if (!me) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; }
 		res.writeHead(200, { ...JSONH, "Cache-Control": "no-store" });

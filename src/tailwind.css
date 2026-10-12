@@ -248,7 +248,7 @@ body {
 	color: var(--accent-foreground);
 	line-height: 1;
 	transition: color 0.1s;
-	flex: 1 1 auto;
+	flex: 0 1 auto; /* 가변 — 내용 크기만 차지, 축소 가능 */
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -270,6 +270,10 @@ body {
 	color: var(--muted-foreground);
 	margin-top: 0.15em;
 }
+
+.turk-ctx-ring { position: absolute; inset: 0; width: 100%; height: 100%; } /* 얼굴 뒤 절대 배치 — 숫자와 중심 공유 */
+.turk-ctx-donut { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 1.35em; height: 1.35em; flex: none; transform: translateY(-0.12em); } /* 도넛 전체를 헤더 라인 기준 위로 */ /* 크기는 박스가 소유 — 링은 절대 채움 */
+.turk-ctx-n { position: relative; font-size: 0.55em; font-weight: 600; line-height: 1; } /* 링 중앙 % — 36박스 중 얼굴 영역(내경 ~0.66)에 맞춤 */ /* 전체 축소(1.15→1.02) */
 
 .turk-ctx-bar {
 	position: relative;
@@ -853,6 +857,12 @@ body {
 	.turk-drawer-row:hover { background: rgba(255, 255, 255, 0.06); }
 }
 
+/* 확인 안 함 대화 — 좌측 노랑 바 (보는 탭 없이 마감된 미열람 턴). 현재 대화(녹)와 배타 — 접속 시 해소 */
+.turk-drawer-row-unread {
+	box-shadow: inset 0.143rem 0 0 var(--warning);
+	border-radius: 0;
+}
+
 /* 현재 대화 하이라이트 — 좌측 success 바 + 살짝 밝은 배경 (라운드 제거 — inset 바가 반듯하게) */
 .turk-drawer-row-current {
 	background: #111;
@@ -894,7 +904,7 @@ body {
 	font-size: 0.85rem; /* 0.62→0.85 — 인디케이터 가독성 (스크린샷 피드백) */
 }
 
-.turk-drawer-sch { color: var(--success); display: inline-flex; align-items: center; gap: 0.15em; line-height: 1; } /* 스케줄 배지 — 녹색 시계·개수 나란히(읽기 전용 정보) */
+.turk-drawer-sch { display: inline-flex; align-items: center; gap: 0.15em; line-height: 1; color: var(--muted-foreground); } /* 스케줄 표시 — 개수 없이 시계 아이콘·본문색 */
 .turk-sch-badge { display: inline-flex; align-items: center; gap: 0.15em; line-height: 1; font-size: 0.95em; font-weight: inherit; } /* 헤더 시계·개수 — 드로어 배지와 동일 배치 */
 .turk-drawer-sch .turk-ico { width: 1.35em; height: 1.35em; }
 
@@ -904,15 +914,7 @@ body {
 	animation: turk-drawer-blink 0.8s steps(2) infinite;
 }
 
-.turk-dot {
-	display: inline-block;
-	width: 0.5rem;
-	height: 0.5rem;
-	border-radius: 50%;
-	background: var(--success);
-}
 
-.turk-dot-starting { background: var(--warning); }
 
 @keyframes turk-drawer-blink {
 	0% { opacity: 1; }
@@ -934,6 +936,7 @@ body {
 }
 
 .turk-drawer-item-btn:disabled { opacity: 0.3; cursor: default; }
+.turk-drawer-item-btn-danger { color: var(--destructive); } /* 삭제 — 상시 빨강 */
 
 @media (hover: hover) {
 	.turk-drawer-item-btn:hover { color: var(--foreground); }
