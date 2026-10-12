@@ -893,7 +893,8 @@ body {
 	font-size: 0.62rem;
 }
 
-.turk-drawer-sch { color: var(--success); display: inline-flex; align-items: center; line-height: 1; } /* 스케줄 배지 — 녹색·개수는 아이콘 얼굴 안(AlarmCountIcon) */
+.turk-drawer-sch { color: var(--success); display: inline-flex; align-items: center; gap: 0.15em; line-height: 1; } /* 스케줄 배지 — 녹색 시계·개수 나란히(읽기 전용 정보) */
+.turk-drawer-sch .turk-ico { width: 1.1em; height: 1.1em; }
 
 .turk-drawer-streaming {
 	color: var(--success);
