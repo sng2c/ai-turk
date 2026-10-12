@@ -323,7 +323,7 @@ body {
 .turk-message-wrap {
 	position: relative;
 	margin: var(--box-shadow-width);
-	flex: 0 0 50%; /* 출력창 50% — 그리드 50% (버튼 4×4) */
+	flex: 1 1 50%; /* 기준 50% — 빈 행 숨김으로 남는 공간 흡수(grow) */
 	min-height: 0;
 }
 
@@ -564,8 +564,9 @@ body {
 .turk-grid {
 	display: grid;
 	gap: 0.143rem;
-	flex: 1 1 auto; /* 그리드 영역 50% (출력창 50%) */
-	margin-top: 0.857rem; /* 제거된 컨테이너 gap 보완 (출력창↔그리드 간격 유지) */
+	flex: 0 1 auto; /* 내용(행 수) 크기 — 빈 행 숨김이면 수축, 남는 공간은 출력창으로 */
+	max-height: 50%; /* 비율은 상한 계약 — 전 버튼 그리드(4×4)가 채우는 최대치 */
+	margin-top: 0.857rem;
 	min-height: 0;
 	grid-auto-rows: auto; /* 정사각형 높이 — 행 딱 붙음 */
 	justify-items: stretch; /* 가로 채움 */
@@ -749,12 +750,13 @@ body {
 		padding-bottom: 0.571rem; /* 기본 하단 패딩 */
 	}
 	.turk-message-wrap {
-		flex: 7 7 0%; /* 출력창 70% */
+		flex: 7 7 0%; /* 출력창 70% — 남는 공간 흡수 */
 		max-height: none;
 		min-height: 0;
 	}
 	.turk-grid {
-		flex: 3 3 0%; /* 버튼 30% — 출력창과 7:3 */
+		flex: 0 1 auto; /* 내용 크기 — 4행 꽉 찬 그리드만 상한으로 눌림 */
+		max-height: 30%; /* 7:3 지표를 상한 계약으로 */
 		grid-auto-rows: minmax(0, 1fr); /* 행 = 30% 영역 균등 분할 */
 		align-content: stretch;
 	}
