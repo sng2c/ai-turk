@@ -4,7 +4,7 @@ import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey, reflectUserKey, uuidv4Fallback,
 	emptyState, errState, extractAssistantText, parseTurkJSON,
-	ensurePush, discardPush, Md,
+	ensurePush, discardPush, Md, AlarmCountIcon,
 } from "./lib/turk";
 import type { TurkState, ToolStatus } from "./lib/turk";
 import { kvSet, kvGet } from "./lib/storage";
@@ -1249,7 +1249,7 @@ export default function App() {
 				<button className="turk-drawer-btn" style={{ pointerEvents: "auto" }} onClick={() => setDrawerOpen((v) => !v)} title="대화 목록"><Menu className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (isDraft ? "turk-ico-green" : !connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!isDraft && (!restored || modelChanging || loading || !piReady) ? " turk-logo-bot-spin" : "")} />} AI-Turk</h1>
 				<span className="turk-mode">
-				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title={schedCount > 0 ? `스케줄 관리 — 활성 ${schedCount}개` : "스케줄 관리"} style={{ color: schedCount > 0 ? "var(--success)" : undefined }}><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} />{schedCount > 0 && <sub>{schedCount}</sub>}</button>
+				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title={schedCount > 0 ? `스케줄 관리 — 활성 ${schedCount}개` : "스케줄 관리"} style={{ color: schedCount > 0 ? "var(--success)" : undefined }}>{schedCount > 0 ? <AlarmCountIcon n={schedCount} style={{ width: "1.4em", height: "1.4em" }} /> : <AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} />}</button>
 				<button className="turk-model-btn" onClick={() => {
 					if (menuMode.current === "model") {
 						// 토글 닫기

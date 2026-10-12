@@ -893,8 +893,7 @@ body {
 	font-size: 0.62rem;
 }
 
-.turk-drawer-sch { color: var(--success); display: inline-flex; align-items: center; gap: 0.12em; line-height: 1; font-size: 0.72em; } /* 스케줄 배지 — 녹색·아이콘과 개수 한 줄 정렬(inline-flex center), 개수는 sub급 축소 */
-.turk-drawer-sch .turk-ico { width: 1.15em; height: 1.15em; }
+.turk-drawer-sch { color: var(--success); display: inline-flex; align-items: center; line-height: 1; } /* 스케줄 배지 — 녹색·개수는 아이콘 얼굴 안(AlarmCountIcon) */
 
 .turk-drawer-streaming {
 	color: var(--success);
