@@ -82,11 +82,11 @@ export default function App() {
 	const baseLogoModeRef = useRef<"robot" | "alarm" | "tool">("robot"); // 톨 종료 후 복귀용
 
 	const [sessionId, setSessionId] = useState("");
-	// 마지막 표시 모델 — 부팅 시 localStorage(turk-last-model)로 시딩 (드래프트(#new)·서버 재시작 직후 빈 헤더 해소).
-	// 대화 진입은 합성/라이브 get_state.model이 우선 덮고, 드래프트 선택(pendingModel)도 setCurrentModel로 덮음 —
-	// 시딩값이 잠깐 보였다 정정되는 경합은 수용 (표시용 힌트).
+	// 드래프트(#new) 모델 시딩 — 1순위: 시작시 지정 계약(서버 TURK_PI_MODEL — pi_ready.defaultModel로 캐시).
+	// 새 대화의 실제 시작 모델이 이 값이므로 표시=진실. 미수집(최초 방문 등)은 2순위 마지막 사용 모델 → 빈값.
+	// 대화 진입은 합성/라이브 get_state.model이 우선 덮고, 드래프트 직접 선택(pendingModel)도 setCurrentModel로 덮음.
 	const [currentModel, setCurrentModel] = useState<string>(() => {
-		try { return localStorage.getItem("turk-last-model") ?? ""; } catch { return ""; }
+		try { return localStorage.getItem("turk-default-model") ?? localStorage.getItem("turk-last-model") ?? ""; } catch { return ""; }
 	});
 	// 마지막 씽킹 레벨 — 동일 시딩 관례: 드래프트 부팅 표시. 대화 진입은 합성/라이브 get_state.thinkingLevel이 우선 덮음.
 	const seedThinking = (() => { try { return localStorage.getItem("turk-last-thinking") ?? ""; } catch { return ""; } })();
@@ -382,6 +382,7 @@ export default function App() {
 				// ① 캐시가 현재 VAPID 키와 일치 → 동기 즉시 재전송 (SW를 건드리지 않음 — unsubscribe 레이스 없음)
 				// ② 캐시 없음/키 불일치 → 전체 재구독 (in-flight 가드; 성공 시 캐시 갱신 → 이후는 ① 경로)
 				if (typeof msg.vapidPublicKey === "string") ensurePush(msg.vapidPublicKey, wsRef.current);
+				if (typeof (msg as any).defaultModel === "string" && (msg as any).defaultModel) { try { localStorage.setItem("turk-default-model", (msg as any).defaultModel); } catch { /* 무시 */ } } // 시작시 지정 계약(TURK_PI_MODEL) 캐시 — 드래프트 시딩 1순위
 				// 상태 복원: get_state 응답 대기 — 복원 전까지 dim (last-assistant-text는 브라우저 localStorage)
 				setRestored(false);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));

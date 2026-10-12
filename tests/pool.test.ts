@@ -326,6 +326,15 @@ function newCore(maxSessions: number) {
 	ok("F1b 접속 즉시 pi_ready 합성 — vapidPublicKey 포함·backend 필드 없음",
 		expectMsg(wsNew, 0, "pi_ready") && typeof wsNew.sent[0].vapidPublicKey === "string" && !("backend" in wsNew.sent[0]));
 	ok("F1c 클릭만 한 대화 — 디스크 0 (conversation.json·dir 미생성)", !existsSync(metaFile("f-new")) && !existsSync(join(DATA, "f-new")));
+	// F1e pi_ready에 시작시 지정 계약(defaultModel=TURK_PI_MODEL) 포함 — 드래프트 시딩 원료
+	process.env.TURK_PI_MODEL = "ollama-cloud/test-default";
+	const wsDM = connect(F.core, "f-default");
+	ok("F1e pi_ready 합성에 defaultModel 포함 (TURK_PI_MODEL 계약 — 미지정 시 필드 부재)",
+		expectMsg(wsDM, 0, "pi_ready") && wsDM.sent[0].defaultModel === "ollama-cloud/test-default");
+	delete process.env.TURK_PI_MODEL;
+	const wsDM2 = connect(F.core, "f-default2");
+	ok("F1f TURK_PI_MODEL 미지정 — defaultModel 필드 부재 (pi 자체 기본 위임)",
+		expectMsg(wsDM2, 0, "pi_ready") && !("defaultModel" in wsDM2.sent[0]));
 
 	// F1d dormant get_state 합성 — sessionId="" → 클라 복원 스킵(빈 그리드) 경로. 필드세트는 라이브 보강(onEvent)과 동일 기준
 	wsMessage(wsNew, { type: "get_state" });

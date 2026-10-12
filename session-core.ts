@@ -926,9 +926,11 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		console.log(`[Turk] 연결: ${userKey.slice(0, 8)} (세션 ${sessions.size} · 백엔드 ${activeBackendCount()}/${MAX_BACKENDS})`);
 
 		// 셸 서빙 준비 신호 — 무조건 pi_ready 합성 (backend 필드 없음, vapidPublicKey만 포함 — 푸시 등록은 셸 단계에서도 가능).
+		// defaultModel: 시작시 지정 계약(TURK_PI_MODEL — 미지정 시 pi 자체 기본) — 클라가 캐시해 드래프트(#new)
+		// 시딩의 1순위로 쓴다. 새 대화의 실제 시작 모델 = 이 값 (드래프트에서 직접 고르면 set_model이 덮음).
 		// 클라는 pi_ready를 멱등 소비 — 이후 진짜 백엔드가 기동되면 개별 pi_ready가 도착해 동일 경로(pi_ready→get_state)를 탄다.
 		// cap·스폰 조건과 완전 무관 — 접속 자체가 서빙 가능 상태(빈 그리드든 복원이든)라 뜻.
-		ws.send(JSON.stringify({ type: "pi_ready", vapidPublicKey: VAPID_PUBLIC_KEY }));
+		ws.send(JSON.stringify({ type: "pi_ready", vapidPublicKey: VAPID_PUBLIC_KEY, ...(process.env.TURK_PI_MODEL ? { defaultModel: process.env.TURK_PI_MODEL } : {}) }));
 
 		ws.on("message", (raw) => {
 			try {
