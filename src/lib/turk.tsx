@@ -37,7 +37,7 @@ export const DRAFT_USER_KEY = null;
 
 export function emptyState(rows: number, cols: number): TurkState {
 	return {
-		// 제목(🤖 AI Turk)은 짝박스 위치 — message에는 본문부터
+		// 제목(🤖 Turk)은 짝박스 위치 — message에는 본문부터
 		message: `**LLM 기반 동적 버튼 그리드 컨트롨러**
 
 - ⌨️ **명령/클릭** — 원하는 기능 요청 또는 옵션 선택
@@ -45,7 +45,7 @@ export function emptyState(rows: number, cols: number): TurkState {
 - 🎨 **맞춤 UI** — 대화하며 최적의 인터페이스 생성
 
 > 지금 바로 시작해보세요!`,
-		answerTo: "🤖 AI Turk",
+		answerTo: "🤖 Turk",
 		buttons: Object.fromEntries(
 			Array.from({ length: rows * cols }, (_, i) => [String(i), ""])
 		),
@@ -204,5 +204,5 @@ export function reflectUserKey(key: string | null): void {
 // null = 드래프트(첫 메시지 전) — App.tsx가 connect를 게이트하고 첫 메시지로 승격한다.
 export const TURK_USER_KEY: string | null = resolveUserKey();
 
-// 탭 타이틀은 261010부터 "AI Turk" 고정 — 부트 스크립트(index.html)가 React 마운트 전에
+// 탭 타이틀은 261010부터 "Turk"(261012 축명) 고정 — 부트 스크립트(index.html)가 React 마운트 전에
 // 설정하며 대화 식별은 드로어·푸시 별명이 담당 (채널명 타이틀 계열 제거).

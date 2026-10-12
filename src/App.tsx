@@ -361,7 +361,7 @@ export default function App() {
 		if (!userKeyRef.current) setState(emptyState(rows, cols));
 	}, []);
 
-	// 탭 타이틀은 부트 스크립트(index.html)가 "AI Turk"로 고정 (261010 — 루트 즐겨찾기·채널명 타이틀 제거)
+	// 탭 타이틀은 부트 스크립트(index.html)가 "Turk"로 고정 (261010 — 루트 즐겨찾기·채널명 타이틀 제거)
 
 	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
 	useEffect(() => {
@@ -626,7 +626,7 @@ export default function App() {
 								// setLoading(false) 금지 — loading은 동기 isStreaming 분기가 소유.
 								// 재연결 시 서버가 스트리밍/씽킹중면 dim이 유지되어야 함 (이전 커밋화면은 dim 아래)
 							} else {
-								// lastResponse 없음(실패/빈 응답/서버 재시작) — 이전 입력(lastPrompt) 있으면 짝 캡션으로, 없으면 웰컴 제목(🤖 AI Turk) 유지
+								// lastResponse 없음(실패/빈 응답/서버 재시작) — 이전 입력(lastPrompt) 있으면 짝 캡션으로, 없으면 웰컴 제목(🤖 Turk) 유지
 								const lp = (msg.data as any).lastPrompt;
 								setState({ ...emptyState(gridRef.current.rows, gridRef.current.cols), ...(typeof lp === "string" && lp ? { answerTo: lp } : {}) });
 							}
@@ -1247,7 +1247,7 @@ export default function App() {
 			<header className="turk-header" style={!restored || modelChanging || loading || !piReady ? { pointerEvents: "none" } : undefined}>
 				{/* ☰ 드로어 버튼은 내비게이션(뷰어 행위)이라 대기 중 헤더 잠금(pointerEvents:none)에서 제외 — 자식 auto가 부모 none을 덮는다. 모델·씽킹·스케줄 버튼은 진행 턴에 상태변경을 끼워넣지 않도록 잠금 유지. */}
 				<button className="turk-drawer-btn" style={{ pointerEvents: "auto" }} onClick={() => setDrawerOpen((v) => !v)} title="대화 목록"><Menu className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
-				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (isDraft ? "turk-ico-green" : !connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!isDraft && (!restored || modelChanging || loading || !piReady) ? " turk-logo-bot-spin" : "")} />} AI-Turk</h1>
+				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (isDraft ? "turk-ico-green" : !connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!isDraft && (!restored || modelChanging || loading || !piReady) ? " turk-logo-bot-spin" : "")} />} Turk</h1>
 				<span className="turk-mode">
 				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title={schedCount > 0 ? `스케줄 관리 — 활성 ${schedCount}개` : "스케줄 관리"} style={{ color: schedCount > 0 ? "var(--success)" : undefined }}><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<button className="turk-model-btn" onClick={() => {

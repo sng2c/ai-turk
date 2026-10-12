@@ -139,7 +139,8 @@ is_running() {
 # 기본 .env 인스턴스는 PM2 'turk' 슬롯이 감시(run.sh prod 경로). start/stop은 pm2 위임해야
 # kill→즉시부활 경합이 생기지 않음. --env 커스텀 인스턴스는 기존 nohup 관리 유지.
 is_pm2_slot() {
-  [ "$ENV_FILE" = "$TURK_DIR/.env" ]
+  # 메인 .env = PM2 슬롯(turk) — 단 pm2가 있을때만 (gs2 운영). 로컬(Termux)은 pm2 부재 그 평범 기동 경로로 자연 폴백.
+  [ "$ENV_FILE" = "$TURK_DIR/.env" ] && command -v pm2 >/dev/null 2>&1
 }
 
 # 특정 포트에 묶인 프로세스 종료 (다른 인스턴스 영향 안 줌)

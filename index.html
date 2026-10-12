@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-v3.png" />
-    <meta name="apple-mobile-web-app-title" content="AI Turk" />
+    <meta name="apple-mobile-web-app-title" content="Turk" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/neodgm/neodgm-webfont@latest/neodgm/style.css" />
-    <title>AI Turk</title>
+    <title>Turk</title>
     <script>
       // 최초 로드 동기 반영 — React 마운트 전에 현재 userKey(#해시 우선)를 URL 해시·localStorage에 부여.
       // URL 3상태 계약 (261010 — 새 대화=첫 페이지, 첫 메시지가 대화를 생성):
@@ -32,8 +32,8 @@
           if (k) history.pushState(null, "", "#" + encodeURIComponent(k)); // 마지막 대화 재개 — 주소창·즐겨찾기에 userid 반영 (React 마운트 전)
           // 저장 없음 → 드래프트 — 루트 그대로, 발급 없음 (첫 메시지 시점에 발급)
         }
-        // 탭 타이틀 "AI Turk" 고정 (261010 — 루트 즐겨찾기·채널명 타이틀 제거 — head의 meta도 고정값).
-        // 대화 식별은 드로어 목록과 푸시 별명(AI Turk · <별명>)이 담당.
+        // 탭 타이틀 "Turk" 고정 (261010 — 루트 즐겨찾기·채널명 타이틀 제거 — head의 meta도 고정값).
+        // 대화 식별은 드로어 목록과 푸시 별명(Turk · <별명>)이 담당.
       } catch (e) {}
     </script>
   </head>

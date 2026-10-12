@@ -890,11 +890,11 @@ body {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.3rem;
-	font-size: 0.62rem;
+	font-size: 0.85rem; /* 0.62→0.85 — 인디케이터 가독성 (스크린샷 피드백) */
 }
 
 .turk-drawer-sch { color: var(--success); display: inline-flex; align-items: center; gap: 0.15em; line-height: 1; } /* 스케줄 배지 — 녹색 시계·개수 나란히(읽기 전용 정보) */
-.turk-drawer-sch .turk-ico { width: 1.1em; height: 1.1em; }
+.turk-drawer-sch .turk-ico { width: 1.35em; height: 1.35em; }
 
 .turk-drawer-streaming {
 	color: var(--success);

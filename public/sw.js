@@ -44,7 +44,7 @@ self.addEventListener("push", (event) => {
 	const userKey = typeof data.userKey === "string" && data.userKey ? data.userKey : keyFromUrl(data.url);
 	// userKey 구분 — tag는 키별 독립 슬롯(치환 방식 — 이름변경에도 슬롯 지속성).
 	// 제목: 대화 별명(title) 우선 (261010 — 첫 프롬프트 30자·드로어 이름변경), 없으면 키 표기로 폴백 (구형 페이로드 호환)
-	const title = data.title ? `AI Turk · ${data.title}` : userKey ? `AI Turk #${shortUserKey(userKey)}` : "AI-Turk";
+	const title = data.title ? `Turk · ${data.title}` : userKey ? `Turk #${shortUserKey(userKey)}` : "Turk";
 	const tag = userKey ? `ai-turk-${userKey}` : "ai-turk";
 
 	event.waitUntil(
