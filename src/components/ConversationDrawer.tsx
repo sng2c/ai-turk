@@ -268,7 +268,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 				{/* 계정 섹션 — username 응답(AUTH on)일 때만 렌더 (dev 익명은 통째로 숨김) */}
 				{me && (
 					<footer className="turk-drawer-foot">
-						<span className="turk-drawer-user"><User className="turk-ico" />{me}</span>
+						<span className="turk-drawer-user"><User className="turk-ico" />{authOff ? "싱글 모드" : me}</span>{/* 익명 모드 라벨 — 저장 스코프는 "local" 계정(내부 명칭) */}
 						{!authOff && <button className="turk-drawer-act" onClick={openPwModal}><KeyRound className="turk-ico" />비밀번호 변경</button>}
 						<button className="turk-drawer-act" onClick={openEnvModal}><KeyRound className="turk-ico" />환경 변수</button>
 						{!authOff && <button className="turk-drawer-act" onClick={logout}><LogOut className="turk-ico" />로그아웃</button>}
