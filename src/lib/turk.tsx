@@ -2,6 +2,7 @@
 // 의존: ReactMarkdown, remarkGfm (Md 컴포넌트), 브라우저 API (localStorage/SW/Push).
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { LucideIcon } from "lucide-react";
 import { validateTurkResponse } from "./response-schema";
 
 // ── 응답 검증 — zod 스키마 제거, 공용 JSON Schema(response-schema.ts)로 이원화.
@@ -12,6 +13,7 @@ import { validateTurkResponse } from "./response-schema";
 export interface TurkState {
 	message: string;
 	buttons: Record<string, string>;
+	icons?: Record<string, LucideIcon>; // 클라 메뉴 아이콘(선택) — AI 응답 그리드는 부재(텍스트 라벨만). colors와 동형 구조
 	colors?: Record<string, string>;
 	textColors?: Record<string, string>;
 	schedules?: any[]; // LLM 응답의 schedules 배열 (일회성 명령 — state에 저장하지 않고 즉시 서버로 전송)
