@@ -96,6 +96,15 @@ export default function App() {
 	// 씽킹 레벨 (부팅은 localStorage 시딩 — 드래프트 표시·모델 미지원이면 토글이 정정) — 모델이 지원하는 레벨만 순환 (cycle_thinking_level)
 	const [thinkingLevel, setThinkingLevel] = useState<string>(seedThinking || "off");
 	const [contextPct, setContextPct] = useState<number | null>(null);
+	// ── 현재 대화 스케줄 개수 — 헤더 시계 녹색·sub 표시 원료 ──
+	// 갱신점: pi_ready(복원)·agent_end(스케줄 등록/삭제 턴 직후)·scheduler_trigger(발화 소진) — /api/conversations 1회 판독.
+	const [schedCount, setSchedCount] = useState(0);
+	const refreshSchedCount = () => {
+		if (!userKeyRef.current) { setSchedCount(0); return; } // 드래프트 — 스케줄 없음
+		fetch("/api/conversations").then((r) => r.ok ? r.json() : null).then((j: unknown) => {
+			if (Array.isArray(j)) { const c = (j as any[]).find((x: any) => x?.id === userKeyRef.current); setSchedCount(c?.scheduleCount ?? 0); }
+		}).catch(() => { /* 무시 — 다음 갱신점이 재시도 */ });
+	};
 	const thinkingLevelRef = useRef("off");
 	const supportedThinkingLevelsRef = useRef<string[]>(["off"]); // model.thinkingLevelMap 기반 지원 레벨
 	thinkingLevelRef.current = thinkingLevel;
@@ -387,6 +396,7 @@ export default function App() {
 				setRestored(false);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
+				refreshSchedCount();
 				break;
 			case "pi_starting":
 				setPiReady(false);
@@ -432,6 +442,7 @@ export default function App() {
 				break;
 
 			case "agent_end": {
+				refreshSchedCount(); // 스케줄 등록/삭제 턴 직후 반영
 				// willRetry가 true면 곧 재시도할 예정 — 아직 최종 응답이 아님. 로딩 유지.
 				if (msg.willRetry) {
 					break;
@@ -750,6 +761,7 @@ export default function App() {
 				break;
 			}
 			case "scheduler_trigger":
+				refreshSchedCount(); // 발화 소진(once 제거) 즉시 반영
 				// 백엔드 주입 직전 서버가 전송 → 다음 agent_end 응답에 prefix 부착
 				schedulerTriggerRef.current = { ids: msg.ids, whens: msg.whens };
 				console.log("[debug] scheduler_trigger 수신", msg.ids);
@@ -1237,7 +1249,7 @@ export default function App() {
 				<button className="turk-drawer-btn" style={{ pointerEvents: "auto" }} onClick={() => setDrawerOpen((v) => !v)} title="대화 목록"><Menu className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
 				<h1 title={statusText}>{logoMode === "tool" || logoMode === "alarm" ? <Settings className="turk-ico turk-ico-green turk-logo-gear-spin" style={{ width: "1.5em", height: "1.5em" }} /> : <Bot className={"turk-ico " + (isDraft ? "turk-ico-green" : !connected ? "turk-ico-red" : !piReady ? "turk-ico-amber" : "turk-ico-green") + (!isDraft && (!restored || modelChanging || loading || !piReady) ? " turk-logo-bot-spin" : "")} />} AI-Turk</h1>
 				<span className="turk-mode">
-				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title="스케줄 관리"><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} /></button>
+				<button className="turk-schedule-btn" onClick={() => handleSend("현재 스케줄 목록을 보여줘")} title={schedCount > 0 ? `스케줄 관리 — 활성 ${schedCount}개` : "스케줄 관리"} style={{ color: schedCount > 0 ? "var(--success)" : undefined }}><AlarmClock className="turk-ico" style={{ width: "1.3em", height: "1.3em" }} />{schedCount > 0 && <sub>{schedCount}</sub>}</button>
 				<button className="turk-model-btn" onClick={() => {
 					if (menuMode.current === "model") {
 						// 토글 닫기
