@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu, Eraser, RefreshCw, Check, X, AlertTriangle } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey, reflectUserKey, uuidv4Fallback,
@@ -394,7 +394,7 @@ export default function App() {
 			case "session_error":
 				// 최대 세션 초과 등 — 재연결 중지 (무한 재시도 방지)
 				shouldReconnect.current = false;
-				setState({ message: `${msg.error || "세션 연결 거부됨"}`, buttons: {} });
+				setState({ message: `⚠️ ${msg.error || "세션 연결 거부됨"}`, buttons: {} });
 				setPiReady(false);
 				break;
 			case "session_terminated":
@@ -446,7 +446,7 @@ export default function App() {
 					userSentRef.current = false; // 실패 턴 — clearInput 생략 (입력 유지)
 					schedulerPrefixRef.current = null;
 					wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
-					setState({ ...errState(`응답 실패: ${String(msg.error).slice(0, 200)}`, gridRef.current.rows, gridRef.current.cols), answerTo: answerToRef.current ?? undefined });
+					setState({ ...errState(`⚠️ 응답 실패: ${String(msg.error).slice(0, 200)}`, gridRef.current.rows, gridRef.current.cols), answerTo: answerToRef.current ?? undefined });
 					break;
 				}
 				// 취소로 종료된 턴(stopReason "aborted") — 자가수정 재요청 금지 + 부분 출력 커밋 금지.
@@ -604,7 +604,7 @@ export default function App() {
 						if ((msg.data as any).lastTurnFailed === true && msg.data.isStreaming !== true) {
 							// 실패 복원 — 서버 버퍼에 남은 이전 입력(lastPrompt)을 짝 캡션으로
 							const lp = (msg.data as any).lastPrompt;
-							setState({ ...errState("응답이 실패했습니다. 입력을 다시 전송해주세요.", gridRef.current.rows, gridRef.current.cols), answerTo: typeof lp === "string" && lp ? lp : undefined });
+							setState({ ...errState("⚠️ 응답이 실패했습니다. 입력을 다시 전송해주세요.", gridRef.current.rows, gridRef.current.cols), answerTo: typeof lp === "string" && lp ? lp : undefined });
 						} else {
 							// 복원은 서버 lastResponse 단일 채널 (클라 IndexedDB 캐시 제거됨)
 							const lr = (msg.data as any).lastResponse;
@@ -625,7 +625,7 @@ export default function App() {
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
 					else setLoading(false); // 놓친 agent_end(백그라운드 유실)로 인한 로딩 스틱 해제
 					setThinkingText(""); // fetch 복원 — 백그라운드 전 stale 씽킹 제거, 짝 캡션이 그 자리를 받음
-					if ((msg.data as any).isCompacting === true) { setLoading(true); setThinkingText("컴팩트 진행 중..."); } // 복원 — dim+스트립 (compaction_end까지)
+					if ((msg.data as any).isCompacting === true) { setLoading(true); setThinkingText("🧹 컴팩트 진행 중..."); } // 복원 — dim+스트립 (compaction_end까지)
 					// 처리중 프롬프트 표시 — 재연결/새로고침 후에도 "뭘 기다리는지"를 입력창에 (서버 제공, streaming 중만)
 					if (msg.data.isStreaming && typeof msg.data.lastPrompt === "string" && msg.data.lastPrompt) { draftEchoRef.current = true; setInput(msg.data.lastPrompt); userSentRef.current = true; }
 					// 실패 재시도 에코 — lastTurnFailed 시 마지막 프롬프트 복원. 유저가 이미 새로 타이핑 중이면 보호
@@ -685,10 +685,10 @@ export default function App() {
 				}
 				if (msg.command === "reload" && msg.success) {
 					// 백엔드 재기동 완료 — ack 화면으로 마감. prevState는 sendReload 캡처분 유지:
-					// ctx 메뉴 모드로 두어 모든 선택(확인)이 "어떤 선택이든 메뉴 종료" 흐름으로 닫히게 한다
-					// (확인 = 취소와 동일 — prevState 복원 후 프롬프트 통과 없음).
+					// ctx 메뉴 모드로 두어 모든 선택(✅ 확인)이 "어떤 선택이든 메뉴 종료" 흐름으로 닫히게 한다
+					// (✅ 확인 = 취소와 동일 — prevState 복원 후 프롬프트 통과 없음).
 					menuMode.current = "ctx";
-					setState({ message: "**재로드 완료** — AGENTS.md·스킬·설정이 즉시 반영됐습니다 (다음 메시지부터 새 지시사항).", buttons: { 0: "확인" }, icons: { 0: Check }, answerTo: "컨텍스트" });
+					setState({ message: "🔄 **재로드 완료** — AGENTS.md·스킬·설정이 즉시 반영됐습니다 (다음 메시지부터 새 지시사항).", buttons: { 0: "✅ 확인" }, answerTo: "컨텍스트" });
 				}
 				if (msg.command === "set_thinking_level" && msg.success) {
 					wsRef.current?.send(JSON.stringify({ type: "get_state" }));
@@ -728,7 +728,7 @@ export default function App() {
 				// API 한도/과부하 등 일시 오류 자동 재시도 — dim 중 인디케이터에 표시 (agent_end에서 통일 클리어)
 				const em = String((msg as any).errorMessage ?? "");
 				const brief = em.match(/"message":"([^"]*)"/)?.[1] ?? em.replace(/\s+/g, " ").slice(0, 80);
-				setThinkingText(`재시도 ${(msg as any).attempt}/${(msg as any).maxAttempts} — ${brief} (${Math.round(((msg as any).delayMs ?? 0) / 1000)}초 후)`);
+				setThinkingText(`⚠️ 재시도 ${(msg as any).attempt}/${(msg as any).maxAttempts} — ${brief} (${Math.round(((msg as any).delayMs ?? 0) / 1000)}초 후)`);
 				break;
 			}
 			case "auto_retry_end":
@@ -737,7 +737,7 @@ export default function App() {
 			case "compaction_start":
 				// 수동 컴팩트만 표시 (threshold/overflow 자동 컴팩트는 조용히)
 				if ((msg as any).reason === "manual") {
-					setThinkingText("컴팩트 진행 중..."); // 상태 스트립 — 메인 출력 불변
+					setThinkingText("🧹 컴팩트 진행 중..."); // 상태 스트립 — 메인 출력 불변
 					if (!loading) setLoading(true); // dim — 컴팩트 동안 동시 전송 차단
 				}
 				break;
@@ -1080,10 +1080,10 @@ export default function App() {
 		}
 		if (text === "/compact") {
 			const ws = wsRef.current;
-			if (loading) { setState({ message: "응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
+			if (loading) { setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
 			if (ws?.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({ type: "compact" }));
-				setThinkingText("컴팩트 진행 중..."); // 상태 레이어
+				setThinkingText("🧹 컴팩트 진행 중..."); // 상태 레이어
 				setLoading(true); // dim 즉시 — compaction_start 이벤트 전 구간 커버
 			}
 			return;
@@ -1091,7 +1091,7 @@ export default function App() {
 		if (text === "/reload") {
 			// /reload — 백엔드만 재기동(세션 유지) — /compact 관례: 스트리밍 중 kill 방지 로딩 게이트 + WS 열림 확인.
 			// WS 없음(드래프트·끊김)은 무시 — 드래프트는 앞 분기에서 "/" 명령 차단, /session·/compact 무응답 관례 동일.
-			if (loading) { setState({ message: "응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
+			if (loading) { setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
 			sendReload();
 			return;
 		}
@@ -1109,26 +1109,26 @@ export default function App() {
 		if (menuMode.current === "ctx") {
 			// 컨텍스트 메뉴 — 어떤 선택이든 메뉴 종료 후 처리
 			menuMode.current = "none";
-			if (text === "취소" || text === "확인") {
-				// 취소 — 원래 화면 복원. "확인"은 리로드 완료 ack 닫기 — 동일 복원(프롬프트 통과 금지)
+			if (text === "취소" || text === "✅ 확인") {
+				// 취소 — 원래 화면 복원. "✅ 확인"은 리로드 완료 ack 닫기 — 동일 복원(프롬프트 통과 금지)
 				setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
 				prevStateRef.current = null;
 				return;
 			}
-			if (text === "리로드") {
+			if (text === "🔄 리로드") {
 				// 리로드 — 지시사항·스킬을 다시 읽습니다(대화 유지). prevState는 ctx 진입 시 저장한 메인 출력 그대로 —
-				// 완료 ack 화면(확인) 닫힘 시 복원. loading 게이트(/compact 관례) — 스트리밍 중 kill 방지.
-				if (loading) { prevStateRef.current = null; setState({ message: "응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
+				// 완료 ack 화면(✅ 확인) 닫힘 시 복원. loading 게이트(/compact 관례) — 스트리밍 중 kill 방지.
+				if (loading) { prevStateRef.current = null; setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
 				sendReload();
 				return;
 			}
 			prevStateRef.current = null;
-			if (text === "컴팩트") {
+			if (text === "🧹 컴팩트") {
 				const ws = wsRef.current;
-				if (loading) { setState({ message: "응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
+				if (loading) { setState({ message: "⚠️ 응답 대기 중 — 완료 후 다시 시도하세요", buttons: {} }); return; }
 				if (ws?.readyState === WebSocket.OPEN) {
 					ws.send(JSON.stringify({ type: "compact" }));
-					setThinkingText("컴팩트 진행 중..."); // 상태 레이어
+					setThinkingText("🧹 컴팩트 진행 중..."); // 상태 레이어
 					setLoading(true); // dim 즉시 — compaction_start 이벤트 전 구간 커버
 					setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols)); // 메인 = 출력 즉시 복원
 					prevStateRef.current = null;
@@ -1269,9 +1269,9 @@ export default function App() {
 				const pct = contextPct != null ? `${Math.round(contextPct)}%` : "—";
 				// 모델 선택 메뉴와 동일 레이아웃: 액션 칸 + 마지막 칸 취소(destructive)
 				const btns: Record<string, string> = Object.fromEntries(Array.from({ length: DEFAULT_ROWS * DEFAULT_COLS }, (_, i) => [String(i), ""]));
-				btns["0"] = "컴팩트"; btns["1"] = "리로드"; btns[String(DEFAULT_ROWS * DEFAULT_COLS - 1)] = "취소";
+				btns["0"] = "🧹 컴팩트"; btns["1"] = "🔄 리로드"; btns[String(DEFAULT_ROWS * DEFAULT_COLS - 1)] = "취소";
 				const last = String(DEFAULT_ROWS * DEFAULT_COLS - 1);
-				setState({ message: `**사용률:** \`${pct}\`\n\n컴팩트 — 대화를 유지한 채 오래된 내용을 요약합니다 (컨텍스트 축소·되돌릴 수 없음).\n\n리로드 — 지시사항·스킬을 다시 읽습니다(대화 유지).`, buttons: btns, icons: { 0: Eraser, 1: RefreshCw, [last]: X }, colors: { [last]: "destructive" }, textColors: { [last]: "white" }, answerTo: "컨텍스트" }); // 제목은 짝박스 위치
+				setState({ message: `**사용률:** \`${pct}\`\n\n컴팩트 — 대화를 유지한 채 오래된 내용을 요약합니다 (컨텍스트 축소·되돌릴 수 없음).\n\n리로드 — 지시사항·스킬을 다시 읽습니다(대화 유지).`, buttons: btns, colors: { [last]: "destructive" }, textColors: { [last]: "white" }, answerTo: "컨텍스트" }); // 제목은 짝박스 위치
 			}} title={`컨텍스트 ${contextPct ?? "—"}% — 컴팩트`}>
 					{contextPct != null ? (
 						<span className="turk-ctx"><span className="turk-ctx-bar"><span className="turk-ctx-fill" style={{ width: `${Math.min(100, Math.max(0, contextPct))}%`, background: contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)" }} /><span className="turk-ctx-pct">{Math.round(contextPct)}%</span></span></span>
@@ -1287,7 +1287,7 @@ export default function App() {
 						{toolStatus ? (
 							<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
 						) : (
-							<div className="turk-thinking-text" ref={stripRef}>{(() => { const StripIco = /^(컴팩트|압축)/.test(thinkingText) ? Eraser : /^재시도/.test(thinkingText) ? AlertTriangle : null; return StripIco ? <><StripIco className="turk-ico" style={{ width: "1em", height: "1em", verticalAlign: "-0.15em" }} /> {thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</> : (thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")); })()}</div>
+							<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
 						)}
 					</div>
 				) : null}
