@@ -206,9 +206,11 @@ export const TURK_USER_KEY: string | null = resolveUserKey();
 
 // ── 알람 카운트 아이콘 — lucide AlarmClock에서 시계바늘(M12 9v4l2 2)을 빼고 중앙에 개수 ──
 // 얼굴(circle)+벨+다리는 lucide 원형 그대로 — 활성 스케줄 개수를 얼굴 안에 담는다 (드로어 배지·헤더 시계 공용).
-export function AlarmCountIcon({ n, style }: { n: number; style?: React.CSSProperties }) {
+export function AlarmCountIcon({ n, size = "1.3em", style }: { n: number; size?: string; style?: React.CSSProperties }) {
+	// 숫자 크기 계약: 아이콘 상자(=size) 기준 — 얼굴 지름 ≈ 0.67×size 안에 숫자가 들차게(1자리 0.72×size·2자리 0.55×size).
+	// span 폰트 = size로 세팅해 내부 em이 아이콘 크기에 연동 (주변 텍스트 폰트와 무관 — 가독성 고정).
 	return (
-		<span style={{ ...style, position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
+		<span style={{ ...style, fontSize: size, width: "1em", height: "1em", position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
 				<circle cx="12" cy="13" r="8" />
 				<path d="M5 3 2 6" />
@@ -216,7 +218,7 @@ export function AlarmCountIcon({ n, style }: { n: number; style?: React.CSSPrope
 				<path d="M6.38 18.7 4 21" />
 				<path d="M17.64 18.67 20 21" />
 			</svg>
-			<span style={{ fontSize: "0.52em", fontWeight: 600, letterSpacing: "-0.05em", transform: "translateY(0.06em)" }}>{n}</span>
+			<span style={{ fontSize: n >= 10 ? "0.55em" : "0.72em", fontWeight: 600, letterSpacing: n >= 10 ? "-0.04em" : undefined, transform: "translateY(0.05em)" }}>{n}</span>
 		</span>
 	);
 }

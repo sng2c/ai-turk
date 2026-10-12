@@ -248,7 +248,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 							<button className="turk-drawer-item-main" onClick={() => switchTo(c.id)} title={c.title || c.id}>
 								<span className="turk-drawer-item-title">{c.title || shortUserKey(c.id)}</span>
 								<span className="turk-drawer-badges">
-									{c.scheduleCount > 0 && <span className="turk-drawer-sch" title="스케줄 활성"><AlarmCountIcon n={c.scheduleCount} style={{ width: "1.1em", height: "1.1em" }} /></span>}
+									{c.scheduleCount > 0 && <span className="turk-drawer-sch" title="스케줄 활성"><AlarmCountIcon n={c.scheduleCount} size="1.15em" /></span>}
 									{c.streaming && <span className="turk-drawer-streaming" title="응답 생성 중"><Play className="turk-ico" style={{ width: "0.85em", height: "0.85em", verticalAlign: "-0.1em" }} /></span>}
 									{c.backendState !== "dormant" && <span className={"turk-dot" + (c.backendState === "starting" ? " turk-dot-starting" : "")} title={c.backendState === "starting" ? "기동 중" : "활성"} />}
 								</span>
