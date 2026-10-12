@@ -105,7 +105,7 @@ export default function App() {
 		}).catch(() => { /* 무시 — 다음 갱신점이 재시도 */ });
 	};
 	const thinkingLevelRef = useRef("off");
-	const supportedThinkingLevelsRef = useRef<string[]>(["off"]); // model.thinkingLevelMap 기반 지원 레벨
+	const supportedThinkingLevelsRef = useRef<string[]>(["off", "low", "medium", "high", "xhigh"]); // 초기 = 표준 전체 가정 — 첫 get_state 실측에서 확정 (명시거부만 숨김 계약 — 존재하지 않는 키 접속 셸도 버튼 유지)
 	thinkingLevelRef.current = thinkingLevel;
 	// OFF 순환 감지용: 첫 켜진 레벨(firstLevel)에 다시 도달하면 OFF로
 	const firstThinkingLevelRef = useRef<string | null>(null);
@@ -647,7 +647,7 @@ export default function App() {
 						const mKey = m.provider ? `${m.provider}/${m.name || m.id}` : (m.name || m.id || "");
 						setCurrentModel(mKey);
 						try { localStorage.setItem("turk-last-model", mKey); } catch { /* 무시 */ } // 드래프트·재시작 시딩 원료 — 마지막 표시 모델 보존
-						supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null) : (m.reasoning ? ["off", "high"] : ["off"]);
+						supportedThinkingLevelsRef.current = m.thinkingLevelMap ? THINKING_ORDER.filter(k => (m.thinkingLevelMap as any)[k] != null) : (m.reasoning !== false ? ["off", "high"] : ["off"]); // 부분 기록 모델(과거 실측분)도 미옵션으로 숨기지 않음 — 명시적 거부(false)만 숨김
 					}
 					if (msg.data.thinkingLevel !== undefined) {
 					setThinkingLevel(msg.data.thinkingLevel);
@@ -1283,15 +1283,13 @@ export default function App() {
 				const last = String(DEFAULT_ROWS * DEFAULT_COLS - 1);
 				setState({ message: `**사용률:** \`${pct}\`\n\n컴팩트 — 대화를 유지한 채 오래된 내용을 요약합니다 (컨텍스트 축소·되돌릴 수 없음).\n\n리로드 — 지시사항·스킬을 다시 읽습니다(대화 유지).`, buttons: btns, colors: { [last]: "destructive" }, textColors: { [last]: "white" }, answerTo: "컨텍스트" }); // 제목은 짝박스 위치
 			}} title={`컨텍스트 ${contextPct ?? "—"}% — 컴팩트`}>
-					{contextPct != null ? (() => {
-						// 도넛 링 — SVG 원호(2πr×pct) + 중앙 % — 배터리 바와 다른 형식, 게이지만 링으로
-						const pct = Math.min(100, Math.max(0, contextPct));
-						const col = contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)";
-						// 얇은 링(3.5)+확대(1.35em) + 중앙에 % 숫자 (링과 숫자 통합 — 별도 텍스트 없음)
-						return (<span className="turk-ctx turk-ctx-donut"><svg viewBox="0 0 36 36" className="turk-ctx-ring"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--muted-foreground)" strokeOpacity="0.25" strokeWidth="3.5" /><circle cx="18" cy="18" r="15" fill="none" stroke={col} strokeWidth="3.5" strokeDasharray={`${pct} ${100 - pct}`} pathLength={100} strokeDashoffset={25} strokeLinecap="round" /></svg><span className="turk-ctx-n" style={{ color: col }}>{Math.round(contextPct)}</span></span>);
-					})() : (
-						<span className="turk-ctx turk-ctx-donut" title="컨텍스트 사용률 — 아직 측정값 없음 (첫 발화 후 표시)"><svg viewBox="0 0 36 36" className="turk-ctx-ring"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--muted-foreground)" strokeOpacity="0.25" strokeWidth="3.5" /></svg></span>
-					)}
+					{(() => {
+						// 도넛 — 단일 경로 (261012): 미측정(null)도 같은 렌더 — 원호·중앙 숫자만 생략 (상태 분기 → 모양 분기 금지 계약)
+						const has = contextPct != null;
+						const pct = has ? Math.min(100, Math.max(0, contextPct)) : 0;
+						const col = !has ? "var(--muted-foreground)" : contextPct < 50 ? "var(--success)" : contextPct < 80 ? "#eab308" : contextPct < 95 ? "var(--warning)" : "var(--destructive)";
+						return (<span className="turk-ctx turk-ctx-donut" title="컨텍스트 사용률 (첫 실측 응답부터 표시)"><svg viewBox="0 0 36 36" className="turk-ctx-ring"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--muted-foreground)" strokeOpacity="0.25" strokeWidth="3.5" />{has && <circle cx="18" cy="18" r="15" fill="none" stroke={col} strokeWidth="3.5" strokeDasharray={`${pct} ${100 - pct}`} pathLength={100} strokeDashoffset={25} strokeLinecap="round" />}</svg>{<span className="turk-ctx-n" style={{ color: col, opacity: has ? 1 : 0 }}>{has ? Math.round(contextPct) : 0}</span>}{/* 투명 글자: 미측정에도 글리프 무게 유지 — 옵티컬 균형 */}</span>);
+					})()}
 				</button></span>
 			</header>
 

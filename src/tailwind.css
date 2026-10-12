@@ -271,8 +271,9 @@ body {
 	margin-top: 0.15em;
 }
 
-.turk-ctx-ring { position: absolute; inset: 0; width: 100%; height: 100%; } /* 얼굴 뒤 절대 배치 — 숫자와 중심 공유 */
-.turk-ctx-donut { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 1.35em; height: 1.35em; flex: none; transform: translateY(-0.12em); } /* 도넛 전체를 헤더 라인 기준 위로 */ /* 크기는 박스가 소유 — 링은 절대 채움 */
+.turk-ctx-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
+.turk-ctx-empty { transform: translateY(-0.08em); } /* 빈 도넛 — 측정 상태와 동일 높이 통일 */ /* 얼굴 뒤 절대 배치 — 숫자와 중심 공유 */
+.turk-ctx-donut { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 1.35em; height: 1.35em; flex: none; transform: translateY(-0.13em); } /* 도넛 전체를 헤더 라인 기준 위로 */ /* 크기는 박스가 소유 — 링은 절대 채움 */
 .turk-ctx-n { position: relative; font-size: 0.55em; font-weight: 600; line-height: 1; } /* 링 중앙 % — 36박스 중 얼굴 영역(내경 ~0.66)에 맞춤 */ /* 전체 축소(1.15→1.02) */
 
 .turk-ctx-bar {
@@ -1178,6 +1179,8 @@ body {
 	cursor: pointer;
 	font-size: var(--turk-font-size);
 	padding: 0.143rem 0.286rem;
+	padding-left: 0.071rem; /* 삼선 헤더 왼쪽 끝 밀착 — 시각 좌측 여백 반감 */
+	margin-left: -0.071rem;
 	color: var(--muted-foreground);
 	line-height: 1;
 	transition: opacity 0.1s;
