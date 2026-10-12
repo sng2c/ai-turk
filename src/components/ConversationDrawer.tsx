@@ -17,7 +17,7 @@
  *///
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, User, KeyRound, LogOut, X } from "lucide-react";
+import { Plus, Pencil, Trash2, User, KeyRound, LogOut, X, AlarmClock, Play } from "lucide-react";
 import { shortUserKey } from "../lib/ukey";
 
 // GET /api/conversations 항목 — session-core ConversationSummary와 필드 계약 동일
@@ -247,8 +247,8 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 							<button className="turk-drawer-item-main" onClick={() => switchTo(c.id)} title={c.title || c.id}>
 								<span className="turk-drawer-item-title">{c.title || shortUserKey(c.id)}</span>
 								<span className="turk-drawer-badges">
-									{c.scheduleCount > 0 && <span className="turk-drawer-sch">⏰{c.scheduleCount}</span>}
-									{c.streaming && <span className="turk-drawer-streaming" title="응답 생성 중">▶</span>}
+									{c.scheduleCount > 0 && <span className="turk-drawer-sch" title="스케줄 활성"><AlarmClock className="turk-ico" style={{ width: "0.85em", height: "0.85em", verticalAlign: "-0.1em" }} />{c.scheduleCount}</span>}
+									{c.streaming && <span className="turk-drawer-streaming" title="응답 생성 중"><Play className="turk-ico" style={{ width: "0.85em", height: "0.85em", verticalAlign: "-0.1em" }} /></span>}
 									{c.backendState !== "dormant" && <span className={"turk-dot" + (c.backendState === "starting" ? " turk-dot-starting" : "")} title={c.backendState === "starting" ? "기동 중" : "활성"} />}
 								</span>
 							</button>
