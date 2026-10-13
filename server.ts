@@ -9,7 +9,6 @@
  * 프로덕션: npm start (이 파일이 dist/ + WebSocket + 백엔드)
  */
 
-import { randomBytes } from "node:crypto";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -18,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
 import { loadAccountEnv, setAccountEnv, deleteAccountEnvKey, isEnvKeyName, migrateConversationEnvToAccounts } from "./env-store.ts"; // 4c-refit — 계정별 환경변수 (값 열림=소유자만·upsert·멱듬 삭제·구 대화 env.json 이관 — 모델 컨텍스트로만 값은 0)
-import { createAuthorizer, attemptLogin, clearCookie, changePassword, reconcileUsersWithDisk, loadUsers, saveUsers } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경 · reconcileUsersWithDisk는 Phase 4a 부팅 잔여키 대사
+import { createAuthorizer, attemptLogin, clearCookie, changePassword, reconcileUsersWithDisk, ensureAnonAccount, ANON_ACCOUNT } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경 · reconcileUsersWithDisk는 Phase 4a 부팅 잔여키 대사
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 console.log(`[Turk] __dirname: ${__dirname}`);
@@ -44,17 +43,8 @@ const DIST_DIR = join(__dirname, "dist");
 
 // ── Phase 2 인증 (TURK_AUTH=1 — .env 로더 뒤에서 판정; 미설정=기존 무인증 동작 그대로) ──
 const AUTH = !!process.env.TURK_AUTH;
-const ANON_ACCOUNT = "local"; // AUTH-off 설치의 가상 계정 — 익명 전원이 이 계정의 도서관(env)을 공유. 소유권은 dev 기존 계약(자유) 유지
 const auth = AUTH ? createAuthorizer() : null; // authorize 주입 — session-core는 구조 일치만 요구
-if (!AUTH) {
-	// 익명 계정 보증 — users.json에 "local" 없으면 무비번 계정 생성 (로그인 불가 = 익명성 유지, env 컨테이너로만 존재)
-	const users = loadUsers() ?? { accounts: {} };
-	if (!users.accounts[ANON_ACCOUNT]) {
-		users.accounts[ANON_ACCOUNT] = { salt: randomBytes(16).toString("hex"), hash: randomBytes(64).toString("hex"), userKeys: [], env: {}, createdAt: Date.now() };
-		saveUsers(users);
-		console.log(`[Turk] 익명 도서관 계정 보증: ${ANON_ACCOUNT}`);
-	}
-}
+if (!AUTH) ensureAnonAccount(); // AUTH-off — 익명 도서관 계정 보증 (auth.ts 단일 진원)
 
 // ── 세션 코어 (공용) — .env 로드 후 생성 ─────────────────────────────────
 const anonAuth = AUTH ? null : {
@@ -242,7 +232,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 			const r = setAccountEnv(user, key, value); // 규칙·예약·상한 검증은 env-store 단일 진원
 			if (!r.ok) { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: r.error })); return; }
 			res.writeHead(200, { ...JSONH, "Cache-Control": "no-store" });
-			res.end(JSON.stringify({ ok: true, next: "다음 백엔드 재할당부터 적용" }));
+			res.end(JSON.stringify({ ok: true, next: "새 대화는 시작부터 적용 · 열린 대화는 리로드하면 즉시 적용" }));
 			return;
 		}
 		// DELETE — 멱등 (미존재 ENV_KEY도 ok). false = 계정 미존재·fs 저장 실패뿐

@@ -37,6 +37,18 @@ export interface UsersFile {
 	accounts: Record<string, UserAccount>;
 }
 
+// ── AUTH-off 익명 도서관 — 가상 계정("local") 보증. 무비번(로그인 불가) = 익명성 유지·env 컨테이너로만 존재 ──
+// prod(server.ts)와 dev(vite 플러그인) 양쪽 부팅이 호출 — 단일 진원.
+export const ANON_ACCOUNT = "local";
+export function ensureAnonAccount(): void {
+	const users = loadUsers();
+	if (!users.accounts[ANON_ACCOUNT]) {
+		users.accounts[ANON_ACCOUNT] = { salt: randomBytes(16).toString("hex"), hash: randomBytes(64).toString("hex"), userKeys: [], env: {}, createdAt: Date.now() };
+		saveUsers(users);
+		console.log(`[Turk] 익명 도서관 계정 보증: ${ANON_ACCOUNT}`);
+	}
+}
+
 function usersPath(): string {
 	return join(DATA_DIR, "users.json");
 }

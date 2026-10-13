@@ -41,7 +41,7 @@
 	--secondary: oklch(0.269 0 0);
 	--secondary-foreground: oklch(0.985 0 0);
 	--muted: oklch(0.269 0 0);
-	--muted-foreground: oklch(0.708 0 0);
+	--muted-foreground: rgba(255, 255, 255, 0.72); /* 딤 = 흰색 반투명 — 어둡게 깎는 대신 알파로 (검은 배경에서 명확) */
 	--accent: oklch(0.269 0 0);
 	--accent-foreground: oklch(0.985 0 0);
 	--destructive: oklch(0.62 0.24 25.94);

@@ -13,7 +13,7 @@
  *
  * 환경 모달(4c-refit — 계정 스코프): 값은 절대 화면에 표시하지 않는다 — GET /api/env 는 이름 목록만 주고, 값 입력란은
  * masked(password 스타일). 키의 주인은 계정 — 브라우저가 userKey를 보내지 않고(쿠키 계정 귀속), 현재 대화와 무관하게
- * 언제든 열고 수정. 저장·삭제 후 목록 갱신 + "다음 백엔드 재할당부터 적용" 고정 안내.
+ * 언제든 열고 수정. 저장·삭제 후 목록 갱신 + 안내(새 대화=시작부터·열린 대화=🔄 리로드로 즉시).
  *///
 
 import { useCallback, useEffect, useState } from "react";
@@ -321,7 +321,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 									onKeyDown={(e) => { if (e.key === "Enter") submitEnv(); }} />
 								<button className="turk-drawer-pw-btn" onClick={submitEnv} disabled={envBusy}>{envBusy ? "저장 중..." : "저장"}</button>
 							</div>
-							<div className="turk-env-note">다음 백엔드 재할당부터 적용</div>
+							<div className="turk-env-note">새 대화는 시작부터 적용 · 열린 대화는 🔄 리로드하면 즉시 적용</div>
 							<div className="turk-drawer-pw-msg" role="alert">{envMsg}</div>
 						</div>
 					</div>
