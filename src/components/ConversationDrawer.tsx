@@ -11,8 +11,8 @@
  * AUTH off(dev): /api/me·PATCH/DELETE·/api/passwd·/api/env 서버가 404 응답(계약) → 계정 섹션은 username 응답이
  * 없어 자동 숨김, 액션은 실패 후 목록 갱신으로 무해 수렴. dev에서 개별 API가 없는 것은 의도된 위임 계약.
  *
- * 환경 모달(4c-refit — 계정 스코프): 값은 절대 화면에 표시하지 않는다 — GET /api/env 는 이름 목록만 주고, 값 입력란은
- * masked(password 스타일). 키의 주인은 계정 — 브라우저가 userKey를 보내지 않고(쿠키 계정 귀속), 현재 대화와 무관하게
+ * 환경 모달(4c-refit — 계정 스코프): 값은 소유자(사람)에게 표시한다 (261010 경계 확정 — 사람=열람 허용,
+ * LLM=이름 참조만·값은 프로세스 주입). GET /api/env는 값을 포함하고 입력란도 평문. 키의 주인은 계정 — 브라우저가 userKey를 보내지 않고(쿠키 계정 귀속), 현재 대화와 무관하게
  * 언제든 열고 수정. 저장·삭제 후 목록 갱신 + 안내(새 대화=시작부터·열린 대화=🔄 리로드로 즉시).
  *///
 
@@ -316,7 +316,7 @@ export default function ConversationDrawer({ userKey, onClose }: Props) {
 									onChange={(e) => setEnvKeyInput(e.target.value)}
 									// Enter로 값 입력란으로 자연 이동 — KEY란 Enter도 저장 허용 (값 비어있으면 서버 검증이 안내)
 									onKeyDown={(e) => { if (e.key === "Enter") submitEnv(); }} />
-								<input className="turk-env-input" type="password" autoComplete="off" placeholder="값 — 화면에 표시되지 않습니다" value={envValueInput}
+								<input className="turk-env-input" autoComplete="off" placeholder="값" value={envValueInput}
 									onChange={(e) => setEnvValueInput(e.target.value)}
 									onKeyDown={(e) => { if (e.key === "Enter") submitEnv(); }} />
 								<button className="turk-drawer-pw-btn" onClick={submitEnv} disabled={envBusy}>{envBusy ? "저장 중..." : "저장"}</button>

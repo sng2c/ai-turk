@@ -788,7 +788,7 @@ body {
 	left: 0;
 	bottom: 0;
 	width: min(24rem, 88vw);
-	background: #000;
+	background: var(--card); /* 순검정 → 카드 톤 — 백드롭 위 떠 있는 패널 (env 모달과 동일 처우) */
 	color: #fff;
 	font-family: "NeoDunggeunmo", monospace;
 	z-index: 71;
@@ -1082,7 +1082,7 @@ body {
 
 /* 환경변수 모달 (Phase 4c) — 비번 모달(turk-drawer-pw-*) 톤 계승. 값은 절대 화면에 표시하지 않는다(이름 목록·masked 입력 전용) */
 .turk-env-overlay {
-	position: absolute;
+	position: fixed; /* 뷰포트 기준 — 드로어(384px) 탈출: 크기 계약의 전제 */
 	inset: 0;
 	background: rgba(0, 0, 0, 0.8);
 	z-index: 80;
@@ -1093,11 +1093,11 @@ body {
 }
 
 .turk-env-card {
-	width: 100%;
-	max-width: 320px;
+	width: 92%;
+	max-width: 60rem;
 	max-height: 92%;
 	overflow-y: auto;
-	background: #000;
+	background: var(--card); /* 순검정 → 카드 톤 — 디머(반투명 블랙)와 경계 가독 */
 	color: #fff;
 	font-family: "NeoDunggeunmo", monospace;
 	border: 1px solid #333;
