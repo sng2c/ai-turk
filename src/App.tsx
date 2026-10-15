@@ -156,6 +156,13 @@ export default function App() {
 	const userKeyRef = useRef<string | null>(userKey);
 	userKeyRef.current = userKey; // 매 렌더링 동기화 (handleSend 드래프트 분기는 렌더 대기 없이 직접 갱신도 병행)
 	const wsRef = useRef<WebSocket | null>(null);
+	// 취소 — 소켓이 살아있으면 abort 명령(서버가 agent_end로 완결), 죽었으면 서버 도달 불가라 즉시 dim 해제 +
+	// close로 재연결 유도 (onclose → 재연결 타이머 → pi_ready → get_state → 서버 치유/복원). 유령 턴 취소 불가 방지.
+	const cancelTurn = () => {
+		const ws = wsRef.current;
+		if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "abort" }));
+		else { setLoading(false); wsRef.current?.close(); }
+	};
 	const inputRef = useRef<HTMLInputElement>(null);
 	const isDraft = userKey === null; // 드래프트 — 첫 메시지 전까지 대화(userKey·WS) 없음
 	// ── 드래프트 첫 메시지 파이프라인 ──
@@ -1372,7 +1379,7 @@ export default function App() {
 				}}
 				onKeyDown={(e) => {
 					if (e.key === "Escape" && loading) {
-						wsRef.current?.send(JSON.stringify({ type: "abort" }));
+						cancelTurn();
 					}
 				}}
 			>
@@ -1406,9 +1413,7 @@ export default function App() {
 					type={loading ? "button" : "submit"}
 					className="turk-submit-btn"
 					disabled={!loading && ((!input.trim() && attachments.length === 0) || !piReady)}
-					onClick={loading ? () => {
-						wsRef.current?.send(JSON.stringify({ type: "abort" }));
-					} : undefined}
+					onClick={loading ? (() => { cancelTurn(); }) : undefined}
 				>
 					{loading ? "취소" : "전송"}
 				</button>

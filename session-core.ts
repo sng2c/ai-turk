@@ -434,6 +434,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			// model은 lastModel 존재 시만 포함 — 기능 이전 생성분(실측 이력 없음)은 absent(클라 가드 소비 현행과 동일).
 			// thinkingLevel·messageCount 등은 클라가 가드형 소비(if 존재 검사)이라 absent 허용.
 			if (cmd.type === "get_state") {
+					healStreaming(session); // 유령 스트리밍 — 백엔드 없는 streaming 기록을 복원 전에 해제 (dim 스틱 근원 차단)
 				broadcast(session, {
 					type: "response", command: "get_state", success: true,
 					data: { sessionId: session.agentSessionId ?? "", lastPrompt: session.lastPrompt,
@@ -512,8 +513,20 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			broadcast(session, { type: "agent_start", route });
 		}
 		// 취소 완결 — abort만으론 pi 자동재시도 '지연'을 못 끊음. abort_retry 병행으로 사용자 의도(완전 취소) 보장
-		if (cmd.type === "abort") session.backend?.send({ type: "abort_retry" });
-		session.backend?.send(cmd);
+		if (cmd.type === "abort") {
+			const wasStreaming = session.isStreaming;
+			session.backend?.send({ type: "abort_retry" });
+			session.backend?.send(cmd);
+			// 수신자 없는 취소 — 백엔드가 죽었거나(dormant·크래시) 이 세션에 진행 턴이 없으면 abort에 응답이 영영 없다.
+			// 클라 dim을 즉시 해제시키는 취소 확정 응답을 합성 (취소 = 무조건 완료 계약).
+			if (!session.backend?.alive() || !wasStreaming) {
+				session.isStreaming = false;
+				console.log(`[${session.userKey.slice(0, 8)}] [Abort] 수신자 없는 취소 — 즉시 완결 합성`);
+				broadcast(session, { type: "agent_end", messages: [{ role: "assistant", stopReason: "aborted" }] });
+			}
+			return;
+		}
+		session.backend?.send(cmd)
 	}
 
 	// ── 풀 시맨틱 (1b) — 희소자원=백엔드, 세션 셸은 불멸 ──────────────────────
@@ -560,6 +573,15 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 
 	// ── 1c 대화 레지스트리 — 백엔드 상태 표기 + 목록 ─────────────────────────
 	// dormant(셸만 — 백엔드 null·비alive) / starting(스폰됐지만 ready 전) / active(ready 완료)
+	// 유령 스트리밍 치유 — isStreaming인데 살아있는 백엔드가 없으면(pi kill·스폰 직후 크래시 등) 턴은 더 이상 없다.
+	// get_state 구성점에서 기록을 false로 고친다 — 브로드캐스트 없이도 클라 복원(else setLoading(false))이 dim을 해제.
+	// 취소 불가 유령 턴의 근원 차단 (863bffcb 케이스).
+	function healStreaming(session: Session): void {
+		if (session.isStreaming && session.backend?.alive() !== true) {
+			session.isStreaming = false;
+			console.log(`[${session.userKey.slice(0, 8)}] [Pool] 유령 스트리밍 치유 — 백엔드 없음, isStreaming 해제`);
+		}
+	}
 	function backendStateOf(session: Session): "active" | "dormant" | "starting" {
 		if (session.backend?.alive() !== true) return "dormant";
 		return session.backendReady ? "active" : "starting";
@@ -757,6 +779,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			}
 			// get_state 응답 보강: isStreaming 등 주입
 			const isGetState = ev.type === "response" && ev.command === "get_state";
+			if (isGetState) healStreaming(session); // 유령 스트리밍 치유 — 라이브 경로도 동일 계약
 			if (isGetState) {
 				(ev as any).data = { ...(ev as any).data, lastPrompt: session.lastPrompt, isStreaming: session.isStreaming, route: session.currentRoute, lastResponse: session.lastResponse, lastResponsePrompt: session.lastResponsePrompt, lastTurnFailed: session.lastTurnFailed, backendState: backendStateOf(session) };
 				// lastModel 기록 — 라이브 실측 model을 대화 속성으로 보존 (data.model 원형 JSON 안전 얕은 복사).
