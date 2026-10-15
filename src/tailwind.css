@@ -548,6 +548,39 @@ body {
 	overflow-y: auto;
 }
 
+/* Note: 빈 씽킹 스피너 — 프레임 10개를 세로 스택으로 쌓아 1ch 창에서 steps() 순환 (JS 인터벌 없이 순수 CSS, App 리렌더 부담 없음) */
+.turk-spin {
+	/* 텍스트 스트립(.turk-thinking-text)과 동일 스타일 — 영역 직계 자식이라 상속이 끋기므로 명시 */
+	font-size: calc(var(--turk-font-size) * 0.8);
+	color: var(--muted-foreground);
+	display: inline-block;
+	width: 1ch;
+	flex: 0 0 1ch;
+	height: 1.3em;
+	overflow: hidden;
+	margin-right: 0.4ch; /* 세로 정렬은 부모 .turk-thinking-area의 align-items:center가 담당 */
+}
+.turk-spin-tool {
+	color: var(--warning); /* 툴 상태 표시 중 — 옆 .turk-strip-tool 색과 동일 */
+}
+.turk-spin-inner {
+	display: flex;
+	flex-direction: column;
+	font-style: normal; /* 이탤릭 스트립 내에서도 스피너 글리프는 직립 */
+	animation: turk-spin-cycle 0.8s steps(10) infinite; /* 80ms × 10프레임 */
+}
+.turk-spin-inner > span {
+	height: 1.3em;
+	/* 세로 센터 — 브레일 잉크 중심(박스 중심보다 0.2505em 위)을 텍스트 잉크 중심 0.6185em에 맞춤:
+		inkCenter = (L−1)/2 + 0.2495 = 0.6185 → L = 1.738em (NeoDunggeunmo asc 0.75/desc 0.25, 인접 프레임 블리드 없음 1.731 > 1.3 확인) */
+	line-height: 1.738em;
+	text-align: center;
+}
+@keyframes turk-spin-cycle {
+	from { transform: translateY(0); }
+	to { transform: translateY(calc(-10 * 1.3em)); }
+}
+
 .turk-strip-tool {
 	flex: 1 1 auto;
 	color: var(--warning);

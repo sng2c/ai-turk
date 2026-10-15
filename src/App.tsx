@@ -111,6 +111,7 @@ export default function App() {
 	const firstThinkingLevelRef = useRef<string | null>(null);
 	const thinkingCycleHitsRef = useRef(0);
 	const THINKING_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+	const SPIN_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"; // 브레일 슬라이스 — 브라일 도트는 폰트 기준 0.375em (line-height 보정으로 세로 센터)
 
 	// 스트리밍 상태 (내부 추적용 — UI에 직접 표시하지 않음)
 	const [, setStreamingText] = useState("");
@@ -1299,12 +1300,14 @@ export default function App() {
 			<div className={"turk-strip-slot" + (loading ? "" : " turk-strip-collapsed")}>
 				{/* 인디케이터(씽킹/툴) — 딤(로딩) 중에만 표시·정상 높이. 딤이 아니면 텍스트 숨김+영역 축소(예전 동작).
 					짝(answerTo)은 출력창 top border 레전드로 이동 — 대기 중 이전 입력이 인디케이터 기본값으로 보여 혼동되던 문제 해소 */}
-				{loading && (thinkingText || toolStatus) ? (
-					<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => setThinkingExpanded((v) => !v)}>
+				{loading ? (
+					<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => { if (thinkingText.trim()) setThinkingExpanded((v) => !v); }}>
+						{/* 스피너 — 스트립 왼쪽 고정, 로딩 내내 상시 회전 (툴/씽킹/대기 모두). 색 = 옆 텍스트 색 반영 (툴=warning) */}
+						<span className={"turk-spin" + (toolStatus ? " turk-spin-tool" : "")} aria-hidden="true"><span className="turk-spin-inner">{SPIN_FRAMES.split("").map((ch, i) => <span key={i}>{ch}</span>)}</span></span>
 						{toolStatus ? (
 							<div className="turk-strip-tool"><Wrench className="turk-ico" /> {toolStatus.name}: {toolStatus.args}</div>
 						) : (
-							<div className="turk-thinking-text" ref={stripRef}>{thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")}</div>
+							<div className="turk-thinking-text" ref={stripRef}>{thinkingText.trim() ? (thinkingExpanded ? thinkingText : (thinkingText.split("\n").filter((l) => l.trim()).pop() ?? "")) : "생각중"}</div>
 						)}
 					</div>
 				) : null}
