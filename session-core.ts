@@ -921,7 +921,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	}
 
 	// ── WS 연결·메시지 처리 (prod/dev 공용) ──────────────────────────────────
-	const customCommands = ["restart_pi", "reload", "schedule", "push_subscribe", "attach", "ping", "prepare"];
+	const customCommands = ["restart_pi", "reload", "schedule", "push_subscribe", "attach", "ping"];
 
 	function denyConnection(ws: WebSocket, message: string): void {
 		ws.send(JSON.stringify({ type: "session_error", error: message }));
@@ -993,22 +993,6 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 						const reloaded = ensureBackend(session);
 						console.log(`[${userKey.slice(0, 8)}] [reload] 백엔드 재기동 (세션 유지·${reloaded ? "즉시 재스폰" : "cap-full 거부"})`);
 						broadcast(session, { type: "response", command: "reload", success: reloaded, data: {} });
-					} else if (msg.type === "prepare") {
-						// 프리워밍 — 대화 진입 뷰어의 백엔드를 렌더와 병렬로 미리 기동. 타이핑해 보낼 시점엔 pi 콜드부팅(실측 최대 16s)이
-						// 끝나 있어 첫 메시지가 즉발. 발화 계약 불변: 접속 자체는 무스폰 — 스폰은 이 명식 명령만.
-						// cap 실패는 조용히 스킵 — 이후 발화 경로의 ensure가 재시도 (준비없이 큐잉 — OS 파이프 버퍼).
-						if (!session.backend?.alive()) {
-							// 스폰 스로틀 — 60s 내 5회 초과면 스킵 (pi 크래시 루프 x 불안정 소켓(리커넥트 폭풍) 조합의 무한 리스폰 방지)
-							const now = Date.now();
-							const recent = (piRestartLog.get(session.userKey) ?? []).filter((t) => now - t < 60000);
-							if (recent.length > 5) { console.log(`[${userKey.slice(0, 8)}] [Pool] prepare 스킵 (60s 리스폰 과다)`); }
-							else {
-								recent.push(now);
-								piRestartLog.set(session.userKey, recent);
-								const warmed = ensureBackend(session);
-								console.log(`[${userKey.slice(0, 8)}] [Pool] prepare 프리워밍 → ${warmed ? "스폰 시작" : "cap 스킵"}`);
-							}
-						}
 					} else if (msg.type === "schedule") {
 						console.log(`[${userKey.slice(0, 8)}] [Scheduler] 명령 수신: action=${msg.action} id=${msg.id ?? "-"} when=${msg.when ?? "-"}`);
 						const r = session.scheduler.handle(msg);

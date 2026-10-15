@@ -401,8 +401,6 @@ export default function App() {
 				if (typeof (msg as any).defaultModel === "string" && (msg as any).defaultModel) { try { localStorage.setItem("turk-default-model", (msg as any).defaultModel); } catch { /* 무시 */ } } // 시작시 지정 계약(TURK_PI_MODEL) 캐시 — 드래프트 시딩 1순위
 				// 상태 복원: get_state 응답 대기 — 복원 전까지 dim (last-assistant-text는 브라우저 localStorage)
 				setRestored(false);
-				// 프리워밍 — 실대화 진입과 동시에 백엔드 스폰을 병렬 시작 (pi 콜드부팅 실측 최대 16s — 보낼 때는 준비완료)
-				if (userKeyRef.current) wsRef.current?.send(JSON.stringify({ type: "prepare" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				refreshSchedCount();
