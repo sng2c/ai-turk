@@ -93,6 +93,7 @@ export interface Session {
 	lastPrompt: string | null; // 처리중 사용자 프롬프트 — 재연결 시 "뭘 기다리는지" 입력창 표시용 (isStreaming과 짝)
 	lastResponsePrompt: string | null; // lastResponse가 대답하는 프롬프트 — 응답 상단 짝표시용
 	isStreaming: boolean; // 백엔드 응답 생성 중 여부
+	inCompact: boolean; // pi 컴팩트 턴 진행 중 — turk-JSON 위반 판정·자가수정·실패 마감 제외용 (1회 소비: agent_end에서 해제)
 	lastActivity: number; // 마지막 활동 타임스탬프 (유휴 백엔드 회수 판정용)
 	title: string | null; // 대화 타이틀 (1c) — 첫 유저 프롬프트 30자, null=미확정 (conversation.json 영속)
 	createdAt: number; // 대화 생성 시각 (1c) — conversation.json에서 복원, 세션 재생성 시에도 보존
@@ -700,10 +701,15 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 					console.log(`[${session.userKey.slice(0, 8)}] [Pool] 무WS 비정상 종료 — dormant 전환 (수요 시 재할당)`);
 				}
 			}
+			// 컴팩트 트랙 — 컴팩트 턴의 agent_end(요약문)는 turk-JSON 위반이 아니다: 판정·자가수정·실패 마감에서 제외
+			// (미제외 시 리트라이 2회 소진 → lastTurnFailed=true → 클라 get_state 실패 화면으로 화면 전면 교체 = 컴팩트가 화면을 비우던 버그)
+			if (ev.type === "compaction_start" || ev.type === "compaction_end") session.inCompact = true;
 			// agent_start: 스트리밍 시작
 			if (ev.type === "agent_start") { session.isStreaming = true; session.thinkingBuf = ""; session.textBuf = ""; return; } // pi 것 스킵 — 서버가 이미 합성 전송
 			// agent_end: 스트리밍 종료 + 큐 드레인 + 웹 푸시
 			if (ev.type === "agent_end") {
+				const compactTurn = session.inCompact === true;
+				session.inCompact = false; // 컴팩트 시그니처 1회 소비 — pi 컴팩트 직후의 agent_end가 유일 방문
 				session.isStreaming = false;
 				// 턴 마감 = 대화 활동 — 레지스트리 정렬 기준 즉시 갱신 (라이브·원격(푸시) 공통).
 				// 재시작 후에도 최근 정렬 유지 — touch가 메타 lastActiveAt 영속. 새 턴 없는 대화는 기존 위치 유지(정렬 키 불변).
@@ -715,23 +721,24 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 				const aborted = Array.isArray((ev as any).messages) && (ev as any).messages.some((m: any) => m.role === "assistant" && m.stopReason === "aborted");
 				session.lastTurnFailed = !!(ev as any).error;
 				// 응답 파싱 — JSON Schema 1차 게이트 [스키마=법, 프롬프트=보조 교육]
-				const { parsed: respParsed, valid: respValid, errors: respErrors, text: respText } = parseTurkResponse(ev);
+				// 컴팩트 요약문은 스키마 심사 밖 — 파스 자체 생략 (캐시도 안 넣는다)
+				const { parsed: respParsed, valid: respValid, errors: respErrors, text: respText } = compactTurn ? { parsed: null, valid: false, errors: undefined as unknown as string, text: "" } : parseTurkResponse(ev);
 				if (DEBUG && !respValid && respErrors) console.log(`[${session.userKey.slice(0, 8)}] [Schema] 응답 위반 → 미기록: ${respErrors.slice(0, 200)}`);
 				// 성공/취소 — 자가수정 카운터 리셋
 				if (respValid || aborted) session.parseRetryCount = 0;
 				// 위반(파싱 실패·스키마 미달·빈 텍스트) — 서버 자가수정 대상 (WS 유무 무관)
-				const violated = !session.lastTurnFailed && !aborted && !respValid;
+				const violated = !compactTurn && !session.lastTurnFailed && !aborted && !respValid;
 				const retryPlanned = violated && session.parseRetryCount < SERVER_PARSE_RETRIES;
 				if (retryPlanned) (ev as any).willRetry = true; // 클라 agent_end가 willRetry=true로 전파 — dim 유지, 주입 agent_start가 인계
 				// 취소(aborted)·스키마 위반·silent는 lastResponse 캐시에서 제외 (AGENTS.md 약속: silent = no cache) —
 				// 빈 message 등 위반 응답은 스키마 단계에서 자동 배제 → 이전 가시 화면 복원본 보존
-				if (!session.lastTurnFailed && !aborted && respValid && respParsed?.silent !== true) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; saveLastResponse(session.userKey, ev, session.lastPrompt); } // 응답↔프롬프트 짝 — 파일 영속화(lastPrompt와 대칭)
+				if (!compactTurn && !session.lastTurnFailed && !aborted && respValid && respParsed?.silent !== true) { session.lastResponse = ev; session.lastResponsePrompt = session.lastPrompt; saveLastResponse(session.userKey, ev, session.lastPrompt); } // 응답↔프롬프트 짝 — 파일 영속화(lastPrompt와 대칭)
 				// 실패/자가수정: lastPrompt 유지 — get_state가 재시도 에코로 전달 (실패 화면과 짝); 정상 완결 턴에만 클리어
 				if (!session.lastTurnFailed && !violated) session.lastPrompt = null;
 				// schedules 배열을 서버가 응답에서 직접 스케줄러에 적용 — 클라이언트 릴레이 제거.
 				// 백그라운드(WS 끊김) 트리거에서도 체이닝 재등록이 유실되지 않게 (silent 스킵의 schedules 재등록이 사라지던 버그 수정)
 				// 결과 broadcast는 기존 클라이언트 로직이 소비 — list 자동 재주입(data.text)·오류 피드백(error)
-				if (!session.lastTurnFailed && !aborted && respValid && Array.isArray(respParsed?.schedules)) {
+				if (!compactTurn && !session.lastTurnFailed && !aborted && respValid && Array.isArray(respParsed?.schedules)) {
 					for (const sch of respParsed.schedules) {
 						if (!sch || typeof sch !== "object") continue;
 						const r = session.scheduler.handle(sch);
@@ -748,7 +755,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 				// 서버측 푸시 억제 (261010) — session.ws가 살아있으면 "이 대화를 포그라운드로 보는 탭"이 있다는 뜻
 				// (App이 visibilitychange로 백그라운드 진입 시 WS를 능동 종료하는 계약 기반 — 주소창 해시와 무관).
 				// 다른 대화를 보고 있다면 이 대화의 ws는 0 → 푸시 발송 (다른 대화 알림은 받아야 맞음).
-				if (session.pushSubscription && session.ws.size === 0) sendPushNotification(session, ev);
+				if (!compactTurn && session.pushSubscription && session.ws.size === 0) sendPushNotification(session, ev); // 컴팩트 내부 이벤트는 푸시 안함
 				// ── 서버 자가수정 주입 (broadcast 후 — 이벤트 순서: agent_end(willRetry) → agent_start(재시도 턴)).
 				//    클라 전담 시절엔 백그라운드(WS 끊김) 턴의 위반 응답이 무보정·무기록으로 유실됨 (261008 #chn —
 				//    최종 응답 message 내 미이스케이프 따옴표 1건 → 출력버퍼 기록 누락). 소진 시 실패 확정 마감.
@@ -873,6 +880,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			ws: new Set(),
 			lastResponse: loadLastResponse(userKey)?.ev ?? null, // 영속 버퍼에서 복원 — 재시작·세션 재생성에도 마지막 가시 응답 유지
 			lastTurnFailed: false,
+			inCompact: false,
 			lastPrompt: loadLastPrompt(userKey), // 영속 버퍼에서 복원 — 이전 입력 짝 캡션
 			lastResponsePrompt: loadLastResponse(userKey)?.prompt ?? null,
 			isStreaming: false,
