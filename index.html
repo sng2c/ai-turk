@@ -26,10 +26,14 @@
           // 드래프트 — 첫 메시지 전까지 대화 없음. 발급·저장·pushState 금지 (#new 그대로).
         } else if (h) {
           // 해시 우선 — 세션 오버라이드(딥링크·알림 클릭·드로어 전환)
+          try { sessionStorage.removeItem("turk-ls-resume"); } catch (e) {} // 해시 진입 = 명증 진입 (푸시·북마크·드로어) — 서버 교정 대상 아님
           try { localStorage.setItem("turk-user-key", h); } catch (e) {} // 해시 진입 = 마지막 대화 갱신 → 루트 즐겨찾기가 최근 대화로 재개 (261010, ChatGPT식)
         } else {
           var k = localStorage.getItem("turk-user-key");
-          if (k) history.pushState(null, "", "#" + encodeURIComponent(k)); // 마지막 대화 재개 — 주소창·즐겨찾기에 userid 반영 (React 마운트 전)
+          if (k) {
+            history.pushState(null, "", "#" + encodeURIComponent(k)); // 마지막 대화 재개 — 주소창·즐겨찾기에 userid 반영 (React 마운트 전)
+            try { sessionStorage.setItem("turk-ls-resume", "1"); } catch (e) {} // 이 해시는 localStorage 자동 재개 결과 — 서버 대장(lastActiveAt) 교정 대상 (마르마크)
+          }
           // 저장 없음 → 드래프트 — 루트 그대로, 발급 없음 (첫 메시지 시점에 발급)
         }
         // 탭 타이틀 "Turk" 고정 (261010 — 루트 즐겨찾기·채널명 타이틀 제거 — head의 meta도 고정값).

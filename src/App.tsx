@@ -368,6 +368,30 @@ export default function App() {
 		if (!userKeyRef.current) setState(emptyState(rows, cols));
 	}, []);
 
+	// localStorage 자동 재개(마르마크) 후 서버 대장 교정 — localStorage 키는 '마지막 해시 진입'뿐이라
+	// 낡거나(마지막 푸시 클릭) 기기 관점에 갇힌다. AUTH 환경에서 목록 1위(lastActiveAt 내림)와 비교해
+	// 다르면 location.replace(#1위 → 풀리오드: 부트가 해시·로컬스토리지 재반영). 명확 사용자 진입(푸시·
+	// 북마크·드로어)은 마르마크 없으므로 절대 교정 안함. 401·AUTH-off·빈 목록: 마르마크 해제 후 로컬 유지.
+	useEffect(() => {
+		if (!sessionStorage.getItem("turk-ls-resume") || !TURK_USER_KEY) return;
+		let cancelled = false;
+		(async () => {
+			try {
+				const r = await fetch("/api/conversations");
+				if (!r.ok) throw new Error("registry unavailable");
+				const j: unknown = await r.json();
+				const top = Array.isArray(j) && (j as { id: string }[])[0]?.id;
+				if (cancelled) return;
+				sessionStorage.removeItem("turk-ls-resume");
+				if (top && top !== TURK_USER_KEY) {
+					try { localStorage.setItem("turk-user-key", top); } catch { /* 무시 */ }
+					location.replace("#" + encodeURIComponent(top)); // 풀리오드 — 낡은 로컬키(트레이너 스틱) 해소
+				}
+			} catch { /* 무시 — 로컬 재개 유지 */ }
+		})();
+		return () => { cancelled = true; };
+	}, []);
+
 	// 탭 타이틀은 부트 스크립트(index.html)가 "Turk"로 고정 (261010 — 루트 즐겨찾기·채널명 타이틀 제거)
 
 	// ── 웹 알림 권한 요청 (페이지 진입 시 1회) ──────────────────────────────
