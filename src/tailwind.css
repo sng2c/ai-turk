@@ -346,18 +346,9 @@ body {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 2.4em;
-	height: 2.4em;
-	border: 0.143rem solid var(--foreground);
-	border-radius: var(--radius-md);
-	box-shadow: var(--pixel-box-shadow);
-	background: var(--card);
-	animation: turk-ptr-spin 0.9s steps(12) infinite; /* 픽셀 간격 회전 */
+	will-change: transform; /* 회전각은 touch 핸들러가 당김량 비례로 직접 구동(App.tsx) */
 }
-.turk-ptr-ico .turk-ico { width: 1.3em; height: 1.3em; }
-@keyframes turk-ptr-spin {
-	to { transform: rotate(360deg); }
-}
+.turk-ptr-ico .turk-ico { width: 1.4em; height: 1.4em; }
 
 /* 짝표시(이전 입력) — 출력창 top border 상단에 겹친 라운드 박스.
 	앱 박스 스타일(픽셀 보더+링 섀도우+라운드) 통일 — 출력창 위 떠 있는 라벨

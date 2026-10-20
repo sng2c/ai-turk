@@ -379,6 +379,9 @@ export default function App() {
 				pi.style.opacity = String(Math.min(pull / 110, 1));
 				pi.style.transform = `translateY(${Math.max(0, (gap - 36) / 2)}px)`;
 			}
+			// 회전각 = 당김량 비례 — 임계(200px)에서 정확히 1바퀴 (끝났다 신호가 각도로 읽힘)
+			const ico = document.querySelector(".turk-ptr-ico") as HTMLElement | null;
+			if (ico) ico.style.transform = `rotate(${Math.round((Math.min(pull, 200) / 200) * 360)}deg)`;
 		};
 		const onTE = () => {
 			const fadeOut = () => {
@@ -392,6 +395,12 @@ export default function App() {
 					w.style.transition = "transform 0.18s ease-out";
 					w.style.transform = "";
 					setTimeout(() => { if (w) w.style.transition = ""; }, 220);
+					const ico = document.querySelector(".turk-ptr-ico") as HTMLElement | null;
+					if (ico) {
+						ico.style.transition = "transform 0.25s ease-out"; // 역회전 복귀 — 당긴 각도에서 0°로 되감기
+						ico.style.transform = "rotate(0deg)";
+						setTimeout(() => { if (ico) ico.style.transition = ""; }, 260);
+					}
 				}
 				fadeOut();
 			}
