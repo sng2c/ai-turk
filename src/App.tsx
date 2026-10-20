@@ -363,14 +363,6 @@ export default function App() {
 	// 최초 진입 userKey를 URL hash에 반영 — 드래프트(null)는 미반영 (#new·루트 그대로, 개인 키 유출 없음)
 	useEffect(() => { reflectUserKey(userKeyRef.current); }, []);
 
-	// 주소 해시 정리 — 해시는 딱링크 계약(푸시·북마크·드로어 전환 진입)만. 부트가 소비한 뒤 러닝 세션의 주소는
-	// 언제나 깨끗한 루트("/") — 즐겨찾기·복사 주소에 개인 대화 키가 흡수되지 않음. F5는 localStorage 자동 재개로
-	// 동일 대화 복귀 (부트의 ls-resume 마르마크 → 서버 대장 교정도 계속 작동). replaceState는 hashchange 미발화 —
-	// 러닝 세션 불변 (드로어 전환·딥링크는 계속 해시 경유).
-	useEffect(() => {
-		if (location.hash) history.replaceState(null, "", location.pathname + location.search);
-	}, []);
-
 	// 드래프트 — get_state 복원 경로가 없다(WS 없음) → 환영 화면을 직접 주입 (빈 메시지 화면 방지)
 	useEffect(() => {
 		if (!userKeyRef.current) setState(emptyState(rows, cols));
@@ -1070,7 +1062,7 @@ export default function App() {
 		try { localStorage.setItem("turk-user-key", k); } catch { /* 무시 */ } // 드래프트 해소 — 이 시점부터 재개 기준점
 		setUserKey(k);
 		userKeyRef.current = k; // re-render 대기 없이 직접 갱신 — 직후 connect의 WS URL이 이 키로 나간다
-		try { history.replaceState(null, "", location.pathname + location.search); } catch { /* 무시 */ } // 주소는 깨끗한 루트 유지 — 재개·즐겨찾기 계약 (F5=로컬스토리지 재개=동일 대화)
+		try { history.pushState(null, "", "#" + encodeURIComponent(k)); } catch { /* 무시 */ } // pushState는 hashchange를 유발하지 않음 — 풀리로드 없음
 		pendingFirstMessageRef.current = text; // 첫 메시지 — 셸 pi_ready(합성)에서 플러시
 		pendingFirstAttachRef.current = pendingFilesRef.current.length; // 보류 첨부 — 응답(칩=경로) 전수 도착 후 전송
 		draftEchoRef.current = true; // 전송 예정 텍스트는 초안이 아님 (에코)
