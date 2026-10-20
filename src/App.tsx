@@ -377,7 +377,7 @@ export default function App() {
 			const pi = document.querySelector(".turk-ptr") as HTMLElement | null;
 			if (pi) {
 				pi.style.opacity = String(Math.min(pull / 110, 1));
-				pi.style.transform = `translateY(${Math.max(0, (gap - 36) / 2)}px)`;
+				pi.style.transform = `translateY(${18 - gap / 2}px)`; // 갭 중앙 추적 — 인디케이터가 랩 translate에 타고 내려가므로 그분만큼 역보정
 			}
 			// 회전각 = 당김량 비례 — 임계(200px)에서 정확히 1바퀴 (끝났다 신호가 각도로 읽힘)
 			const ico = document.querySelector(".turk-ptr-ico") as HTMLElement | null;
