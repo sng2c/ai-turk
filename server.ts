@@ -319,7 +319,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 	// ── 정적 게이트 (Phase 2, AUTH시) — 공개 예외 외 미인증: 루트=로그인 페이지 자리서빙(#해시 보존), 나머지 401 ──
 	if (AUTH) {
 		const path = url.pathname;
-		const publicStatic = path === "/sw.js" || path === "/favicon.svg" || path.startsWith("/apple-touch-icon")
+		const publicStatic = path === "/sw.js" || path === "/manifest.webmanifest" || path === "/favicon.svg" || path.startsWith("/apple-touch-icon")
 			|| path.startsWith("/icon-") || path.startsWith("/push-") || path === "/api/health";
 		if (!publicStatic) {
 			const user = auth ? await auth.authorizeRequest(req) : null;

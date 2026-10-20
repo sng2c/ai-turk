@@ -345,6 +345,59 @@ export default function App() {
 		return () => document.removeEventListener("visibilitychange", onVisible);
 	}, [connect]);
 
+	// 세로 당김 새로고침 — 스탠드얼론(주소창 무) 환경에서의 리로드 수단. 메시지 스크롤이 최상단일 때
+	// 아래로 당겨 고무밴드 유리 → 임계(당김 ~200px) 초과 릴리스 = 리로드. 가로 제스처·중간 스크롤은 무시.
+	// 드로어·입력창·그리드에서의 당김은 제외(.turk-message 내부 시작만).
+	useEffect(() => {
+		let startY = 0, startX = 0, pull = 0, armed = false, dragging = false;
+		const wrap = () => document.querySelector(".turk-message-wrap") as HTMLElement | null;
+		const onTS = (e: TouchEvent) => {
+			const t = e.touches[0];
+			startX = t.clientX; startY = t.clientY;
+			const m = document.querySelector(".turk-message") as HTMLElement | null;
+			const inMsg = !!(e.target as Element | null)?.closest?.(".turk-message");
+			armed = inMsg && !!m && m.scrollTop <= 0;
+			dragging = false; pull = 0;
+		};
+		const onTM = (e: TouchEvent) => {
+			if (!armed) return;
+			const t = e.touches[0];
+			const dy = t.clientY - startY, dx = t.clientX - startX;
+			if (!dragging) {
+				if (Math.abs(dx) > Math.abs(dy)) { armed = false; return; } // 가로 제스처 — 회수
+				if (dy > 12) dragging = true;
+				else return;
+			}
+			e.preventDefault();
+			pull = dy;
+			const w = wrap();
+			if (w) w.style.transform = `translateY(${Math.min(Math.round(dy * 0.45), 72)}px)`;
+		};
+		const onTE = () => {
+			if (dragging) {
+				const w = wrap();
+				if (pull > 200) location.reload(); // 당김 확정
+				else if (w) {
+					w.style.transition = "transform 0.18s ease-out";
+					w.style.transform = "";
+					setTimeout(() => { if (w) w.style.transition = ""; }, 220);
+				}
+			}
+			armed = false; dragging = false; pull = 0;
+		};
+		document.addEventListener("touchstart", onTS, { passive: true });
+		document.addEventListener("touchmove", onTM, { passive: false });
+		document.addEventListener("touchend", onTE);
+		document.addEventListener("touchcancel", onTE);
+		return () => {
+			document.removeEventListener("touchstart", onTS);
+			document.removeEventListener("touchmove", onTM);
+			document.removeEventListener("touchend", onTE);
+			document.removeEventListener("touchcancel", onTE);
+		};
+	}, []);
+
+
 	// ── URL hash 런타임 변경 → 세션 전환 (링크 공유/복귀) ─────────────────
 	// 해시 편집·뒤로가기 시 풀리로드 — Chrome same-document 전환은 document.title 갱신이
 	// 히스토리 엔트리·즐겨찾기 다이얼로그에 새로 커밋이 아니라고 반영 안 되는 동작이 있어서(이전 타이틀로 즐겨찾기 저장),
