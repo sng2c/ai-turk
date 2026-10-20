@@ -328,6 +328,37 @@ body {
 	min-height: 0;
 }
 
+/* 당김 새로고침 인지둘 — 당김 공간(랩 위 여백) 중앙에 회전 아이콘. 불투명도·위치는 touch 핸들러가 직접 구동(App.tsx) */
+.turk-ptr {
+	position: absolute;
+	top: -36px;
+	left: 0;
+	right: 0;
+	height: 36px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	opacity: 0;
+	pointer-events: none;
+	color: var(--muted-foreground);
+}
+.turk-ptr-ico {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.4em;
+	height: 2.4em;
+	border: 0.143rem solid var(--foreground);
+	border-radius: var(--radius-md);
+	box-shadow: var(--pixel-box-shadow);
+	background: var(--card);
+	animation: turk-ptr-spin 0.9s steps(12) infinite; /* 픽셀 간격 회전 */
+}
+.turk-ptr-ico .turk-ico { width: 1.3em; height: 1.3em; }
+@keyframes turk-ptr-spin {
+	to { transform: rotate(360deg); }
+}
+
 /* 짝표시(이전 입력) — 출력창 top border 상단에 겹친 라운드 박스.
 	앱 박스 스타일(픽셀 보더+링 섀도우+라운드) 통일 — 출력창 위 떠 있는 라벨
 	대기 중 이전 입력이 인디케이터 기본값으로 보여 현재 대기와 혼동되던 것을 해소 */

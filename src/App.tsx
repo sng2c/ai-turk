@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu } from "lucide-react";
+import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu, RefreshCw } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey, reflectUserKey, uuidv4Fallback,
@@ -370,10 +370,21 @@ export default function App() {
 			}
 			e.preventDefault();
 			pull = dy;
+			const gap = Math.min(Math.round(dy * 0.45), 72); // 드러나는 빈공간 높이 (px)
 			const w = wrap();
-			if (w) w.style.transform = `translateY(${Math.min(Math.round(dy * 0.45), 72)}px)`;
+			if (w) w.style.transform = `translateY(${gap}px)`;
+			// 당김 공간 중앙의 회전 아이콘 — 불투명도는 당김량 팬딩, 위치는 공간 중앙 추적
+			const pi = document.querySelector(".turk-ptr") as HTMLElement | null;
+			if (pi) {
+				pi.style.opacity = String(Math.min(pull / 110, 1));
+				pi.style.transform = `translateY(${Math.max(0, (gap - 36) / 2)}px)`;
+			}
 		};
 		const onTE = () => {
+			const fadeOut = () => {
+				const pi = document.querySelector(".turk-ptr") as HTMLElement | null;
+				if (pi) { pi.style.opacity = "0"; pi.style.transform = ""; }
+			};
 			if (dragging) {
 				const w = wrap();
 				if (pull > 200) location.reload(); // 당김 확정
@@ -382,6 +393,7 @@ export default function App() {
 					w.style.transform = "";
 					setTimeout(() => { if (w) w.style.transition = ""; }, 220);
 				}
+				fadeOut();
 			}
 			armed = false; dragging = false; pull = 0;
 		};
@@ -1398,6 +1410,7 @@ export default function App() {
 			</div>
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
+				<div className="turk-ptr" aria-hidden="true"><span className="turk-ptr-ico"><RefreshCw className="turk-ico" /></span></div>
 				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
 				{canScrollUp && (
 					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로"><ChevronUp className="turk-ico" /></button>
