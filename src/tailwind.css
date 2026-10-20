@@ -82,6 +82,7 @@ body {
 	color: var(--foreground);
 	min-height: 100dvh;
 	font-size: 1rem;
+	overflow: hidden; /* 루트 스크롤 원천 차단 — 가장자리 밀기(플릭 연타)로 상단(헤더·스트립)이 화면 밖으로 밀려나는 것 방지. 내부 스크롤은 .turk-message·.turk-drawer가 전담 */
 }
 
 /* lucide 아이콘 공통 */
@@ -380,6 +381,7 @@ body {
 }
 
 .turk-message {
+	overscroll-behavior-y: contain; /* 스크롤 가장자리 제스처가 body로 사슬이지 않게 — 맨 위에서 플릭 연타해도 상단이 안 밀림 */
 	border-radius: var(--radius-md);
 	background: var(--card);
 	border: 0.143rem solid var(--foreground);
@@ -816,6 +818,7 @@ body {
 }
 
 .turk-drawer {
+	overscroll-behavior-y: contain; /* 목록 가장자리 제스처 체이닝 방지 — 메시지 영역과 동일 계약 */
 	position: fixed;
 	top: 0;
 	left: 0;
