@@ -98,6 +98,8 @@ export interface Session {
 	title: string | null; // 대화 타이틀 (1c) — 첫 유저 프롬프트 30자, null=미확정 (conversation.json 영속)
 	createdAt: number; // 대화 생성 시각 (1c) — conversation.json에서 복원, 세션 재생성 시에도 보존
 	lastActiveAt: number; // 마지막 대화 활동 (1c) — 접속 확정·프롬프트 발화마다 갱신, 레지스트리 정렬 기준
+	lastViewedAt: number; // 마지막 열람 (1c) — 복원 기준 전용(lastActiveAt과 분리). 접속=열람으로 갱신, 백그라운드 턴·푸시는 건드리지 않음
+	lastViewedWritten: number; // 위 갱신의 메타 디스크 기록 직후 시각 — 컴타 소켓 폭풍 대비 쓰기 스로틀
 	currentRoute: "user" | "scheduler" | "tool"; // 현재 프롬프트 경로 — agent_start에 주입
 	parseRetryCount: number; // 서버 자가수정(위반 응답 재시도) 카운터 — 성공·취소·신규 유저입력에서 리셋
 	pendingThinkingLevel?: string; // 열림 무지연 — dormant 동안 수신한 set_thinking_level 큐 (pi_ready 재할당 시 재생 후 소멸)
@@ -238,6 +240,7 @@ interface ConversationMeta {
 	title: string | null;
 	createdAt: number;
 	lastActiveAt: number;
+	lastViewedAt?: number; // 마지막 열람 (선택 — 레거시 파일 부재 허용). 복원 기준 = 이 값 1위 (turn 기반 lastActiveAt와 분리)
 	model?: Record<string, unknown> | null; // 대화별 마지막 실측 모델 (선택 — 기능 이전 메타 부재 허용)
 	ctxPct?: number | null; // 대화별 마지막 실측 컨텍스트 사용률(%) (선택 — 부재 허용)
 	thinkingLevel?: string | null; // 대화별 마지막 실측 씽킹 레벨 (선택 — 부재 허용)
@@ -393,7 +396,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	// 전용 — 첫 발화가 대화의 디스크 시작점(장부 자정). 접속 확정(enterSession) 경로는 게이트 갱신만.
 	// 메타 저장 본체 — model(lastModel)은 선택 필드: 존재 시에만 기록 (기존 title·createdAt·lastActiveAt 보존)
 	function metaPayload(session: Session): ConversationMeta {
-		return { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt, ...(session.lastModel ? { model: session.lastModel } : {}), ...(session.lastContextPct != null ? { ctxPct: session.lastContextPct } : {}), ...(session.lastThinkingLevel != null ? { thinkingLevel: session.lastThinkingLevel } : {}), ...(session.unread ? { unread: true } : {}) };
+		return { title: session.title, createdAt: session.createdAt, lastActiveAt: session.lastActiveAt, lastViewedAt: session.lastViewedAt, ...(session.lastModel ? { model: session.lastModel } : {}), ...(session.lastContextPct != null ? { ctxPct: session.lastContextPct } : {}), ...(session.lastThinkingLevel != null ? { thinkingLevel: session.lastThinkingLevel } : {}), ...(session.unread ? { unread: true } : {}) };
 	}
 	function touchConversationMeta(session: Session, create = false): void {
 		session.lastActiveAt = Date.now();
@@ -888,6 +891,8 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			title: convMeta?.title ?? null, // conversation.json 복원 — 기존 대화면 보존
 			createdAt: convMeta?.createdAt ?? now,
 			lastActiveAt: convMeta?.lastActiveAt ?? now,
+			lastViewedAt: convMeta?.lastViewedAt ?? 0, // 복원 기준 — 파일 부재(신규)는 0(열람 미경험)
+			lastViewedWritten: convMeta?.lastViewedAt ?? 0,
 			lastModel: convMeta?.model && typeof convMeta.model === "object" && !Array.isArray(convMeta.model) ? convMeta.model : null, // 메타 model 복원 — 원형 그대로 (부재·기형 null). 부팅 스윕·재시작 모두 createSession 경유 적재점
 			lastContextPct: typeof convMeta?.ctxPct === "number" ? convMeta.ctxPct : null, // 메타 ctxPct 복원 — 부재·기형 null
 			lastThinkingLevel: typeof convMeta?.thinkingLevel === "string" ? convMeta.thinkingLevel : null, // 메타 thinkingLevel 복원 — 부재·기형 null
@@ -955,6 +960,13 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		// 열람만 한 접속은 lastActiveAt 미갱신 — "대화 없이 열기만 한 대화는 그 자리 유지"(261012).
 		// 클릭만 한(무발화) 대화는 메타 존재 불확정 → 디스크 기록 0 유지.
 		if (session.unread) { session.unread = false; touchConversationMeta(session); }
+		// 마지막 열람 갱신 — 복원 기준. WS 접속=전경 열람 신호(onVisible 계약), 백그라운드 턴 마감·푸시는 이 필드 미건의.
+		// 쓰기 30s 스로틀 — 컴타 전환 소켓의 초당 연결에도 디스크 스톰 없게 (값 동일이면 스킵).
+		session.lastViewedAt = Date.now();
+		if (session.lastViewedAt - session.lastViewedWritten > 30_000) {
+			session.lastViewedWritten = session.lastViewedAt;
+			touchConversationMeta(session);
+		}
 		// 백엔드 기동 제거(열림 무지연·지연 할당) — 접속은 뷰어 신호일 뿐, 프로세스는 작업 명령만 부른다.
 		// 기동 수요 = sendToBackend ensure 목록(prompt·compact) + 스케줄러 트리거 발화만. 접속 직후 클라의
 		// pi_ready→get_state는 dormant 합성 응답으로 즉시 마감 — 스폰·지연·교착 없음(뷰어만으로 풀을 잠그지 않게).
