@@ -108,7 +108,9 @@ export function parseTurkJSON(text: string): { parsed: TurkState } | { error: st
 
 // ── 마크다운 간이 렌더 ────────────────────────────────────────────────
 export function Md({ text }: { text: string }) {
-	return <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>;
+	// remarkGfm({ singleTilde: false }) — GFM 단일 틸드 취소선 오판 차단: "~30분" 같은 근사 표기가 인접 틸드와 맞물려 취소선으로
+	// 뭉치던 것 분리 (micromark 토크나이저 레벨 옵션 — remark-gfm Options 전달 계약, 5.5.6 스타일 플러그인 튜플). 이중 틸드(~~del~~)는 유지.
+	return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>{text}</ReactMarkdown>;
 }
 
 // ── 알림용 텍스트 정제 (마크다운 제거 + 50자) ───────────────────────────
