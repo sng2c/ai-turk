@@ -115,7 +115,9 @@ export function Md({ text }: { text: string }) {
 	// remarkCjkFriendly(+gfm-strikethrough) — CJK 강조 flanking 보정: "**병신합(丙辛合)**이"처럼 닫는 ** 안쪽이 전각 괄호·문장부호,
 	// 바깥쪽이 한글이면 CommonMark right-flanking 규칙이 실패해 **가 그대로 노출되던 것 (commonmark-spec#650).
 	// 순서 계약(공식 README): remarkGfm → remarkCjkFriendly → remarkCjkFriendlyGfmStrikethrough.
-	return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkFriendly, remarkCjkFriendlyGfmStrikethrough]}>{text}</ReactMarkdown>;
+	// ⚠ cjk-gfm-strike는 독자 micromark 확장으로 gfm 취소선 토크나이저를 통째히 대체 — singleTilde 기본 true라
+	// "~취소~"·"~30분" 근사 표기가 다시 취소선으로 뭉치는 회귀 발생. gfm에 부은 singleTilde:false를 동일 전달해야 차단.
+	return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkFriendly, [remarkCjkFriendlyGfmStrikethrough, { singleTilde: false }]]}>{text}</ReactMarkdown>;
 }
 
 // ── 알림용 텍스트 정제 (마크다운 제거 + 50자) ───────────────────────────
