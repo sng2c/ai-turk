@@ -734,7 +734,12 @@ export default function App() {
 							const lrText = lr && Array.isArray(lr.messages) ? extractAssistantText(lr.messages) : "";
 							const lrRes = lrText ? parseTurkJSON(lrText) : null;
 							if (lrRes && "parsed" in lrRes && lrRes.parsed.silent !== true) {
-								commit({ ...lrRes.parsed, answerTo: (msg.data as any).lastResponsePrompt ?? undefined }); // 서버 짝 정보
+								// WS 연결 복원 — 렌더된 내용이 서버 출력버퍼(lastResponse)와 같을 때 갱신 금지:
+								// 동일 커밋의 pop 재생(key 리마운트)·그리드 리레이아웃 플리커 차단 (연결 블립·백그라운드 복귀 무관 무커밋)
+								const p = lrRes.parsed;
+								const ans = ((msg.data as any).lastResponsePrompt ?? (answerToRef.current ?? undefined)) as string | undefined;
+								const sameJson = (x: unknown, y: unknown) => (x === y ? true : JSON.stringify(x ?? null) === JSON.stringify(y ?? null));
+								setState((prev) => (prev.message === p.message && sameJson(prev.buttons, p.buttons) && sameJson(prev.colors, p.colors) && sameJson(prev.textColors, p.textColors) && (prev.answerTo ?? undefined) === ans ? prev : { ...p, answerTo: ans }));
 								// setLoading(false) 금지 — loading은 동기 isStreaming 분기가 소유.
 								// 재연결 시 서버가 스트리밍/씽킹중면 dim이 유지되어야 함 (이전 커밋화면은 dim 아래)
 							} else {
