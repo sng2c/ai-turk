@@ -1,6 +1,8 @@
 // AI Turk 순수 자산 — App.tsx에서 분리된 타입/상수/순수 함수/컴포넌트.
 // 의존: ReactMarkdown, remarkGfm (Md 컴포넌트), 브라우저 API (localStorage/SW/Push).
 import ReactMarkdown from "react-markdown";
+import remarkCjkFriendly from "remark-cjk-friendly";
+import remarkCjkFriendlyGfmStrikethrough from "remark-cjk-friendly-gfm-strikethrough";
 import remarkGfm from "remark-gfm";
 import { validateTurkResponse } from "./response-schema";
 
@@ -110,7 +112,10 @@ export function parseTurkJSON(text: string): { parsed: TurkState } | { error: st
 export function Md({ text }: { text: string }) {
 	// remarkGfm({ singleTilde: false }) — GFM 단일 틸드 취소선 오판 차단: "~30분" 같은 근사 표기가 인접 틸드와 맞물려 취소선으로
 	// 뭉치던 것 분리 (micromark 토크나이저 레벨 옵션 — remark-gfm Options 전달 계약, 5.5.6 스타일 플러그인 튜플). 이중 틸드(~~del~~)는 유지.
-	return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>{text}</ReactMarkdown>;
+	// remarkCjkFriendly(+gfm-strikethrough) — CJK 강조 flanking 보정: "**병신합(丙辛合)**이"처럼 닫는 ** 안쪽이 전각 괄호·문장부호,
+	// 바깥쪽이 한글이면 CommonMark right-flanking 규칙이 실패해 **가 그대로 노출되던 것 (commonmark-spec#650).
+	// 순서 계약(공식 README): remarkGfm → remarkCjkFriendly → remarkCjkFriendlyGfmStrikethrough.
+	return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkCjkFriendly, remarkCjkFriendlyGfmStrikethrough]}>{text}</ReactMarkdown>;
 }
 
 // ── 알림용 텍스트 정제 (마크다운 제거 + 50자) ───────────────────────────
