@@ -769,9 +769,8 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 						const guide = respText
 							? `지난 응답이 올바른 JSON 형식이 아닙니다. JSON.parse 에러: ${errInfo}\n다음 원문을 참고하여, 동일한 내용으로 올바른 JSON 버튼 그리드 하나만 다시 출력하세요. 원문 외 설명/코드펜스 금지.\n\n[잘못된 응답]\n${respText.slice(0, 800)}`
 							: "지난 턴의 출력에 JSON 버튼 그리드가 없습니다. 방금 수행한 작업 결과를 turk JSON 버튼 그리드(message+buttons)로 정리해 출력하세요. 원문 외 설명/코드펜스 금지.";
-						const dt = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric", weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
 						console.log(`[${session.userKey.slice(0, 8)}] [Schema] 응답 위반 → 서버 자가수정 주입 (${session.parseRetryCount}/${SERVER_PARSE_RETRIES}): ${errInfo.slice(0, 120)}`);
-						sendToBackend(session, { type: "prompt", message: `[현재 일시: ${dt} KST]\n\n${guide}` }, { route: "tool" }); // 클라 시절 재시도 계약 동일 — route tool이라 lastPrompt 불변(짝 보존)
+						sendToBackend(session, { type: "prompt", message: guide }, { route: "tool" }); // 클라 시절 재시도 계약 동일 — route tool이라 lastPrompt 불변(짝 보존). [현재 일시] prefix 제거(매턴 노이즈 — 261025)
 					} else {
 						// 재시도 소진 — 실패 확정: lastTurnFailed(입력 에코 유지·get_state 실패 화면) + 실패 전파
 						session.lastTurnFailed = true;

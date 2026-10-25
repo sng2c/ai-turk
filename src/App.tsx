@@ -1085,7 +1085,7 @@ export default function App() {
 		}, 800);
 	};
 
-	// ── 프롬프트 본문 구성 (공용) — 첨부 경로 주입 + 스케줄러 피드백 + 현재 일시 prefix ──
+	// ── 프롬프트 본문 구성 (공용) — 첨부 경로 주입 + 스케줄러 피드백 ──
 	// sendPrompt(대화 전송)·sendFirstMessage(드래프트 첫 프롬프트)가 같은 구성을 받도록 단일화.
 	// 시스템 지시(그리드/프로토콜)는 AGENTS.md(워크스페이스 CWD에 자동생성)로 백엔드가 자동 읽음.
 	// 따라서 메시지에 systemPrompt를 부착하지 않는다 — 중복 제거 + 복원 회귀 방지.
@@ -1101,14 +1101,9 @@ export default function App() {
 			message = `${schedulerFeedbackRef.current}\n\n${message}`;
 			schedulerFeedbackRef.current = null;
 		}
-		// 현재 일시 주입 — LLM은 현재 시각을 모르며, 스케줄 when 계산 등에 필요. 매 턴마다 갱신.
-		const now = new Date();
-		const dt = new Intl.DateTimeFormat("ko-KR", {
-			timeZone: "Asia/Seoul",
-			year: "numeric", month: "long", day: "numeric", weekday: "long",
-			hour: "2-digit", minute: "2-digit", hour12: false,
-		}).format(now);
-		return `[현재 일시: ${dt} KST]\n\n${message}`;
+		// 현재 일시 주입 삭제 — 매턴 이산(노이즈)이었던 관계로 제거. 시각이 필요하면 AGENTS.md 계약대로
+		// 모델이 bash로 직접 조회(스케줄 when 계산시에만). (261025)
+		return message;
 	};
 
 	// ── 드래프트 첫 메시지 플러시 — 셸 pi_ready(합성)에서 즉시 원래 입력을 실제 첫 프롬프트로 ──
