@@ -1100,6 +1100,41 @@ export default function App() {
 		};
 	}, [applyTrack, flipTo]);
 
+	// ── 키보드 숏컷 — 엔터=입력창 포커스(입력창 밖), Esc=취소(턴 취소·메뉴 닫기), ↑↓=페이지 플립 ──
+	// 입력 필드·드로어 내부는 자체 동작 우선(커서 이동·폼 Escape·버튼 활성화 간섭 금지)
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (e.ctrlKey || e.altKey || e.metaKey) return; // 조합 키는 브라우저·OS 소관
+			const t = e.target as HTMLElement | null;
+			const inField = !!t?.closest?.("input, textarea, .turk-drawer");
+			if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+				if (inField) return; // 입력 커서 이동·드로어 목록 스크롤은 자체 동작
+				e.preventDefault();
+				flipTo(e.key === "ArrowDown" ? 1 : -1); // ↓=다음(최신) · ↑=이전(과거)
+				return;
+			}
+			if (e.key === "Escape") {
+				if (inField) return; // 폼 내부 Escape — 폼 onKeyDown(취소)이 담당, 이중 발사 방지
+				if (menuMode.current !== "none") { // 열린 메뉴 닫기 — 취소 버튼과 동일 마무리(원 화면 복원)
+					menuMode.current = "none";
+					setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
+					prevStateRef.current = null;
+					e.preventDefault();
+					return;
+				}
+				if (loading) { cancelTurn(); e.preventDefault(); } // 진행 턴 취소 — 폼 취소 버튼과 동일 계약
+				return;
+			}
+			if (e.key === "Enter") {
+				if (inField || t?.tagName === "BUTTON" || t?.isContentEditable) return; // 필드·포커스된 버튼 활성화·편집은 자체 동작
+				e.preventDefault();
+				inputRef.current?.focus(); // 입력창 밖 엔터 — 곧장 타이핑 시작
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [flipTo, loading]);
+
 	// ── 모델 그리드 렌더 ───────────────────────────────────────────────
 	const renderModelGrid = () => {
 		const models = availableModels.current;
