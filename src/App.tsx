@@ -1075,18 +1075,20 @@ export default function App() {
 		window.addEventListener("touchend", onTouchEnd, { passive: false });
 		window.addEventListener("touchcancel", onTouchEnd, { passive: false });
 
-		// 마우스 휠/트랙패드 — 출력창 위: 스크롤 여지면 네이티브, 경계면 플립 연동. 그 외 화면: 플립 전용
-		let wheelAcc = 0, wheelLast = 0;
+		// 마우스 휠/트랙패드 — 출력창 위: 스크롤 여지면 네이티브, 경계면 플립 연동. 그 외 화면: 플립 전용.
+		// 반응성 계약: 노치 1회(≈100px)에 즉시 플립 — 시간 기반 폐기 금지(연타를 삼켜 둔감해지던 구조),
+		// 플립 애니메이션(190ms) 중에만 폐기하고 마감 직후 다음 노치가 이어받는다. line 모드(Firefox)는 px 환산.
+		let wheelAcc = 0;
 		const onWheel = (e: WheelEvent) => {
 			const t = e.target as HTMLElement;
 			if (t.closest("input, textarea, .turk-drawer")) return; // 입력창·드로어 — 자체 스크롤
 			if (t.closest(".turk-message") && canScroll(curScrollRef.current, e.deltaY)) return; // 출력창 내부 스크롤 여지 — 네이티브
 			e.preventDefault();
-			// 휠 축적으로 플립 (연타 가드 240ms: 플립 애니메이션 폭)
-			const now = performance.now();
-			if (now - wheelLast < 240) return;
-			wheelAcc += e.deltaY;
-			if (Math.abs(wheelAcc) >= 60) { flipTo(wheelAcc > 0 ? 1 : -1); wheelAcc = 0; wheelLast = now; }
+			const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY; // line 모드 휠 → px 환산 (노치 ≈ 3라인 × 33px)
+			if (animFlipRef.current) { wheelAcc = 0; return; } // 플립 진행중 — 마감 후 다음 노치가 받음
+			if ((wheelAcc > 0) !== (d > 0)) wheelAcc = 0; // 방향 전환 — 잔여 축적 초기화
+			wheelAcc += d;
+			if (Math.abs(wheelAcc) >= 60) { flipTo(wheelAcc > 0 ? 1 : -1); wheelAcc = 0; }
 		};
 		window.addEventListener("wheel", onWheel, { passive: false });
 		return () => {
