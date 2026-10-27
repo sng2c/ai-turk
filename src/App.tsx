@@ -1096,7 +1096,7 @@ export default function App() {
 		// 마우스 휠/트랙패드 — 출력창 위: 스크롤 여지면 네이티브, 경계면 플립 연동. 그 외 화면: 플립 전용.
 		// 반응성 계약: 노치 1회(≈100px)에 즉시 플립 — 시간 기반 폐기 금지(연타를 삼켜 둔감해지던 구조),
 		// 플립 애니메이션(190ms) 중에만 폐기하고 마감 직후 다음 노치가 이어받는다. line 모드(Firefox)는 px 환산.
-		let wheelAcc = 0, lastWheelEvAt = 0, wheelRun = false, lastWheelSign = 0; // 런=플립 후 모멘텀 흡수
+		let wheelAcc = 0, lastWheelEvAt = 0, wheelRun = false, lastWheelSign: boolean | null = null; // 런=플립 후 모멘텀 흡수
 		const onWheel = (e: WheelEvent) => {
 			const t = e.target as HTMLElement;
 			if (t.closest("input, textarea, .turk-drawer")) return; // 입력창·드로어 — 자체 스크롤
@@ -1104,7 +1104,7 @@ export default function App() {
 			const wSign = e.deltaY > 0;
 			// 런 해제 — 정숙 150ms(모멘텀 종료) 또는 방향 전환(새 의도·넘침 되돌리기). 이전 300ms 정숙 단일 조건은
 			// 연타 노치(간격<300ms)를 영영 흡수하던 교착의 근원이었다. 모멘텀 이벤트 간격(16~60ms)만 흡수 계약 유지.
-			if (wheelRun && (wNow - lastWheelEvAt > 150 || (lastWheelSign !== 0 && wSign !== lastWheelSign))) wheelRun = false;
+			if (wheelRun && (wNow - lastWheelEvAt > 150 || (lastWheelSign !== null && wSign !== lastWheelSign))) wheelRun = false;
 			lastWheelEvAt = wNow;
 			lastWheelSign = wSign;
 			const inBox = !!t.closest(".turk-message");
