@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 // @tailwindcss/vite 제거 — @tailwindcss/postcss 전환 (CSS HMR full-reload 방지, tailwindlabs/tailwindcss#19903)
 import { WebSocketServer } from "ws";
-import { createSessionCore } from "./session-core.ts";
+import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
 import { ensureAnonAccount, ANON_ACCOUNT } from "./auth.ts"; // 익명 도서관 — prod와 동일 진원
 import { loadAccountEnv, setAccountEnv, deleteAccountEnvKey } from "./env-store.ts"; // env 저장소 단일 진원
 
@@ -43,6 +43,19 @@ function turkPlugin(): Plugin {
 			});
 
 			wss.on("connection", (ws, req) => core.handleConnection(ws, req));
+
+			// 히스토리 뷰어 — GET /api/conversations/<key>/history (dev 무인증 경로 — prod server.ts의 3단 검증 대응체).
+			// 기존 "/api/conversations" 마운트보다 먼저 등록: connect 마운트(/api/conversations)는 서브패스도 흡수하므로
+			// 여기서 history 패턴만 소비하고 나머지는 next()로 통과시킨다.
+			server.middlewares.use("/api/conversations", (req, res, next) => {
+				if (req.method !== "GET" || !/^\/[^/]+\/history\/?$/.test(req.url || "")) { next(); return; } // 목록 라우트 등 — 통과
+				let id = "";
+				try { id = decodeURIComponent((req.url || "").replace(/^\//, "").replace(/\/history\/?$/, "")); } catch { id = ""; }
+				res.setHeader("Content-Type", "application/json");
+				res.setHeader("Cache-Control", "no-store");
+				if (!verifyUserKeyFormat(id)) { res.statusCode = 400; res.end(JSON.stringify({ error: "대화 키 형식이 올바르지 않습니다" })); return; }
+				res.end(JSON.stringify({ turns: core.readConversationHistory(id) }));
+			});
 
 			// 1c 대화 레지스트리 — prod server.ts와 동일 단일 진원 (core.listConversations())
 			server.middlewares.use("/api/conversations", (_req, res) => {

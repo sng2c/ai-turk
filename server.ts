@@ -290,6 +290,22 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 	// ── 개별 대화 관리 (Phase 3) — rename(PATCH)·delete(DELETE). AUTH off → 404 (dev 무인증 — vite는 수정 금지,
 	// dev에서 이 API가 없는 것은 의도된 계약). 순서 계약: ①형식검증 → ②쿠키 인증 → ③소유권 own만 (fs rm 경로조작 방어) ──
 	const CONV_PREFIX = "/api/conversations/";
+	// ── 히스토리 뷰어 — GET /api/conversations/<key>/history. PATCH/DELETE와 동일 3단 검증(형식→쿠키 인증→소유권 own).
+	// 읽기 전용이라도 대화 본문은 계정 자산 — orphan·foreign까지 열어주지 않는다 (무인증 dev은 vite 미들웨어가 담당).
+	if (req.method === "GET" && url.pathname.startsWith(CONV_PREFIX) && /\/history\/?$/.test(url.pathname)) {
+		if (!AUTH) { res.writeHead(404, JSONH); res.end(JSON.stringify({ error: "인증 비활성" })); return; }
+		let id = "";
+		try { id = decodeURIComponent(url.pathname.slice(CONV_PREFIX.length, url.pathname.length - "/history".length)); } // 키 부분만 — 끝의 /history 절편 제거
+		catch { id = ""; }
+		if (!verifyUserKeyFormat(id)) { res.writeHead(400, JSONH); res.end(JSON.stringify({ error: "대화 키 형식이 올바르지 않습니다" })); return; } // ①
+		const user = auth ? await auth.authorizeRequest(req) : null;
+		if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; } // ②
+		if (auth?.checkConversation(user, id) !== "own") { res.writeHead(403, JSONH); res.end(JSON.stringify({ error: "권한 없음" })); return; } // ③
+		res.writeHead(200, JSONH);
+		res.end(JSON.stringify({ turns: core.readConversationHistory(id) })); // 스폰 0 — 세션 JSONL 직접 판독
+		return;
+	}
+
 	if (url.pathname.startsWith(CONV_PREFIX) && (req.method === "PATCH" || req.method === "DELETE")) {
 		if (!AUTH) { res.writeHead(404, JSONH); res.end(JSON.stringify({ error: "인증 비활성" })); return; }
 		let id = "";

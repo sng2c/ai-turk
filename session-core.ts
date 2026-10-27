@@ -38,8 +38,8 @@ import { ensureAgentsMd, applyEnvSection } from "./src/lib/agents-md-server.ts";
 import envPaths from "env-paths";
 import webpush from "web-push";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, readdirSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
+import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, readdirSync, statSync } from "node:fs";
 
 const DATA_DIR = envPaths("ai-turk").data;
 
@@ -68,6 +68,44 @@ export function verifyUserKeyFormat(key: string): boolean {
 // agent-session-id(세션)·schedules.json(스케줄)·conversation.json(메타) 중 하나라도 있으면 대화.
 // 루트의 파일(vapid.json 등)·상태 파일 없는 빈 디렉토리는 제외. 결과는 알파벳 정렬(스캔 결정성 — 테스트·로그 재현).
 const CONVERSATION_STATE_FILES = ["agent-session-id", "schedules.json", "conversation.json"] as const;
+
+// ── 히스토리 리더 상수/헬퍼 (출력 페이지 뷰어) ──
+// 서버 자가수정 주입 프롬프트 식별 전위 — 히스토리 턴 경계에서 제외된다 (아래 readConversationHistory).
+const RETRY_Q_PREFIXES = [
+	"지난 응답이 올바른 JSON 형식이 아닙니다.",
+	"지난 턴의 출력에 JSON 버튼 그리드가 없습니다.",
+] as const;
+const HISTORY_MAX_TURNS = 300; // 최근 턴 상한 — 페이로드 절약 (전체 로그 중 꼬리)
+
+// pi 세션 파일 위치 — ~/.pi/agent/sessions/<sanitized-cwd>/<timestamp>_<session-id>.jsonl.
+// cwd 치환 규칙을 재현하지 않고 session-id(UUID) 파일명 접미로 전 트리에서 역탐색(충돌 불가 — 커스텀 --session-id).
+function findSessionFile(sessionId: string): string | null {
+	const root = join(homedir(), ".pi", "agent", "sessions");
+	let best: string | null = null, bestMtime = 0;
+	try {
+		for (const d of readdirSync(root, { withFileTypes: true })) {
+			if (!d.isDirectory()) continue;
+			const dir = join(root, d.name);
+			let files: string[];
+			try { files = readdirSync(dir); } catch { continue; }
+			for (const f of files) {
+				if (!f.endsWith(`_${sessionId}.jsonl`)) continue;
+				try {
+					const m = statSync(join(dir, f)).mtimeMs;
+					if (m > bestMtime) { bestMtime = m; best = join(dir, f); } // 동일 id 파일(레어) — 최신본
+				} catch { /* 무시 */ }
+			}
+		}
+	} catch { return null; } // sessions dir 미존재 — pi 세션 없음
+	return best;
+}
+
+// AgentMessage 텍스트 블록 적출 — content가 배열이면 text 블록 join, 문자열이면 그대로
+function agentMessageText(m: any): string {
+	if (typeof m?.content === "string") return m.content;
+	if (Array.isArray(m?.content)) return m.content.filter((b: any) => b?.type === "text" && typeof b.text === "string").map((b: any) => b.text).join("\n");
+	return "";
+}
 export function scanConversationDirs(dataDir: string): string[] {
 	try {
 		return readdirSync(dataDir, { withFileTypes: true })
@@ -147,8 +185,21 @@ export interface SessionCore {
 	ensureBackend(session: Session): boolean; // 풀 할당 — 멱등(alive면 no-op). cap 도달 시 유휴 LRU victim 회수 후 할당, victim 없으면 false
 	reclaimSweep(): number; // 유휴 백엔드 회수 스윕 1회 실행 (60s 인터벌 + 테스트·수동 트리거용) — 회수 수 반환
 	listConversations(username?: string): ConversationSummary[]; // 대화 레지스트리 목록 (1c) — authorize 주입 시 username의 own만 필터 (orphan·foreign 제외)
+	readConversationHistory(userKey: string): HistoryTurn[]; // 히스토리 리더 — pi 세션 JSONL에서 활성 브랜치 턴 목록 (페이지 뷰어 원료). 스폰 없이 디스크 직접 판독
 	renameConversation(userKey: string, title: string): boolean; // 대화 이름 변경 (Phase 3) — 세션 셸·conversation.json 동시 갱신. 형식 위반·미존재 → false
 	deleteConversation(userKey: string): boolean; // 대화 삭제 (Phase 3) — 셸 제거(removeSession 재사용) + 데이터·워크스페이스 dir 소멸. 멱등 — 형식 위반만 false
+}
+
+// 히스토리 턴 — GET /api/conversations/<key>/history 응답 항목 (시간순).
+// q = 원 유저 프롬프트(첨부 경로 주입 포함 원문), a = 최종 assistant 텍스트(터크 JSON 원문 — 클라가 parseTurkJSON로 해석),
+// id = assistant 엔트리 id·qId = user 엔트리 id (Phase 2 분기 fork 원료), model/ts = 페이지 헤더 표시용.
+export interface HistoryTurn {
+	id: string;
+	qId: string;
+	q: string;
+	a: string;
+	model?: string;
+	ts?: string;
 }
 
 // 대화 레지스트리 항목 (1c) — GET /api/conversations 응답 본체
@@ -609,6 +660,63 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		}));
 		list.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
 		return list;
+	}
+
+	// ── 히스토리 리더 (출력 페이지 뷰어) — pi 세션 JSONL에서 활성 브랜치 턴 목록을 읽는다 ──
+	// 백엔드 스폰 없이 디스크 직접 판독(appendFileSync 동기 플러시 — agent_end 시점 이미 기록완료) —
+	// dormant 대화도 즉시 서빙. claude 백엔드(세션 파일 없음)·미발화 대화는 빈 목록 → 클라가 단일 페이지로 동작.
+	// 활성 브랜치 = 마지막 엔트리→루트 경로(pi buildSessionPath 계약 — leaf 미지정시 append 순 마지막).
+	// 서버 자가수정 재시도 프롬프트는 턴 경계에서 제외(원 질문 승계), aborted 최종응답은 미완 턴으로 배제.
+	function readConversationHistory(userKey: string): HistoryTurn[] {
+		if (!verifyUserKeyFormat(userKey)) return [];
+		const sid = loadAgentSessionId(userKey);
+		if (!sid) return [];
+		const file = findSessionFile(sid);
+		if (!file) return [];
+		let raw: string;
+		try { raw = readFileSync(file, "utf-8"); } catch { return []; }
+		const entries: any[] = [];
+		const byId = new Map<string, any>();
+		for (const line of raw.split("\n")) {
+			const s = line.trim();
+			if (!s) continue;
+			try {
+				const e = JSON.parse(s);
+				if (e?.type === "session") continue; // 헤더는 트리 밖
+				entries.push(e);
+				if (e?.id) byId.set(e.id, e);
+			} catch { continue; } // 끊긴 꼬리 라인 — 무시
+		}
+		// 활성 브랜치 — 마지막 엔트리부터 parentId를 따라 루트까지, 뒤집어 시간순으로
+		const path: any[] = [];
+		let cur: any = entries[entries.length - 1] ?? null;
+		while (cur) { path.push(cur); cur = cur.parentId ? (byId.get(cur.parentId) ?? null) : null; }
+		path.reverse();
+		// 턴 구성 — user 프롬프트로 시작, 턴 내 마지막 assistant 텍스트(도구 체인의 최종응답)로 마감.
+		// 재시도 주입은 user 프롬프트지만 턴 경계가 아니다(원 질문 승계) — skip해 다음 assistant가 a를 덮어쓴다.
+		const turns: HistoryTurn[] = [];
+		let q: string | null = null, qId = "";
+		let a: string | null = null, aId = "", model: string | undefined, ts: string | undefined;
+		const flush = () => {
+			if (q != null && a != null) turns.push({ id: aId, qId, q, a, ...(model ? { model } : {}), ...(ts ? { ts } : {}) });
+			q = null; a = null; model = undefined; ts = undefined;
+		};
+		for (const e of path) {
+			if (e.type !== "message") continue; // model_change·compaction 등은 표시에서 제외
+			const m = e.message ?? {};
+			if (m.role === "user") {
+				const text = agentMessageText(m);
+				if (!text) continue;
+				if (RETRY_Q_PREFIXES.some((p) => text.startsWith(p))) continue; // 서버 자가수정 주입 — 턴 경계 아님
+				flush();
+				q = text; qId = String(e.id ?? "");
+			} else if (m.role === "assistant" && m.stopReason !== "aborted") {
+				const text = agentMessageText(m);
+				if (text) { a = text; aId = String(e.id ?? ""); model = typeof m.model === "string" ? m.model : undefined; ts = typeof e.timestamp === "string" ? e.timestamp : undefined; }
+			}
+		}
+		flush();
+		return turns.slice(-HISTORY_MAX_TURNS); // 최근순 상한 — 페이로드 절약 (컴팩션 이전 포함 전체 중 꼬리)
 	}
 
 	// ── 개별 대화 관리 (Phase 3) — 드로어 항목 PATCH/DELETE의 단일 진원 ──
@@ -1094,5 +1202,5 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		iv.unref?.(); // 서버 생명 유지 책임은 listen 쪽 — keepalive가 프로세스를 붙잡지 않게 (dev·prod 동일)
 	}
 
-	return { sessions, maxSessions: MAX_BACKENDS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive, ensureBackend, reclaimSweep, listConversations, renameConversation, deleteConversation };
+	return { sessions, maxSessions: MAX_BACKENDS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive, ensureBackend, reclaimSweep, listConversations, readConversationHistory, renameConversation, deleteConversation };
 }

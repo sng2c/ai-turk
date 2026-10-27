@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { Bot, ChevronUp, ChevronDown, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu, RefreshCw } from "lucide-react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
+import { Bot, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu, RefreshCw } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey, reflectUserKey, uuidv4Fallback,
@@ -13,6 +13,14 @@ import ConversationDrawer from "./components/ConversationDrawer";
 // 모바일(터치) 감지 — 모바일에서는 자동 포커스로 가상 키보드 자동 노출 방지
 const IS_FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(hover: hover) and (pointer: fine)")?.matches === true;
 
+// ── 출력 히스토리 페이저 — 서버 대화 로그(pi 세션)를 1턴 1페이지로 넘겨보기 ──
+// PageTurn: 서버 /history 턴을 클라 소비형으로 구운 것 (parsed = turk JSON 해석본, 실패시 null→원문 표시)
+type PageTurn = { id: string; qId: string; q: string; a: string; parsed: TurkState | null; model?: string; ts?: string };
+// PageView: 페이저 페이지 — 과거 턴 or live(현행 state). 최신이 아래(마지막 페이지 = live)
+type PageView = { kind: "past"; turn: PageTurn } | { kind: "live" };
+// 첨부 경로 주입 헤더 제거 — 히스토리 질문 표시는 순수 유저 입력만 (composePrompt 원문 중 display용 박리)
+const stripAttachHeader = (q: string) => q.replace(/^\[첨부 파일 — 아래 경로를 read 도구로 읽어 확인하세요\]\n(?:- .*\n)+\n?/, "").trim();
+
 // ── 앱 ─────────────────────────────────────────────────────────────────
 export default function App() {
 	const rows = DEFAULT_ROWS;
@@ -24,9 +32,13 @@ export default function App() {
 		setRawState((prev: TurkState) => {
 			const newState = typeof next === "function" ? next(prev) : next;
 			if (newState.message !== prev.message) msgVerRef.current = msgVerRef.current ? 0 : 1;
+			// 그리드 리마운트(스태거드 btn-enter)는 실제 버튼·색 변화시에만 — 복원 setState마다
+			// 그리드 전체가 "재등장"하는 것을 차단 (생각중 재접속·answerTo만 바뀐 복원 등)
+			if (JSON.stringify(newState.buttons) !== JSON.stringify(prev.buttons)
+				|| JSON.stringify(newState.colors) !== JSON.stringify(prev.colors)
+				|| JSON.stringify(newState.textColors) !== JSON.stringify(prev.textColors)) gridVerRef.current = gridVerRef.current ? 0 : 1;
 			return newState;
 		});
-		gridVerRef.current = gridVerRef.current ? 0 : 1;
 	}, []);
 
 	// 최종 화면 커밋 — 과도 뷰(모델 선택/세션 상세)는 이것을 쓰지 않음 (히스토리 기능 제거 — setState 별칭)
@@ -137,19 +149,79 @@ export default function App() {
 	// schedulerPrefixRef: scheduler_trigger로부터 생성된 prefix → setState 시 message 앞에 부착
 	const schedulerPrefixRef = useRef<string | null>(null);
 
-	// 메시지 박스 스크롤 — 출력 업데이트 시 맨 위로, 스크롤 포지션에 따라 화살표 표시
-	const messageRef = useRef<HTMLDivElement | null>(null);
-	const dragState = useRef<{ active: boolean; moved: boolean; lastY: number; velocity: number; lastTime: number }>({ active: false, moved: false, lastY: 0, velocity: 0, lastTime: 0 });
-	const inertiaRef = useRef<number | null>(null);
-	const [canScrollUp, setCanScrollUp] = useState(false);
-	const [canScrollDown, setCanScrollDown] = useState(false);
+	// ── 출력 히스토리 페이저 — 1턴 1페이지 책넘기기. pages = [과거 턴…] + [live(현행 state)] ──
+	// 새 출력 커밋·복원·메뉴는 live(마지막)로 점프(현행 “출력 시 맨 위” 계약의 페이저판).
+	// 드래그/휠: 화면(출력창 밖) 제스처는 페이지 플립(과거 이동) 전용.
+	// 출력창(.turk-message) 내부 — 그 방향으로 스크롤 여지가 있으면 네이티브 스크롤, 경계(맨 위↔맨 아래)에서
+	// 같은 제스처로 페이지 플립 연동: 맨 위에서 아래로 당김 = 과거, 맨 아래에서 위로 밀기 = 최신.
+	const [histTurns, setHistory] = useState<PageTurn[]>([]); // 서버 히스토리 턴(시간순) — fetchHistory 원료 (history≠window.history)
+	const [pageIdx, setPageIdx] = useState(0); // 현재 페이지 인덱스 — pages[pageIdx]
+	const pageIdxRef = useRef(0);
+	pageIdxRef.current = pageIdx; // 매 렌더링 동기화 — 핸들러·타이머가 최신값 참조
+	const pagesLenRef = useRef(1);
+	const wasAtLastRef = useRef(true); // history 교체 시점의 “마지막 페이지 보던 여부” — fetch 완료 후 점프/클램프 결정
+	const pagerRef = useRef<HTMLDivElement | null>(null); // 페이저 뷰포트 — 슬롯 높이 원천
+	const trackRef = useRef<HTMLDivElement | null>(null); // 3슬롯 트랙 — translateY 직접 구동(드래그·플립 애니메이션)
+	const curScrollRef = useRef<HTMLDivElement | null>(null); // 현재 페이지 스크롤러(.turk-message) — 터치·휠·당김 대상
+	const animFlipRef = useRef(false); // 플립 애니메이션 진행중 — 중복 플립·드래그 경합 가드
+	const flipTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined); // 플립 마감 타이머 — 인디케이터 점프 등이 선점 취소
+	const liveRawRef = useRef<string>(""); // live 페이지 원문(assistant 텍스트) — history 꼬리 중복 판별(서버 최신턴 == 현재 화면)
+	const histTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined); // 턴 완결 후 재동기 디바운스
+	const histFetchingRef = useRef(false); // 히스토리 fetch 중 — 중복 요청 가드
+	const dragState = useRef<{ active: boolean; mode: "idle" | "native" | "page" | "ptr"; moved: boolean; lastY: number; velocity: number; lastTime: number; shift: number }>({ active: false, mode: "idle", moved: false, lastY: 0, velocity: 0, lastTime: 0, shift: 0 });
+	// 페이지 어셈블리 — history에서 live와 같은 꼬리(서버 최신턴 == 현재 화면)는 덜어내고 live(state)를 마지막 페이지로.
+	// silent 턴은 미표시 계약(서버 캐시와 동일). history가 비면(신규·claude·fetch 실패) 단일 live 페이지 = 현행 동작.
+	const pastPages = useMemo(() => {
+		const list = histTurns.filter((t) => t.parsed?.silent !== true);
+		if (list.length && list[list.length - 1].a === liveRawRef.current) return list.slice(0, -1); // 꼬리 = live 중복 제거
+		return list;
+	}, [histTurns]);
+	const pages: PageView[] = useMemo(() => [...pastPages.map((turn) => ({ kind: "past" as const, turn })), { kind: "live" as const }], [pastPages]);
+	pagesLenRef.current = pages.length; // 매 렌더링 동기화 — 점프·클램프 계산 원료
 
-	const updateScrollArrows = useCallback(() => {
-		const el = messageRef.current;
-		if (!el) return;
-		setCanScrollUp(el.scrollTop > 2);
-		setCanScrollDown(el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+	// ── 페이저 트랙 구동 — 3슬롯(prev·cur·next) 가상화, translateY 직접 조작 ──
+	// 인자는 shift(드래그·플립 진행 px) → 트랙px = -슬롯높이+shift. 플립: 애니메이션 → 페이지 전환 → useLayoutEffect 재기준.
+	// 그리드(버튼) 영역은 플립에 슬라이드하지 않는다 — 페이지 전환 시 즉시 교체(별로라는 평가로 원상복구).
+	const slotH = () => pagerRef.current?.clientHeight ?? 0;
+	const applyTrack = useCallback((shift: number, animate: boolean) => {
+		const t = trackRef.current;
+		if (!t) return;
+		t.style.transition = animate ? "transform 0.18s ease-out" : "none";
+		t.style.transform = `translateY(${-slotH() + shift}px)`;
 	}, []);
+	const flipTo = useCallback((dir: 1 | -1) => {
+		if (animFlipRef.current) return; // 진행중 플립 — 제스처 무시 (스냅백 불필요: 기존 애니메이션이 마감 수행)
+		const next = pageIdxRef.current + dir;
+		if (next < 0 || next >= pagesLenRef.current) { applyTrack(0, true); return; } // 경계 — 고무밴드 제자리 스냅
+		animFlipRef.current = true;
+		applyTrack(-dir * slotH(), true); // dir=-1(이전/과거) → shift +slotH(위에서 내려옴) · dir=+1(다음/최신) → 아래에서 올라옴
+		clearTimeout(flipTimerRef.current);
+		flipTimerRef.current = setTimeout(() => { animFlipRef.current = false; setPageIdx(next); }, 190); // 애니메이션 마감 = 윈도 시프트 → useLayoutEffect 재기준
+	}, [applyTrack]);
+
+	// ── 히스토리 fetch — 서버가 pi 세션 JSONL을 스폰 없이 판독(GET /api/conversations/<key>/history) ──
+	// 실패(라우트 부재·오류)는 history []로 마감 — 단일 live 페이지 현행 동작 유지 (claude 백엔드 등).
+	const fetchHistory = useCallback(() => {
+		wasAtLastRef.current = pageIdxRef.current >= pagesLenRef.current - 1; // 교체 후 점프 여부 기준 — fetch 시점 스냅샷
+		const k = userKeyRef.current;
+		if (!k || histFetchingRef.current) { if (!k) setHistory([]); return; } // 드래프트 — 히스토리 없음
+		histFetchingRef.current = true;
+		fetch(`/api/conversations/${encodeURIComponent(k)}/history`)
+			.then((r) => (r.ok ? r.json() : null))
+			.then((j: any) => {
+				histFetchingRef.current = false;
+				if (userKeyRef.current !== k) return; // 대화 전환 경합 — 폐기
+				if (!Array.isArray(j?.turns)) { setHistory([]); return; } // 라우트 부재·오류 — 단일 페이지 동작
+				setHistory(j.turns.map((t: any): PageTurn => {
+					const res = typeof t?.a === "string" ? parseTurkJSON(t.a) : null;
+					return { id: String(t?.id ?? ""), qId: String(t?.qId ?? ""), q: stripAttachHeader(String(t?.q ?? "")), a: String(t?.a ?? ""), parsed: res && "parsed" in res ? res.parsed : null, model: typeof t?.model === "string" ? t.model : undefined, ts: typeof t?.ts === "string" ? t.ts : undefined };
+				}));
+			})
+			.catch(() => { histFetchingRef.current = false; });
+	}, []);
+	// 턴 완결 직후 재동기 — pi는 엔트리마다 appendFileSync 동기 플러시(agent_end 시점 기록완료)라 300ms 디바운스로 충분
+	const scheduleHistorySync = useCallback(() => { clearTimeout(histTimerRef.current); histTimerRef.current = setTimeout(fetchHistory, 300); }, [fetchHistory]);
+
 	// userKey — 가변 상태, null(드래프트) 허용. 첫 메시지가 키를 발급·승격한다 (ChatGPT 모델 — 새 대화=첫 페이지).
 	// 해시 전환은 풀리로드(onHashChange) 계약이라 런타임 재설정은 드래프트→대화 승격(setUserKey)뿐.
 	const [userKey, setUserKey] = useState<string | null>(TURK_USER_KEY);
@@ -354,9 +426,10 @@ export default function App() {
 		const onTS = (e: TouchEvent) => {
 			const t = e.touches[0];
 			startX = t.clientX; startY = t.clientY;
-			const m = document.querySelector(".turk-message") as HTMLElement | null;
+			const m = curScrollRef.current; // 현재 페이지 스크롤러 — 페이저 이후 복수 .turk-message 중 진본
 			const inMsg = !!(e.target as Element | null)?.closest?.(".turk-message");
-			armed = inMsg && !!m && m.scrollTop <= 0;
+			// 첫 페이지(가장 오래된 턴)에서만 당김 리로드 — 중간 페이지의 최상단 당김은 페이지 플립이 받는다
+			armed = inMsg && !!m && m.scrollTop <= 0 && pageIdxRef.current === 0;
 			dragging = false; pull = 0;
 		};
 		const onTM = (e: TouchEvent) => {
@@ -505,8 +578,9 @@ export default function App() {
 				// ② 캐시 없음/키 불일치 → 전체 재구독 (in-flight 가드; 성공 시 캐시 갱신 → 이후는 ① 경로)
 				if (typeof msg.vapidPublicKey === "string") ensurePush(msg.vapidPublicKey, wsRef.current);
 				if (typeof (msg as any).defaultModel === "string" && (msg as any).defaultModel) { try { localStorage.setItem("turk-default-model", (msg as any).defaultModel); } catch { /* 무시 */ } } // 시작시 지정 계약(TURK_PI_MODEL) 캐시 — 드래프트 시딩 1순위
-				// 상태 복원: get_state 응답 대기 — 복원 전까지 dim (last-assistant-text는 브라우저 localStorage)
-				setRestored(false);
+				// 상태 복원: get_state 응답 대기 — 복원 전까지 dim (last-assistant-text는 브라우저 localStorage).
+				// 단 스트리밍(생각중) 재접속은 dim 섬광 생략 — WS 블립이 화면 점멸 반복으로 읽히는 것 방지
+				if (!loading) setRestored(false);
 				wsRef.current?.send(JSON.stringify({ type: "get_state" }));
 				wsRef.current?.send(JSON.stringify({ type: "get_session_stats" }));
 				refreshSchedCount();
@@ -608,15 +682,15 @@ export default function App() {
 				// 2차(fallback): messages가 비었거나 파싱 실패 시 스트리밍 누적본 사용
 				if (!text) text = streamingTextRef.current;
 				if (text) {
-					const result = parseTurkJSON(text);
-					if (result && "parsed" in result) {
-						const parsed = result.parsed;
+					// 커밋 공용 마무리 — 짝 부착 → silent/schedules 정리 → live 페이지 확정(commit) → 히스토리 재동기 예약.
+					// 반환: "silent"(미표시 마감) | "committed"(live 확정) — silent는 재시도 폴백도 생략(기존 return 계약).
+					const commitParsed = (parsed: TurkState, raw: string): "silent" | "committed" => {
 						parsed.answerTo = answerToRef.current ?? undefined; // 짝표시 부착
 						// schedules는 서버가 agent_end에서 직접 스케줄러에 적용 (릴레이 제거 — 백그라운드 트리거 체이닝 보존)
 						// silent: 사용자에게 미표시
 						if (parsed.silent === true) {
 							if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
-							return;
+							return "silent";
 						}
 						// 화면 표시
 						if (Array.isArray(parsed.schedules)) {
@@ -633,39 +707,19 @@ export default function App() {
 							}
 							commit(parsed);
 						}
-					} else {
-						// 스트리밍본으로 한 번 더 시도 (messages가 잘렸을 수 있음)
-						const fallback = streamingTextRef.current && streamingTextRef.current !== text
-							? parseTurkJSON(streamingTextRef.current)
-							: null;
-						if (fallback && "parsed" in fallback) {
-							const parsed = fallback.parsed;
-							parsed.answerTo = answerToRef.current ?? undefined; // 짝표시 부착
-							// schedules는 서버가 agent_end에서 직접 스케줄러에 적용 (릴레이 제거 — 백그라운드 트리거 체이닝 보존)
-							// silent: 사용자에게 미표시
-							if (parsed.silent === true) {
-								if (schedulerPrefixRef.current) schedulerPrefixRef.current = null;
-								return;
-							}
-							if (Array.isArray(parsed.schedules)) {
-								const { schedules, ...stateWithoutSchedules } = parsed;
-								if (schedulerPrefixRef.current) {
-									stateWithoutSchedules.message = schedulerPrefixRef.current + (stateWithoutSchedules.message || "");
-									schedulerPrefixRef.current = null;
-								}
-								commit(stateWithoutSchedules);
-							} else {
-								if (schedulerPrefixRef.current) {
-									parsed.message = schedulerPrefixRef.current + (parsed.message || "");
-									schedulerPrefixRef.current = null;
-								}
-								commit(parsed);
-							}
-						} else {
-							// 자가수정은 서버 전담 (261008 — 클라 전담 시절 백그라운드 WS 끊김 턴의 위반 응답이
-							// 무보정·무기록으로 유실됨). willRetry=true agent_end에서 서버가 위반 원문+에러를
-							// 되돌려 route tool 재시도 주입 → agent_start가 이어 받아 dim 유지. 소진 시 agent_end.error로 마감.
-						}
+						liveRawRef.current = raw; // live 페이지 원문 확정 — 히스토리 꼬리 중복 판별용
+						scheduleHistorySync(); // 턴 완결 — 서버 세션 로그 재판독 (pi는 엔트리마다 동기 플러시)
+						return "committed";
+					};
+					const result = parseTurkJSON(text);
+					const outcome = result && "parsed" in result ? commitParsed(result.parsed, text) : null;
+					// 스트리밍본으로 한 번 더 시도 (messages가 잘렸을 수 있음) — silent 커밋은 폴백 생략
+					if (outcome !== "silent" && outcome !== "committed" && streamingTextRef.current && streamingTextRef.current !== text) {
+						const fallback = parseTurkJSON(streamingTextRef.current);
+						if (fallback && "parsed" in fallback) commitParsed(fallback.parsed, streamingTextRef.current);
+						// 자가수정은 서버 전담 (261008 — 클라 전담 시절 백그라운드 WS 끊김 턴의 위반 응답이
+						// 무보정·무기록으로 유실됨). willRetry=true agent_end에서 서버가 위반 원문+에러를
+						// 되돌려 route tool 재시도 주입 → agent_start가 이어 받아 dim 유지. 소진 시 agent_end.error로 마감.
 					}
 				} else if (!loading) {
 					// 응답 텍스트 자체가 없는 경우 (도구만 사용 등)
@@ -740,14 +794,21 @@ export default function App() {
 								const ans = ((msg.data as any).lastResponsePrompt ?? (answerToRef.current ?? undefined)) as string | undefined;
 								const sameJson = (x: unknown, y: unknown) => (x === y ? true : JSON.stringify(x ?? null) === JSON.stringify(y ?? null));
 								setState((prev) => (prev.message === p.message && sameJson(prev.buttons, p.buttons) && sameJson(prev.colors, p.colors) && sameJson(prev.textColors, p.textColors) && (prev.answerTo ?? undefined) === ans ? prev : { ...p, answerTo: ans }));
+								liveRawRef.current = lrText; // 복원본 원문 — 히스토리 꼬리 중복 판별용
 								// setLoading(false) 금지 — loading은 동기 isStreaming 분기가 소유.
 								// 재연결 시 서버가 스트리밍/씽킹중면 dim이 유지되어야 함 (이전 커밋화면은 dim 아래)
 							} else {
 								// lastResponse 없음(실패/빈 응답/서버 재시작) — 이전 입력(lastPrompt) 있으면 짝 캡션으로, 없으면 웰컴 제목(🤖 Turk) 유지
 								const lp = (msg.data as any).lastPrompt;
 								setState({ ...emptyState(gridRef.current.rows, gridRef.current.cols), ...(typeof lp === "string" && lp ? { answerTo: lp } : {}) });
+								liveRawRef.current = ""; // 빈 복원 — 히스토리 꼬리 전부 과거 페이지로
 							}
 						}
+						fetchHistory(); // 복원 완료 — 서버 세션 로그 전체 판독(페이지 어셈블리 원료). 스폰 0 무동작
+					} else {
+						// 세션 없음(restart_pi·삭제 후 새 셸·첫 발화 전) — 낡은 히스토리 잔류 차단 (신규 대화 = 단일 live 페이지)
+						setHistory([]);
+						liveRawRef.current = "";
 					}
 					setRestored(true); // 상태 복원 완료 → dim 해제
 					if (msg.data.isStreaming) { setLoading(true); const base = msg.data.route === "scheduler" ? "alarm" : msg.data.route === "tool" ? "tool" : "robot"; baseLogoModeRef.current = base; setLogoMode(base); } // 응답 기다리는 중 상태 복원 (재연결 시)
@@ -899,18 +960,24 @@ export default function App() {
 	// ref 동기화 — 항상 최신 handleEvent 유지
 	handleEventRef.current = handleEvent;
 
-	// 출력 업데이트 시 스크롤 맨 위로 초기화 + 화살표 갱신
+	// 출력 갱신(커밋·복원·메뉴) — live(마지막) 페이지로 점프 (현행 "출력 시 맨 위" 계약의 페이저판).
+	// deps에서 loading 제외 — 전송 시점(agent_start)엔 유지, 실제 출력 변화에만 점프 (기존 계약 승계)
 	useEffect(() => {
-		const el = messageRef.current;
-		if (el) {
-			el.scrollTop = 0;
-			// DOM 갱신 후 화살표 여부 계산
-			requestAnimationFrame(updateScrollArrows);
-		}
-		// deps에서 loading 제외 — 전송 시점(agent_start)엔 스크롤 유지, 실제 출력 변화(커밋)에만 맨 위로
-	}, [state.message, state.buttons, updateScrollArrows]);
+		setPageIdx(() => pagesLenRef.current - 1);
+	}, [state.message, state.buttons]);
 
-	// 가상 키보드 감지 → 버튼 영역 숨김
+	// history 교체(pages 변동) — 마지막 페이지 보던 중이면 새 마지막으로, 아니면 현재 위치 클램프
+	useEffect(() => {
+		const last = pagesLenRef.current - 1;
+		setPageIdx((i) => (wasAtLastRef.current ? last : Math.min(i, last)));
+	}, [pages]);
+
+	// 페이지 윈도 시프트 후 트랙 재기준 — 플립 애니메이션 마감·history 교체 공용 (무애니 스냅: 연속 프레임 무빙)
+	useLayoutEffect(() => {
+		applyTrack(0, false); // 윈도 시프트 후 재기준 — shift 0(중앙 슬롯)
+	}, [pageIdx, pages, applyTrack]);
+
+	// 가상 키보드 감지 → 버튼 영역 숨김 + 페이저 재기준 (뷰포트 변동 = 슬롯 높이 변동)
 	useEffect(() => {
 		const vv = window.visualViewport;
 		if (!vv) return;
@@ -919,76 +986,107 @@ export default function App() {
 		vv.addEventListener("resize", onResize);
 		vv.addEventListener("scroll", onResize);
 		return () => { vv.removeEventListener("resize", onResize); vv.removeEventListener("scroll", onResize); };
-	}, []);
+	}, [applyTrack]);
 
-	// 화면 아무데나 위/아래 드래그 → 출력창 스크롤 + 플릭 시 관성 (입력창/메시지박스 내부는 제외)
+	// 페이저 높이 변동 재기준 — 상태별 레이아웃 변동 전부 커버: 스트립 확장(로딩)·그리드 행 수·빈 그리드·
+	// 창 리사이즈·회전. px 기준 translateY는 뷰포트 크기가 변하는 순간 낡는다(전 페이지 끝이 새어 보이는 버그의
+	// 근원) → ResizeObserver로 즉시 재기준. 드래그·플립 진행 중엔 제스처가 마감 시 재기준하므로 간섭 금지.
 	useEffect(() => {
-		const startInertia = () => {
-			const decay = () => {
-				const el = messageRef.current;
-				if (!el) { inertiaRef.current = null; return; }
-				// velocity 단위: px/ms, 16ms 프레임당 이동
-				el.scrollTop += dragState.current.velocity * 16;
-				dragState.current.velocity *= 0.92; // 프레임당 감쇠
-				updateScrollArrows();
-				if (Math.abs(dragState.current.velocity) < 0.02) { inertiaRef.current = null; return; }
-				inertiaRef.current = requestAnimationFrame(decay);
-			};
-			inertiaRef.current = requestAnimationFrame(decay);
+		const el = pagerRef.current;
+		if (!el) return;
+		const rebase = () => { if (!dragState.current.active && !animFlipRef.current) applyTrack(0, false); };
+		if (typeof ResizeObserver !== "undefined") {
+			const ro = new ResizeObserver(rebase);
+			ro.observe(el);
+			return () => ro.disconnect();
+		}
+		window.addEventListener("resize", rebase); // 구형 브라우저 폴백
+		return () => window.removeEventListener("resize", rebase);
+	}, [applyTrack]);
+
+	// 드래그 — 화면(출력창 밖)=플립 전용. 출력창 안=스크롤 여지에 따라 네이티브 스크롤, 경계에서 플립 연동
+	// (맨 위 아래로 당김=과거 · 맨 아래 위로 밀기=최신 — 제스처 시작점 기준 1회 판정). 첫 페이지 맨 위
+	// 당김은 당김-리로드(ptr 핸들러)가 소관. 짧은 탭(8px 미만)은 클릭으로 통과.
+	useEffect(() => {
+		const canScroll = (el: HTMLElement | null, dy: number) => {
+			if (!el || dy === 0) return false;
+			return dy > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 2 : el.scrollTop > 2; // dy>0 = 손가락 위 = 아래로 스크롤
 		};
 		const onTouchStart = (e: TouchEvent) => {
 			const t = e.target as HTMLElement;
-			// .turk-drawer 예외 — 드로어 영역 터치는 전역 스크롤 하이재크 제외 (Phase 3; 메시지박스 로직은 불변)
-			if (t.closest("input, textarea, .turk-message, .turk-drawer")) return;
-			// 새 터치 시 기존 관성 취소
-			if (inertiaRef.current !== null) { cancelAnimationFrame(inertiaRef.current); inertiaRef.current = null; }
+			if (t.closest("input, textarea, .turk-drawer")) return; // 입력창·드로어 — 자체 스크롤 (출력창은 아래 판정에서 분기)
+			// 플립 애니메이션 중 새 제스처 무시 — 190ms 관통 클릭만 허용 (moved=false)
+			if (animFlipRef.current) return;
 			const now = performance.now();
-			dragState.current = { active: true, moved: false, lastY: e.touches[0]?.clientY ?? 0, velocity: 0, lastTime: now };
+			dragState.current = { active: true, mode: "idle", moved: false, lastY: e.touches[0]?.clientY ?? 0, velocity: 0, lastTime: now, shift: 0 };
+			applyTrack(0, false); // 잔여 드래그 오프셋 스냅
 		};
 		const onTouchMove = (e: TouchEvent) => {
-			if (!dragState.current.active) return;
+			const ds = dragState.current;
+			if (!ds.active) return;
 			const y = e.touches[0]?.clientY ?? 0;
-			const dy = dragState.current.lastY - y;
-			// 드래그 시작 감지: 일정 거리 이상 이동 시 스크롤 모드 진입 (짧은 탭은 클릭 유지)
-			if (!dragState.current.moved && Math.abs(dy) < 8) return;
-			dragState.current.moved = true;
-			const el = messageRef.current;
-			if (el) {
-				el.scrollTop += dy;
-				const now = performance.now();
-				const dt = now - dragState.current.lastTime;
-				if (dt > 0) {
-					// 순간 속도(px/ms) — 이동평균으로 부드럽게
-					const inst = dy / dt;
-					dragState.current.velocity = dragState.current.velocity * 0.6 + inst * 0.4;
-				}
-				dragState.current.lastY = y;
-				dragState.current.lastTime = now;
-				updateScrollArrows();
+			const dy = ds.lastY - y;
+			// 드래그 시작 감지: 일정 거리 이상 이동 시 제스처 확정 (짧은 탭은 클릭 유지)
+			if (!ds.moved && Math.abs(dy) < 8) return;
+			ds.moved = true;
+			// 제스처 판정(1회) — 시작점의 스크롤 여지로 이 제스처의 소관 확정
+			if (ds.mode === "idle") {
+				const sc = curScrollRef.current;
+				const inBox = !!(e.target as Element | null)?.closest?.(".turk-message");
+				// 첫 페이지 맨 위 아래당김 — 당김-리로드 소관 (과거 페이지 없음)
+				if (inBox && dy < 0 && pageIdxRef.current === 0 && sc && sc.scrollTop <= 0) { ds.mode = "ptr"; return; }
+				// 출력창 안 + 그 방향 스크롤 여지 — 네이티브 스크롤에 맡김 (이 제스처는 preventDefault 금지)
+				if (inBox && canScroll(sc, dy)) { ds.mode = "native"; return; }
+				ds.mode = "page"; // 그 외(출력창 밖 전역·경계·내용 없음) — 페이지 플립
 			}
+			if (ds.mode === "native" || ds.mode === "ptr") return; // 네이티브 스크롤·당김-리로드 — 여기선 손대지 않는다
+			const now = performance.now();
+			const dt = now - ds.lastTime;
+			if (dt > 0) {
+				// 순간 속도(px/ms) — 이동평균으로 부드럽게
+				const inst = dy / dt;
+				ds.velocity = ds.velocity * 0.6 + inst * 0.4;
+			}
+			ds.lastY = y;
+			ds.lastTime = now;
+			// 트랙 직접 구동 — shift 음수 = 다음(최신) 방향. 원시 이동량은 그대로 축적(플립 판정용),
+			// 경계 밖 시각 오프셋만 고무밴드 감쇠(0.35) — 원시와 표시의 분리
+			ds.shift += -dy;
+			const atFirst = pageIdxRef.current <= 0, atLast = pageIdxRef.current >= pagesLenRef.current - 1;
+			const damped = (ds.shift > 0 && atFirst) || (ds.shift < 0 && atLast) ? ds.shift * 0.35 : ds.shift;
+			applyTrack(damped, false);
 			e.preventDefault();
 		};
 		const onTouchEnd = (e: TouchEvent) => {
-			if (dragState.current.moved) {
+			const ds = dragState.current;
+			if (ds.moved && ds.mode === "page") {
 				e.preventDefault(); // 클릭 차단
-				// 충분한 속도면 관성 스크롤 시작
-				if (Math.abs(dragState.current.velocity) > 0.05) startInertia();
+				// 임계(¼슬롯)·플릭(속도)으로 플립 — 미달시 제자리 스냅
+				const h = slotH();
+				const flick = Math.abs(ds.velocity) > 0.5;
+				if (ds.shift < -h * 0.25 || (flick && ds.velocity > 0)) flipTo(1); // 다음(최신)
+				else if (ds.shift > h * 0.25 || (flick && ds.velocity < 0)) flipTo(-1); // 이전(과거)
+				else applyTrack(0, true);
 			}
-			dragState.current.active = false;
-			dragState.current.moved = false;
+			ds.active = false; ds.moved = false; ds.mode = "idle"; ds.shift = 0; ds.velocity = 0;
 		};
 		window.addEventListener("touchstart", onTouchStart, { passive: true });
 		window.addEventListener("touchmove", onTouchMove, { passive: false });
 		window.addEventListener("touchend", onTouchEnd, { passive: false });
-		// 마우스 휠/트랙패드 스크롤도 화면 어디서나 출력창에 연동
+		window.addEventListener("touchcancel", onTouchEnd, { passive: false });
+
+		// 마우스 휠/트랙패드 — 출력창 위: 스크롤 여지면 네이티브, 경계면 플립 연동. 그 외 화면: 플립 전용
+		let wheelAcc = 0, wheelLast = 0;
 		const onWheel = (e: WheelEvent) => {
 			const t = e.target as HTMLElement;
-			if (t.closest("input, textarea, .turk-drawer")) return; // 입력창·드로어는 자체 스크롤 유지
-			const el = messageRef.current;
-			if (!el) return;
-			el.scrollTop += e.deltaY;
-			updateScrollArrows();
+			if (t.closest("input, textarea, .turk-drawer")) return; // 입력창·드로어 — 자체 스크롤
+			if (t.closest(".turk-message") && canScroll(curScrollRef.current, e.deltaY)) return; // 출력창 내부 스크롤 여지 — 네이티브
 			e.preventDefault();
+			// 휠 축적으로 플립 (연타 가드 240ms: 플립 애니메이션 폭)
+			const now = performance.now();
+			if (now - wheelLast < 240) return;
+			wheelAcc += e.deltaY;
+			if (Math.abs(wheelAcc) >= 60) { flipTo(wheelAcc > 0 ? 1 : -1); wheelAcc = 0; wheelLast = now; }
 		};
 		window.addEventListener("wheel", onWheel, { passive: false });
 		return () => {
@@ -997,9 +1095,8 @@ export default function App() {
 			window.removeEventListener("touchend", onTouchEnd);
 			window.removeEventListener("touchcancel", onTouchEnd);
 			window.removeEventListener("wheel", onWheel);
-			if (inertiaRef.current !== null) cancelAnimationFrame(inertiaRef.current);
 		};
-	}, [updateScrollArrows]);
+	}, [applyTrack, flipTo]);
 
 	// ── 모델 그리드 렌더 ───────────────────────────────────────────────
 	const renderModelGrid = () => {
@@ -1144,7 +1241,7 @@ export default function App() {
 		try { localStorage.setItem("turk-user-key", k); } catch { /* 무시 */ } // 드래프트 해소 — 이 시점부터 재개 기준점
 		setUserKey(k);
 		userKeyRef.current = k; // re-render 대기 없이 직접 갱신 — 직후 connect의 WS URL이 이 키로 나간다
-		try { history.pushState(null, "", "#" + encodeURIComponent(k)); } catch { /* 무시 */ } // pushState는 hashchange를 유발하지 않음 — 풀리로드 없음
+		try { window.history.pushState(null, "", "#" + encodeURIComponent(k)); } catch { /* 무시 */ } // pushState는 hashchange를 유발하지 않음 — 풀리로드 없음
 		pendingFirstMessageRef.current = text; // 첫 메시지 — 셸 pi_ready(합성)에서 플러시
 		pendingFirstAttachRef.current = pendingFilesRef.current.length; // 보류 첨부 — 응답(칩=경로) 전수 도착 후 전송
 		draftEchoRef.current = true; // 전송 예정 텍스트는 초안이 아님 (에코)
@@ -1322,18 +1419,32 @@ export default function App() {
 	};
 
 	// ── 렌더 ─────────────────────────────────────────────────────────────
+	// 페이지별 그리드 원료 — 과거 페이지 보는 중엔 그 턴의 버튼을 표시. 조작 계약은 live와 동일(라벨 프롬프트 전송 —
+	// 입력창이 과거 페이지에서도 현재 세션으로 전송되는 것과 대칭. 응답 커밋 시 live 점프로 마감). 분기(fork) 질문은 Phase 2.
+	// 파싱 실패(silent·원문) 턴은 빈 그리드 — 출력창(flex)이 흡수해 커진다 (빈 라인 숨김 계약과 동일 감각).
+	const activePast = pageIdx < pages.length - 1 && pages[pageIdx].kind === "past" ? pages[pageIdx].turn : null;
+	const gridState: TurkState = activePast ? (activePast.parsed ?? { message: activePast.a, buttons: {} }) : state;
 	const gridRows: [string, string][][] = [];
 	for (let r = 0; r < rows; r++) {
 		const row: [string, string][] = [];
 		for (let c = 0; c < cols; c++) {
 			const idx = String(r * cols + c);
-			row.push([idx, state.buttons[idx] ?? ""]);
+			row.push([idx, gridState.buttons?.[idx] ?? ""]);
 		}
 		// 빈 라인 숨김(261012) — 라벨이 하나라도 있는 라인만 그리고, 그리드가 수축한 만큼 출력창(flex)이 흡수해 커진다.
 		// 라벨 라인의 빈 칸은 기존 그대로(그리드 틀 유지·애니메이션 지연도 원 행 인덱스 기준 유지).
 		if (row.every(([, label]) => !label)) continue;
 		gridRows.push(row);
 	}
+
+	// 최신(live) 페이지 점프 — 제목 칩 탭. 진행중 플립 선점 취소 후 즉시 전환
+	const jumpToLatest = () => {
+		if (pageIdx >= pages.length - 1) return;
+		clearTimeout(flipTimerRef.current);
+		animFlipRef.current = false;
+		wasAtLastRef.current = true;
+		setPageIdx(pages.length - 1);
+	};
 
 	const statusText = isDraft ? "새 대화" : !connected ? "연결 끊김" : !piReady ? "세션 초기화 중" : showThinking ? "사고중" : loading ? "생성중" : "준비";
 
@@ -1412,7 +1523,7 @@ export default function App() {
 
 			<div className={"turk-strip-slot" + (loading ? "" : " turk-strip-collapsed")}>
 				{/* 인디케이터(씽킹/툴) — 딤(로딩) 중에만 표시·정상 높이. 딤이 아니면 텍스트 숨김+영역 축소(예전 동작).
-					짝(answerTo)은 출력창 top border 레전드로 이동 — 대기 중 이전 입력이 인디케이터 기본값으로 보여 혼동되던 문제 해소 */}
+					짝(answerTo)은 출력창 위 독립 박스로 상단 배치 — 대기 중 이전 입력이 인디케이터 기본값으로 보여 혼동되던 문제 해소 */}
 				{loading ? (
 					<div className={"turk-thinking-area" + (thinkingExpanded ? " expanded" : "")} onClick={() => { if (thinkingText.trim()) setThinkingExpanded((v) => !v); }}>
 						{/* 스피너 — 스트립 왼쪽 고정, 로딩 내내 상시 회전 (툴/씽킹/대기 모두). 색 = 옆 텍스트 색 반영 (툴=warning) */}
@@ -1428,28 +1539,53 @@ export default function App() {
 
 			<div className={"turk-message-wrap" + (loading ? " turk-loading" : "")}>
 				<div className="turk-ptr" aria-hidden="true"><span className="turk-ptr-ico"><RefreshCw className="turk-ico" /></span></div>
-				<button className="turk-copy-btn" onClick={() => { navigator.clipboard?.writeText(state.message).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
-				{canScrollUp && (
-					<button className="turk-scroll-arrow turk-scroll-up" onClick={() => messageRef.current?.scrollTo({ top: 0, behavior: "smooth" })} title="맨 위로"><ChevronUp className="turk-ico" /></button>
-				)}
-				{canScrollDown && (
-					<button className="turk-scroll-arrow turk-scroll-down" onClick={() => messageRef.current?.scrollTo({ top: messageRef.current.scrollHeight, behavior: "smooth" })} title="맨 아래로"><ChevronDown className="turk-ico" /></button>
-				)}
-				{/* 애니메이션 단위 박스 — 짝 레전드를 출력창 구조에 포함해 pop을 함께 받음.
-					key 리마운트로 매 턴 재생. 짝을 .turk-message(스크롤 컨테이너) 안에 직접 넣으면
-					overflow-y:auto에 잘리고 내용과 같이 스크롤되므로, 스크롤 밖 동기 박스에 배치 */}
-				<div key={msgVerRef.current} className="turk-msg-anim">
-					{state.answerTo && (
-						/* 항상 표시 — 딤 중에도 유지: 스트립 높이 확보(min-height 3rem)로 인디케이터 텍스트와 간격 확보 */
-						<div className="turk-answer-chip" title={state.answerTo}><span>{state.answerTo}</span></div>
-					)}
-					<div
-						ref={messageRef}
-						className={`turk-message${loading ? " turk-message-loading" : ""}`}
-						onScroll={updateScrollArrows}
-					>
-						{/* 메인 출력 — 짝(answerTo)은 top border 레전드 (인디케이터 혼동 해소) */}
-						<Md text={state.message} />
+				{/* 복사 — 보고 있는 페이지 기준: 과거 페이지는 그 턴의 표시본(parsed.message, 실패시 원문) */}
+				<button className="turk-copy-btn" onClick={() => { const text = activePast ? (activePast.parsed?.message ?? activePast.a) : state.message; navigator.clipboard?.writeText(text).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
+				{/* 페이저 — 3슬롯(prev·cur·next) 가상 트랙. translateY는 applyTrack이 직접 구동(드래그·플립),
+					경계 밖 슬롯은 빈 칸으로 자리 유지(지오메트리 일정). 짝 라벨·pop 애니메이션은 페이지 내부에 승계 */}
+				<div className="turk-pager" ref={pagerRef}>
+					<div className="turk-pager-track" ref={trackRef}>
+						{[-1, 0, 1].map((rel) => {
+							const i = pageIdx + rel;
+							const pv = i >= 0 && i < pages.length ? pages[i] : null;
+							if (!pv) return <div className="turk-page turk-page-empty" key={`e${rel}`} aria-hidden="true" />;
+							if (pv.kind === "live") return (
+								/* 신원 "live" 고정 — 인덱스 키는 history 갱신(pages.length 흔들림) 때마다 live 슬롯을
+								   리마운트해 pop("화면 나타남")을 재생했다. 새 턴의 pop은 내부 key(msgVer)가 담당 */
+								<div className="turk-page" key="live">
+									{/* 애니메이션 단위 박스 — key(msgVer) 리마운트로 매 턴 pop 재생 (기존 .turk-msg-anim 계약 승계) */}
+									<div key={msgVerRef.current} className="turk-msg-anim">
+										{(state.answerTo || pages.length > 1) && (
+											/* 항상 표시 — 딤 중에도 유지: 짝 박스는 플로우라 스트립과 간섭 없음. 몇턴 중 몇턴(live=마지막) */
+											<div className="turk-answer-chip" title={state.answerTo}>
+												{state.answerTo && <span className="turk-answer-q">{state.answerTo}</span>}
+												{pages.length > 1 && <span className="turk-answer-pos">{pages.length}/{pages.length}턴</span>}
+											</div>
+										)}
+										<div ref={i === pageIdx ? curScrollRef : undefined} className={"turk-message" + (loading ? " turk-message-loading" : "")}>
+											{/* 메인 출력(live) — 짝 박스 아래 나머지 영역 (인디케이터 혼동 해소) */}
+											<Md text={state.message} />
+										</div>
+									</div>
+								</div>
+							);
+							const t = pv.turn;
+							return (
+								<div className="turk-page" key={i} data-page={i}>
+									{/* 과거 턴 — 짝 헤더(질문) + 마크다운 답변. 파싱 실패 응답은 원문 그대로 (전체 로그 계약) */}
+									{(t.q || pages.length > 1) && (
+										/* 과거 턴 제목 — 몇턴 중 몇턴. 탭하면 최신(live) 페이지로 점프 */
+										<div className={"turk-answer-chip" + (i < pages.length - 1 ? " turk-answer-chip-jump" : "")} title={[t.q, t.model, t.ts?.slice(0, 10)].filter(Boolean).join(" · ") + (i < pages.length - 1 ? " — 탭하면 최신으로" : "")} onClick={i < pages.length - 1 ? jumpToLatest : undefined}>
+											{t.q && <span className="turk-answer-q">{t.q}</span>}
+											{pages.length > 1 && <span className="turk-answer-pos">{i + 1}/{pages.length}턴</span>}
+										</div>
+									)}
+									<div ref={i === pageIdx ? curScrollRef : undefined} className="turk-message turk-message-past">
+										<Md text={t.parsed?.message ?? t.a} />
+									</div>
+								</div>
+							);
+						})}
 					</div>
 				</div>
 			</div>
@@ -1459,12 +1595,12 @@ export default function App() {
 					label ? (
 						<button
 							key={`${idx}:${gridVerRef.current}`}
-							className={`turk-grid-btn${state.colors?.[idx] ? ` turk-bg-${state.colors[idx]}` : ""}${state.textColors?.[idx] ? ` turk-fg-${state.textColors[idx]}` : state.colors?.[idx] ? ` turk-fg-${["secondary", "muted", "accent", "destructive"].includes(state.colors[idx]) ? "white" : "black"}` : ""}`}
-							disabled={loading || !piReady}
-							onClick={() => handleSend(label)}
+							className={`turk-grid-btn${loading || !piReady ? " turk-grid-btn-off" : ""}${gridState.colors?.[idx] ? ` turk-bg-${gridState.colors[idx]}` : ""}${gridState.textColors?.[idx] ? ` turk-fg-${gridState.textColors[idx]}` : gridState.colors?.[idx] ? ` turk-fg-${["secondary", "muted", "accent", "destructive"].includes(gridState.colors[idx]) ? "white" : "black"}` : ""}`}
+							aria-disabled={loading || !piReady}
+							onClick={() => { if (loading || !piReady) return; handleSend(label); }} // disabled 속성 금지 — 비활성 폼 컨트롤은 터치 이벤트 자체가 소멸해 버튼영역 드래그(페이지 플립)가 죽는다. 클릭만 논리 가드.
 							style={menuMode.current === "model" ? (() => {
 								// 모델 선택 화면: 모델명이 길면 폰트 자동 축소 (기준 8칸, 최소 0.8em)
-								const w = [...label].reduce((a, c) => a + (/[^\x00-\x7F]/.test(c) ? 2 : 1), 0);
+								const w = [...label].reduce((a, c) => a + (/[^\u0000-\u007f]/.test(c) ? 2 : 1), 0);
 								const delay = `${Math.floor(Number(idx) / cols) * 60}ms`;
 								if (w <= 8) return { animationDelay: delay };
 								return { fontSize: `max(0.7em, ${(8 / w).toFixed(3)}em)`, animationDelay: delay };
