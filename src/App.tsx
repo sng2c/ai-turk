@@ -1114,8 +1114,8 @@ export default function App() {
 				const dir = wheelAcc > 0 ? 1 : -1;
 				wheelAcc = 0;
 				if (wheelRun) return; // 런 중 모멘텀 — 흡수(연쇄 캔슬). 플립은 런당 1회
-				// 출력창 내부 경계는 저항(첫 노치 엿보기, 이어지는 노치 확정) — 밖은 즉시 플립(의도적 페이지 이동)
-				if (inBox ? resistPush(dir) : true) { flipTo(dir); wheelRun = true; }
+				// 모든 휠 플립은 저항(첫 노치 엿보기+스냅백, 이어지는 노치 확정) — 커서 위치(출력창 안밖) 무관 통일 계약
+				if (resistPush(dir)) { flipTo(dir); wheelRun = true; }
 			}
 		};
 		window.addEventListener("wheel", onWheel, { passive: false });
