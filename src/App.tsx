@@ -1110,7 +1110,12 @@ export default function App() {
 			if (e.key === "ArrowUp" || e.key === "ArrowDown") {
 				if (inField) return; // 입력 커서 이동·드로어 목록 스크롤은 자체 동작
 				e.preventDefault();
-				flipTo(e.key === "ArrowDown" ? 1 : -1); // ↓=다음(최신) · ↑=이전(과거)
+				// 출력창 스크롤 우선 — 끄트머리(경계)에서 페이지 전환까지 연동 (휠과 동일 계약)
+				const sc = curScrollRef.current;
+				const down = e.key === "ArrowDown";
+				const can = sc ? (down ? sc.scrollTop + sc.clientHeight < sc.scrollHeight - 2 : sc.scrollTop > 2) : false;
+				if (can && sc) { sc.scrollTop += (down ? 1 : -1) * sc.clientHeight * 0.75; return; } // ¾ 뷰포트씩
+				flipTo(down ? 1 : -1); // ↓=다음(최신) · ↑=이전(과거)
 				return;
 			}
 			if (e.key === "Escape") {
