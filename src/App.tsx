@@ -1721,7 +1721,7 @@ export default function App() {
 					</div>
 				)}
 				<input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} />
-				<button type="button" className="turk-submit-btn" style={{ flex: "0 0 auto", padding: "0 0.6rem" }} title="파일 첨부 (최대 50MB)" disabled={loading || !piReady} onClick={() => fileInputRef.current?.click()}>
+				<button type="button" className={"turk-submit-btn" + ((loading || !piReady) ? " turk-submit-btn-off" : "")} style={{ flex: "0 0 auto", padding: "0 0.6rem" }} title="파일 첨부 (최대 50MB)" aria-disabled={loading || !piReady} onClick={() => { if (loading || !piReady) return; fileInputRef.current?.click(); }}> {/* disabled 속성 금지 — 비활성 컨트롤은 터치·휠 이벤트 소멸(페이지 플립 죽은 영역). 클릭만 논리 가드 */}
 					<Paperclip style={{ width: "1em", height: "1em" }} />
 				</button>
 				<input
@@ -1738,8 +1738,8 @@ export default function App() {
 				/>
 				<button
 					type={loading ? "button" : "submit"}
-					className="turk-submit-btn"
-					disabled={!loading && ((!input.trim() && attachments.length === 0) || !piReady)}
+					className={"turk-submit-btn" + (!loading && ((!input.trim() && attachments.length === 0) || !piReady) ? " turk-submit-btn-off" : "")} /* disabled 속성 금지(이벤트 소멸) — 빈 입력 클릭·엔터는 onSubmit이 blur로 마감 */
+					aria-disabled={!loading && ((!input.trim() && attachments.length === 0) || !piReady)}
 					onClick={loading ? (() => { cancelTurn(); }) : undefined}
 				>
 					{loading ? "취소" : "전송"}

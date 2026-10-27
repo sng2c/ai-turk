@@ -827,13 +827,13 @@ body {
 	transition: all 0.1s;
 }
 
-.turk-submit-btn:active:not(:disabled) {
+.turk-submit-btn:active:not(.turk-submit-btn-off) {
 	transform: translateY(0.214rem);
 }
 
-.turk-submit-btn:disabled {
+.turk-submit-btn.turk-submit-btn-off {
 	opacity: 0.4;
-	cursor: default;
+	cursor: default; /* 클릭은 App.tsx 논리 가드 — disabled 속성은 터치·휠 이벤트 소멸 때문에 쓰지 않는다 */
 }
 
 /* PC (넓은 화면): 입력창 플로팅 해제, 그리드 밑에 붙임 */
