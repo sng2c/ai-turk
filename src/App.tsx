@@ -1096,10 +1096,13 @@ export default function App() {
 		// 마우스 휠/트랙패드 — 출력창 위: 스크롤 여지면 네이티브, 경계면 플립 연동. 그 외 화면: 플립 전용.
 		// 반응성 계약: 노치 1회(≈100px)에 즉시 플립 — 시간 기반 폐기 금지(연타를 삼켜 둔감해지던 구조),
 		// 플립 애니메이션(190ms) 중에만 폐기하고 마감 직후 다음 노치가 이어받는다. line 모드(Firefox)는 px 환산.
-		let wheelAcc = 0;
+		let wheelAcc = 0, lastWheelEvAt = 0, wheelRun = false; // 런=플립 후 모멘텀 — 정숙(300ms) 후 새 플릭 재허용
 		const onWheel = (e: WheelEvent) => {
 			const t = e.target as HTMLElement;
 			if (t.closest("input, textarea, .turk-drawer")) return; // 입력창·드로어 — 자체 스크롤
+			const wNow = performance.now();
+			if (wheelRun && wNow - lastWheelEvAt > 300) wheelRun = false; // 정숙 갭 — 모멘텀 종료, 새 제스처
+			lastWheelEvAt = wNow;
 			const inBox = !!t.closest(".turk-message");
 			if (inBox && canScroll(curScrollRef.current, e.deltaY)) return; // 출력창 내부 스크롤 여지 — 네이티브
 			e.preventDefault();
@@ -1110,8 +1113,9 @@ export default function App() {
 			if (Math.abs(wheelAcc) >= 60) {
 				const dir = wheelAcc > 0 ? 1 : -1;
 				wheelAcc = 0;
+				if (wheelRun) return; // 런 중 모멘텀 — 흡수(연쇄 캔슬). 플립은 런당 1회
 				// 출력창 내부 경계는 저항(첫 노치 엿보기, 이어지는 노치 확정) — 밖은 즉시 플립(의도적 페이지 이동)
-				if (inBox ? resistPush(dir) : true) flipTo(dir);
+				if (inBox ? resistPush(dir) : true) { flipTo(dir); wheelRun = true; }
 			}
 		};
 		window.addEventListener("wheel", onWheel, { passive: false });
@@ -1127,6 +1131,9 @@ export default function App() {
 	// ── 키보드 숏컷 — 엔터=입력창 포커스(입력창 밖), Esc=취소(턴 취소·메뉴 닫기), ↑↓=페이지 플립 ──
 	// 입력 필드·드로어 내부는 자체 동작 우선(커서 이동·폼 Escape·버튼 활성화 간섭 금지)
 	useEffect(() => {
+		// 프레스 세션 — 홀드 중 플립은 1회만: 넘긴 뒤엔 키를 떼고 다시 눌러야 다음 페이지(연쇄 캔슬).
+		// 스크롤(내용 읽기)은 홀드로 계속 가능 — 정지되는 것은 페이지 전환뿐.
+		const held = { flipped: false };
 		const onKey = (e: KeyboardEvent) => {
 			if (e.ctrlKey || e.altKey || e.metaKey) return; // 조합 키는 브라우저·OS 소관
 			const t = e.target as HTMLElement | null;
@@ -1141,7 +1148,9 @@ export default function App() {
 				if (can && sc) { sc.scrollTop += (down ? 1 : -1) * sc.clientHeight * 0.75; return; } // ¾ 뷰포트씩
 				// 경계 — 저항 후 플립: 첫 푸시는 이웃 페이지 엿보기+스냅백, 이어지는 푸시에 확정
 				const dir = down ? 1 : -1;
-				if (resistPush(dir)) flipTo(dir);
+				if (!e.repeat) held.flipped = false; // 새 프레스 — 세션 리셋
+				if (held.flipped) return; // 이 프레스에서 이미 넘김 — 릴리스까지 정지 (연쇄 캔슬)
+				if (resistPush(dir)) { flipTo(dir); held.flipped = true; }
 				return;
 			}
 			if (e.key === "Escape") {
@@ -1162,8 +1171,10 @@ export default function App() {
 				inputRef.current?.focus(); // 입력창 밖 엔터 — 곧장 타이핑 시작
 			}
 		};
+		const onKeyUp = (e: KeyboardEvent) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") held.flipped = false; }; // 릴리스 — 다음 프레스 세션
 		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
+		window.addEventListener("keyup", onKeyUp);
+		return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
 	}, [flipTo, loading, resistPush]);
 
 	// ── 모델 그리드 렌더 ───────────────────────────────────────────────
