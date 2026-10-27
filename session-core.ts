@@ -773,7 +773,9 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		session.backend = createBackendFn({
 			cwd: workspacePath(session.userKey),
 			userKey: session.agentSessionId ?? undefined, // 저장된 agentSessionId 있으면 지정(같은 세션 복원), 없으면 undefined(새 세션). claude는 무시
-			model: typeof session.lastModel?.id === "string" && session.lastModel.id ? session.lastModel.id : undefined, // 대화별 마지막 모델로 스폰 — 무관성 계약의 실측 반쪽: 표시뿐 아니라 실제 턴도 그 모델로 (미지정 → TURK_PI_MODEL 신규 기본)
+			model: session.lastModel && typeof session.lastModel.id === "string" && session.lastModel.id
+				? (typeof session.lastModel.provider === "string" && session.lastModel.provider ? `${session.lastModel.provider}/${session.lastModel.id}` : session.lastModel.id)
+				: undefined, // 대화별 마지막 모델로 스폰 — 무관성 계약의 실측 반쪽. provider/id 형식 필수: bare id는 다중 provider에서 ambiguous 즉시 exit (pi 프로세스 종료됨 버그의 근원, 실측)
 			workspaceEnv, // 4c-refit — 계정 env. spawn 환경 병합은 backend.ts 담당 (계약 키 최후 순위) — 로그·브로드캐스트 경로 없음
 			onLog: (m: string) => console.log(`[${session.userKey.slice(0, 8)}] ${m}`),
 		});
