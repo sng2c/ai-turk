@@ -1701,7 +1701,8 @@ export default function App() {
 				className="turk-input-form" style={{ bottom: kbHeight }}
 				onSubmit={(e) => {
 					e.preventDefault();
-					if ((input.trim() || attachments.length > 0) && !loading && piReady) handleSend(input.trim());
+					if ((input.trim() || attachments.length > 0) && !loading && piReady) { handleSend(input.trim()); return; }
+					if (!input.trim() && attachments.length === 0) inputRef.current?.blur(); // 빈 입력 엔터 — 언포커스(모바일 키보드 내림)
 				}}
 				onKeyDown={(e) => {
 					if (e.key === "Escape" && loading) {
