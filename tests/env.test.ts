@@ -215,7 +215,7 @@ ok("C4 값 4KB 경계 — 4096바이트 통과 · 4097 초과 거부 · 한글 �
 		authorize: A.createAuthorizer() as never, // 실 authorizer 전체 경로 — 쿠키 JWT → username → userKey 역색인 → 계정 env
 		backendFactory: (opts: BackendOptions) => { const b = new FakeBackend(opts); backends.push(b); return b; },
 	});
-	const waitFor = async (cond: () => boolean, ms = 3000): Promise<boolean> => { const end = Date.now() + ms; while (Date.now() < end) { if (cond()) return true; await sleep(20); } return cond(); } // 실 authorizer(jwtVerify 비동기) 정착 대기 — 고정 sleep은 부하·노드 버전에 따라 60ms가 밀리는 플레이크(gs2 V24 F1 실측) → 조건 폴링
+	const waitFor = async (cond: () => boolean, ms = 3000): Promise<boolean> => { const end = Date.now() + ms; while (Date.now() < end) { if (cond()) return true; await sleep(20); } return cond(); } // 실 authorizer(jwtVerify 비동기) 정착 대기 — 고정 sleep은 부하·노드 버전에 따라 60ms가 밀리는 플레이크(원격 노드 실측) → 조건 폴링
 	const token = await A.issueToken("acct-core");
 	const ws1 = makeWs();
 	core.handleConnection(ws1, { url: `/ws?u=${encodeURIComponent("envcore-key")}`, headers: { cookie: `turk_auth=${token}` } });
