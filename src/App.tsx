@@ -1132,8 +1132,8 @@ export default function App() {
 		};
 	}, [applyTrack, flipTo, resistPush]);
 
-	// ── 키보드 숏컷 — 엔터=입력창 포커스(입력창 밖), Esc=취소(턴 취소·메뉴 닫기), ↑↓=페이지 플립 ──
-	// 입력 필드·드로어 내부는 자체 동작 우선(커서 이동·폼 Escape·버튼 활성화 간섭 금지)
+	// ── 키보드 숏컷 — /=입력창 점프, Esc=취소(턴 취소·메뉴 닫기), PgUp/PgDn=페이저, 화살표=그리드 포커스 내비 ──
+	// 엔터는 간섭 금지(폼 전송·포커스된 버튼 활성화). 입력 필드·드로어 내부는 자체 동작 우선
 	useEffect(() => {
 		// 프레스 세션 — 홀드 중 플립은 1회만: 넘긴 뒤엔 키를 떼고 다시 눌러야 다음 페이지(연쇄 캔슬).
 		// 스크롤(내용 읽기)은 홀드로 계속 가능 — 정지되는 것은 페이지 전환뿐.
@@ -1189,10 +1189,12 @@ export default function App() {
 				if (loading) { cancelTurn(); e.preventDefault(); } // 진행 턴 취소 — 폼 취소 버튼과 동일 계약
 				return;
 			}
-			if (e.key === "Enter") {
-				if (inField || t?.tagName === "BUTTON" || t?.isContentEditable) return; // 필드·포커스된 버튼 활성화·편집은 자체 동작
+			if (e.key === "/") {
+				// 슬래시 — 입력창 점프 (Gmail·Slack·Discord 관례). 엔터는 포커스된 버튼 활성화(브라우저 표준)에 양보 —
+				// 화살표 그리드 내비 후 엔터 전송과 "타이핑 시작"이 충돌하던 것을 키 분리로 해소
+				if (inField || t?.isContentEditable) return; // 입력 중 슬래시는 그냥 타이핑(/model·/compact 등 명령)
 				e.preventDefault();
-				inputRef.current?.focus(); // 입력창 밖 엔터 — 곧장 타이핑 시작
+				inputRef.current?.focus();
 			}
 		};
 		const onKeyUp = (e: KeyboardEvent) => { if (e.key === "PageUp" || e.key === "PageDown") held.flipped = false; }; // 릴리스 — 다음 프레스 세션
