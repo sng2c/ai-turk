@@ -15,7 +15,7 @@ const IS_FINE_POINTER = typeof window !== "undefined" && window.matchMedia?.("(h
 
 // ── 출력 히스토리 페이저 — 서버 대화 로그(pi 세션)를 1턴 1페이지로 넘겨보기 ──
 // PageTurn: 서버 /history 턴을 클라 소비형으로 구운 것 (parsed = turk JSON 해석본, 실패시 null→원문 표시)
-type PageTurn = { id: string; qId: string; q: string; a: string; parsed: TurkState | null; model?: string; ts?: string };
+type PageTurn = { id: string; qId: string; q: string; a: string; parsed: TurkState | null; model?: string; ts?: string; compact?: { summary?: string; ts?: string } };
 // PageView: 페이저 페이지 — 과거 턴 or live(현행 state). 최신이 아래(마지막 페이지 = live)
 type PageView = { kind: "past"; turn: PageTurn } | { kind: "live" };
 // 첨부 경로 주입 헤더 제거 — 히스토리 질문 표시는 순수 유저 입력만 (composePrompt 원문 중 display용 박리)
@@ -214,7 +214,7 @@ export default function App() {
 				if (!Array.isArray(j?.turns)) { setHistory([]); return; } // 라우트 부재·오류 — 단일 페이지 동작
 				setHistory(j.turns.map((t: any): PageTurn => {
 					const res = typeof t?.a === "string" ? parseTurkJSON(t.a) : null;
-					return { id: String(t?.id ?? ""), qId: String(t?.qId ?? ""), q: stripAttachHeader(String(t?.q ?? "")), a: String(t?.a ?? ""), parsed: res && "parsed" in res ? res.parsed : null, model: typeof t?.model === "string" ? t.model : undefined, ts: typeof t?.ts === "string" ? t.ts : undefined };
+					return { id: String(t?.id ?? ""), qId: String(t?.qId ?? ""), q: stripAttachHeader(String(t?.q ?? "")), a: String(t?.a ?? ""), parsed: res && "parsed" in res ? res.parsed : null, model: typeof t?.model === "string" ? t.model : undefined, ts: typeof t?.ts === "string" ? t.ts : undefined, compact: t?.compact && typeof t.compact === "object" ? { summary: typeof t.compact.summary === "string" ? t.compact.summary : undefined, ts: typeof t.compact.ts === "string" ? t.compact.ts : undefined } : undefined };
 				}));
 			})
 			.catch(() => { histFetchingRef.current = false; });
@@ -1575,6 +1575,10 @@ export default function App() {
 							return (
 								<div className="turk-page" key={i} data-page={i}>
 									{/* 과거 턴 — 짝 헤더(질문) + 마크다운 답변. 파싱 실패 응답은 원문 그대로 (전체 로그 계약) */}
+									{t.compact && (
+										/* 컴팩트 전환점 — 이 턴부터 모델은 위 요약으로 과거를 기억 (tooltip=요약 원문) */
+										<div className="turk-compact-mark" title={t.compact.summary ?? "컴팩트 요약본 없음"}>🧹 컴팩트{t.compact.ts ? ` · ${t.compact.ts.slice(0, 16).replace("T", " ")}` : ""} — 이 지점부터 과거는 요약으로 기억</div>
+									)}
 									{(t.q || pages.length > 1) && (
 										/* 과거 턴 제목 — 몇턴 중 몇턴. 탭하면 최신(live) 페이지로 점프 */
 										<div className={"turk-answer-chip" + (i < pages.length - 1 ? " turk-answer-chip-jump" : "")} title={[t.q, t.model, t.ts?.slice(0, 10)].filter(Boolean).join(" · ") + (i < pages.length - 1 ? " — 탭하면 최신으로" : "")} onClick={i < pages.length - 1 ? jumpToLatest : undefined}>

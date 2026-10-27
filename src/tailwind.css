@@ -373,6 +373,21 @@ body {
 	overflow: hidden; /* 반전 카운터가 라운드 코너에 맞게 클리핑 */
 	cursor: default;
 }
+/* 컴팩트 전환점 마커 — 페이지 최상단 얇은 라인 (요약 원문은 tooltip) */
+.turk-compact-mark {
+	flex: 0 0 auto;
+	font-size: calc(var(--turk-font-size) * 0.75);
+	line-height: 1.3;
+	color: var(--muted-foreground);
+	font-family: "NeoDunggeunmo", monospace;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	padding: 0 0.25rem;
+	opacity: 0.85;
+	cursor: help;
+}
+
 .turk-answer-chip .turk-answer-q {
 	align-self: center;
 	overflow: hidden;

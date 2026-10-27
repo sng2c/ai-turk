@@ -200,6 +200,7 @@ export interface HistoryTurn {
 	a: string;
 	model?: string;
 	ts?: string;
+	compact?: { summary?: string; ts?: string }; // 직전 컴팩트 마커 — 이 턴부터 모델은 요약 기억. 클라 페이지 상단 라인 원료
 }
 
 // 대화 레지스트리 항목 (1c) — GET /api/conversations 응답 본체
@@ -694,15 +695,22 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		path.reverse();
 		// 턴 구성 — user 프롬프트로 시작, 턴 내 마지막 assistant 텍스트(도구 체인의 최종응답)로 마감.
 		// 재시도 주입은 user 프롬프트지만 턴 경계가 아니다(원 질문 승계) — skip해 다음 assistant가 a를 덮어쓴다.
+		// compaction 엔트리는 턴 경계가 아니지만 "기억 전환점"이라 다음 턴에 마커로 부착 (페이지 상단 🧹 라인).
 		const turns: HistoryTurn[] = [];
 		let q: string | null = null, qId = "";
 		let a: string | null = null, aId = "", model: string | undefined, ts: string | undefined;
+		let pendingCompact: { summary?: string; ts?: string } | null = null; // compaction 엔트리 → 다음 턴 시작 시 소비
+		let turnCompact: { summary?: string; ts?: string } | null = null; // 이 턴의 마커 — 컴팩트 직후 시작 턴에만
 		const flush = () => {
-			if (q != null && a != null) turns.push({ id: aId, qId, q, a, ...(model ? { model } : {}), ...(ts ? { ts } : {}) });
-			q = null; a = null; model = undefined; ts = undefined;
+			if (q != null && a != null) turns.push({ id: aId, qId, q, a, ...(model ? { model } : {}), ...(ts ? { ts } : {}), ...(turnCompact ? { compact: turnCompact } : {}) });
+			q = null; a = null; model = undefined; ts = undefined; turnCompact = null;
 		};
 		for (const e of path) {
-			if (e.type !== "message") continue; // model_change·compaction 등은 표시에서 제외
+			if (e.type === "compaction") {
+				pendingCompact = { ...(typeof e.summary === "string" && e.summary ? { summary: e.summary } : {}), ...(typeof e.timestamp === "string" ? { ts: e.timestamp } : {}) };
+				continue;
+			}
+			if (e.type !== "message") continue; // model_change 등은 표시에서 제외
 			const m = e.message ?? {};
 			if (m.role === "user") {
 				const text = agentMessageText(m);
@@ -710,6 +718,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 				if (RETRY_Q_PREFIXES.some((p) => text.startsWith(p))) continue; // 서버 자가수정 주입 — 턴 경계 아님
 				flush();
 				q = text; qId = String(e.id ?? "");
+				turnCompact = pendingCompact; pendingCompact = null; // 컴팩트 직후 시작 턴 — 이 지점부터 요약 기억 마커
 			} else if (m.role === "assistant" && m.stopReason !== "aborted") {
 				const text = agentMessageText(m);
 				if (text) { a = text; aId = String(e.id ?? ""); model = typeof m.model === "string" ? m.model : undefined; ts = typeof e.timestamp === "string" ? e.timestamp : undefined; }
