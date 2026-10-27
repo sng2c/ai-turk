@@ -44,6 +44,9 @@ export interface BackendOptions {
 	cwd: string;
 	onLog?: (msg: string) => void;
 	userKey?: string; // 세션 ID(pi --session-id) — 영속 세션. Claude 백엔드는 무시.
+	model?: string; // 대화별 시작 모델(modelId) — 세션 코어가 lastModel.id를 전달. 미지정 시 TURK_PI_MODEL 기본값.
+	// 근거: pi는 --model 플래그가 세션 파일의 model_change보다 우선한다(실측 검증) — 전달 없이는 dormant 스폰이
+	// 대화의 마지막 모델을 서버 기본값으로 리셋했다 (표시만 lastModel 유지, 실제 턴은 기본 모델로 도는 분열).
 	workspaceEnv?: Record<string, string>; // 계정별 환경변수 (4c-refit) — 세션 코어가 authorize.accountEnv 계약으로 수령해 주입 (동일 계정 대화들이 공유). 값은 로그·이벤트로 노출 금지
 }
 
@@ -128,7 +131,7 @@ export class PiBackend extends JsonlBackend {
 	override start(): void {
 		try { mkdirSync(this.opts.cwd, { recursive: true }); } catch { /* 무시 */ }
 		const bin = process.env.TURK_PI_BIN || "pi";
-		const model = process.env.TURK_PI_MODEL || "";
+		const model = this.opts.model || process.env.TURK_PI_MODEL || ""; // 대화별 모델 우선 — TURK_PI_MODEL은 신규 대화 기본값
 		const extra = (process.env.TURK_PI_ARGS || "").split(/\s+/).filter(Boolean);
 		// userKey 있으면 해당 세션 복원(--session-id), 없으면 pi가 자체 영속 세션 생성 (--no-session 사용 안함)
 		const sessionArgs = this.opts.userKey ? ["--session-id", this.opts.userKey] : [];
