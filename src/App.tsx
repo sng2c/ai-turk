@@ -199,6 +199,24 @@ export default function App() {
 		flipTimerRef.current = setTimeout(() => { animFlipRef.current = false; setPageIdx(next); }, 190); // 애니메이션 마감 = 윈도 시프트 → useLayoutEffect 재기준
 	}, [applyTrack]);
 
+	// 경계 저항(resistance) — 키/휘이 경계에서 페이지 전환 직전 한 번 저항: 첫 푸시는 이웃 페이지
+	// 가장자리를 고무밴드로 엿보고 제자리 스냅백(끝 신호), 창(~1.2s) 내 같은 방향 두 번째 푸시에만 플립 확정.
+	// 반대 방향 푸시는 즉시 리셋(저항 방향 갱신). 터치 드래그의 ¼슬롯 임계와 대칭인 키/휴 계약.
+	const resistRef = useRef<{ dir: 0 | 1 | -1; count: number; at: number }>({ dir: 0, count: 0, at: 0 });
+	const resistPush = useCallback((dir: 1 | -1): boolean => {
+		const r = resistRef.current;
+		const now = performance.now();
+		if (r.dir !== dir || now - r.at > 1200) { r.dir = dir; r.count = 0; }
+		r.count += 1;
+		r.at = now;
+		if (r.count >= 2) { r.count = 0; return true; } // 저항 관통 — 플립 확정
+		if (!animFlipRef.current) { // 첫 푸시 — 엿보기+스냅백 (시각 저항)
+			applyTrack(-dir * slotH() * 0.12, true);
+			setTimeout(() => { if (!animFlipRef.current && !dragState.current.active) applyTrack(0, true); }, 150);
+		}
+		return false;
+	}, [applyTrack]);
+
 	// ── 히스토리 fetch — 서버가 pi 세션 JSONL을 스폰 없이 판독(GET /api/conversations/<key>/history) ──
 	// 실패(라우트 부재·오류)는 history []로 마감 — 단일 live 페이지 현행 동작 유지 (claude 백엔드 등).
 	const fetchHistory = useCallback(() => {
@@ -1082,13 +1100,19 @@ export default function App() {
 		const onWheel = (e: WheelEvent) => {
 			const t = e.target as HTMLElement;
 			if (t.closest("input, textarea, .turk-drawer")) return; // 입력창·드로어 — 자체 스크롤
-			if (t.closest(".turk-message") && canScroll(curScrollRef.current, e.deltaY)) return; // 출력창 내부 스크롤 여지 — 네이티브
+			const inBox = !!t.closest(".turk-message");
+			if (inBox && canScroll(curScrollRef.current, e.deltaY)) return; // 출력창 내부 스크롤 여지 — 네이티브
 			e.preventDefault();
 			const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY; // line 모드 휠 → px 환산 (노치 ≈ 3라인 × 33px)
 			if (animFlipRef.current) { wheelAcc = 0; return; } // 플립 진행중 — 마감 후 다음 노치가 받음
 			if ((wheelAcc > 0) !== (d > 0)) wheelAcc = 0; // 방향 전환 — 잔여 축적 초기화
 			wheelAcc += d;
-			if (Math.abs(wheelAcc) >= 60) { flipTo(wheelAcc > 0 ? 1 : -1); wheelAcc = 0; }
+			if (Math.abs(wheelAcc) >= 60) {
+				const dir = wheelAcc > 0 ? 1 : -1;
+				wheelAcc = 0;
+				// 출력창 내부 경계는 저항(첫 노치 엿보기, 이어지는 노치 확정) — 밖은 즉시 플립(의도적 페이지 이동)
+				if (inBox ? resistPush(dir) : true) flipTo(dir);
+			}
 		};
 		window.addEventListener("wheel", onWheel, { passive: false });
 		return () => {
@@ -1098,7 +1122,7 @@ export default function App() {
 			window.removeEventListener("touchcancel", onTouchEnd);
 			window.removeEventListener("wheel", onWheel);
 		};
-	}, [applyTrack, flipTo]);
+	}, [applyTrack, flipTo, resistPush]);
 
 	// ── 키보드 숏컷 — 엔터=입력창 포커스(입력창 밖), Esc=취소(턴 취소·메뉴 닫기), ↑↓=페이지 플립 ──
 	// 입력 필드·드로어 내부는 자체 동작 우선(커서 이동·폼 Escape·버튼 활성화 간섭 금지)
@@ -1115,7 +1139,9 @@ export default function App() {
 				const down = e.key === "ArrowDown";
 				const can = sc ? (down ? sc.scrollTop + sc.clientHeight < sc.scrollHeight - 2 : sc.scrollTop > 2) : false;
 				if (can && sc) { sc.scrollTop += (down ? 1 : -1) * sc.clientHeight * 0.75; return; } // ¾ 뷰포트씩
-				flipTo(down ? 1 : -1); // ↓=다음(최신) · ↑=이전(과거)
+				// 경계 — 저항 후 플립: 첫 푸시는 이웃 페이지 엿보기+스냅백, 이어지는 푸시에 확정
+				const dir = down ? 1 : -1;
+				if (resistPush(dir)) flipTo(dir);
 				return;
 			}
 			if (e.key === "Escape") {
@@ -1138,7 +1164,7 @@ export default function App() {
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [flipTo, loading]);
+	}, [flipTo, loading, resistPush]);
 
 	// ── 모델 그리드 렌더 ───────────────────────────────────────────────
 	const renderModelGrid = () => {
