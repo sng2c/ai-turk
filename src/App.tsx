@@ -1142,19 +1142,39 @@ export default function App() {
 			if (e.ctrlKey || e.altKey || e.metaKey) return; // 조합 키는 브라우저·OS 소관
 			const t = e.target as HTMLElement | null;
 			const inField = !!t?.closest?.("input, textarea, .turk-drawer");
-			if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-				if (inField) return; // 입력 커서 이동·드로어 목록 스크롤은 자체 동작
+			if (e.key === "PageUp" || e.key === "PageDown") {
+				if (inField) return;
 				e.preventDefault();
-				// 출력창 스크롤 우선 — 끄트머리(경계)에서 페이지 전환까지 연동 (휠과 동일 계약)
+				// 페이지 키 — 출력창 스크롤(0.9 뷰포트씩) 우선, 끄트머리(경계)에서 저항 후 페이지 전환 (휠과 동일 계약)
 				const sc = curScrollRef.current;
-				const down = e.key === "ArrowDown";
+				const down = e.key === "PageDown";
 				const can = sc ? (down ? sc.scrollTop + sc.clientHeight < sc.scrollHeight - 2 : sc.scrollTop > 2) : false;
-				if (can && sc) { sc.scrollTop += (down ? 1 : -1) * sc.clientHeight * 0.75; return; } // ¾ 뷰포트씩
+				if (can && sc) { sc.scrollTop += (down ? 1 : -1) * sc.clientHeight * 0.9; return; }
 				// 경계 — 저항 후 플립: 첫 푸시는 이웃 페이지 엿보기+스냅백, 이어지는 푸시에 확정
 				const dir = down ? 1 : -1;
 				if (!e.repeat) held.flipped = false; // 새 프레스 — 세션 리셋
 				if (held.flipped) return; // 이 프레스에서 이미 넘김 — 릴리스까지 정지 (연쇄 캔슬)
 				if (resistPush(dir)) { flipTo(dir); held.flipped = true; }
+				return;
+			}
+			if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+				if (inField) return; // 입력 커서 이동은 자체 동작
+				e.preventDefault();
+				// 화살표 — 그리드 버튼 포커스 이동(↑↓=행, ←→=열). 빈 칸·숨은 행은 건너뛰고 다음 실재 버튼으로
+				const btns = Array.from(document.querySelectorAll<HTMLButtonElement>(".turk-grid .turk-grid-btn:not(.turk-grid-btn-empty)"));
+				if (!btns.length) return;
+				const active = document.activeElement as HTMLElement | null;
+				const curBtn = !!active?.classList?.contains("turk-grid-btn") ? (active as HTMLButtonElement) : null;
+				if (!curBtn) { (e.key === "ArrowUp" || e.key === "ArrowLeft" ? btns[btns.length - 1] : btns[0]).focus(); return; } // 진입점 — 맨 뒤/맨 앞
+				const idx = Number(curBtn.dataset.idx ?? NaN);
+				if (!Number.isFinite(idx)) return;
+				const r = Math.floor(idx / cols), c = idx % cols;
+				const stepRow = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+				const stepCol = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+				for (let rr = r + stepRow, cc = c + stepCol; rr >= 0 && rr < rows && cc >= 0 && cc < cols; rr += stepRow, cc += stepCol) {
+					const cand = btns.find((b) => Number(b.dataset.idx) === rr * cols + cc);
+					if (cand) { cand.focus(); return; }
+				}
 				return;
 			}
 			if (e.key === "Escape") {
@@ -1175,7 +1195,7 @@ export default function App() {
 				inputRef.current?.focus(); // 입력창 밖 엔터 — 곧장 타이핑 시작
 			}
 		};
-		const onKeyUp = (e: KeyboardEvent) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") held.flipped = false; }; // 릴리스 — 다음 프레스 세션
+		const onKeyUp = (e: KeyboardEvent) => { if (e.key === "PageUp" || e.key === "PageDown") held.flipped = false; }; // 릴리스 — 다음 프레스 세션
 		window.addEventListener("keydown", onKey);
 		window.addEventListener("keyup", onKeyUp);
 		return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
@@ -1684,7 +1704,8 @@ export default function App() {
 							key={`${idx}:${gridVerRef.current}`}
 							className={`turk-grid-btn${loading || !piReady ? " turk-grid-btn-off" : ""}${gridState.colors?.[idx] ? ` turk-bg-${gridState.colors[idx]}` : ""}${gridState.textColors?.[idx] ? ` turk-fg-${gridState.textColors[idx]}` : gridState.colors?.[idx] ? ` turk-fg-${["secondary", "muted", "accent", "destructive"].includes(gridState.colors[idx]) ? "white" : "black"}` : ""}`}
 							aria-disabled={loading || !piReady}
-							onClick={() => { if (loading || !piReady) return; handleSend(label); }} // disabled 속성 금지 — 비활성 폼 컨트롤은 터치 이벤트 자체가 소멸해 버튼영역 드래그(페이지 플립)가 죽는다. 클릭만 논리 가드.
+							data-idx={idx}
+								onClick={() => { if (loading || !piReady) return; handleSend(label); }} // disabled 속성 금지 — 비활성 폼 컨트롤은 터치 이벤트 자체가 소멸해 버튼영역 드래그(페이지 플립)가 죽는다. 클릭만 논리 가드. data-idx — 화살표 포커스 내비 원료
 							style={menuMode.current === "model" ? (() => {
 								// 모델 선택 화면: 모델명이 길면 폰트 자동 축소 (기준 8칸, 최소 0.8em)
 								const w = [...label].reduce((a, c) => a + (/[^\u0000-\u007f]/.test(c) ? 2 : 1), 0);
