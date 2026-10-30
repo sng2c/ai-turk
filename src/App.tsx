@@ -926,7 +926,7 @@ export default function App() {
 						const kb = `${b.provider}/${b.name || b.id}`;
 						return ka < kb ? -1 : ka > kb ? 1 : 0;
 					});
-					try { localStorage.setItem("turk-models-cache", JSON.stringify(availableModels.current)); } catch { /* 무시 */ } // 드래프트 메뉴용 — WS 없는 첫 페이지가 캐시로 렌더 (서버 왕복 없음)
+					try { localStorage.setItem("turk-models-cache-v2", JSON.stringify(availableModels.current)); } catch { /* 무시 */ } // 드래프트 메뉴용 — WS 없는 첫 페이지가 캐시로 렌더 (서버 왕복 없음)
 					openModelMenu(); // 최근 선택 모델 로드 후 렌더 (비동기)
 				}
 				break;
@@ -1258,7 +1258,7 @@ export default function App() {
 	const openModelMenuFromCache = () => {
 		let cached: any[] | null = null;
 		try {
-			const raw = localStorage.getItem("turk-models-cache");
+			const raw = localStorage.getItem("turk-models-cache-v2"); // v2 — provider 화이트리스트 도입 전 미색 목록 무효화
 			const p = raw ? JSON.parse(raw) : null;
 			if (Array.isArray(p) && p.length) cached = p;
 		} catch { /* 파손 캐시 = 없음 취급 */ }
