@@ -45,6 +45,7 @@ export interface BackendOptions {
 	onLog?: (msg: string) => void;
 	userKey?: string; // 세션 ID(pi --session-id) — 영속 세션. Claude 백엔드는 무시.
 	model?: string; // 대화별 시작 모델(modelId) — 세션 코어가 lastModel.id를 전달. 미지정 시 TURK_PI_MODEL 기본값.
+	noSession?: boolean; // 예열·조회용 throwaway 스폰 — pi --no-session (세션 파일 미생성). userKey보다 우선하지 않음(공존 시 --session-id 승계).
 	// 근거: pi는 --model 플래그가 세션 파일의 model_change보다 우선한다(실측 검증) — 전달 없이는 dormant 스폰이
 	// 대화의 마지막 모델을 서버 기본값으로 리셋했다 (표시만 lastModel 유지, 실제 턴은 기본 모델로 도는 분열).
 	workspaceEnv?: Record<string, string>; // 계정별 환경변수 (4c-refit) — 세션 코어가 authorize.accountEnv 계약으로 수령해 주입 (동일 계정 대화들이 공유). 값은 로그·이벤트로 노출 금지
@@ -134,7 +135,7 @@ export class PiBackend extends JsonlBackend {
 		const model = this.opts.model || process.env.TURK_PI_MODEL || ""; // 대화별 모델 우선 — TURK_PI_MODEL은 신규 대화 기본값
 		const extra = (process.env.TURK_PI_ARGS || "").split(/\s+/).filter(Boolean);
 		// userKey 있으면 해당 세션 복원(--session-id), 없으면 pi가 자체 영속 세션 생성 (--no-session 사용 안함)
-		const sessionArgs = this.opts.userKey ? ["--session-id", this.opts.userKey] : [];
+		const sessionArgs = this.opts.userKey ? ["--session-id", this.opts.userKey] : this.opts.noSession ? ["--no-session"] : []; // 미지정 시 pi가 자체 영속 세션 생성
 		// 세션별 API 토큰 귀속 — 접두사·폴백 토큰은 .env에서 주입 (게이트웨이 세부는 리포 외부)
 		const userHash = this.opts.userKey ? createHash("sha256").update(this.opts.userKey).digest("hex").slice(0, 12) : "";
 		const gwPrefix = process.env.GATEWAY_TOKEN_PREFIX;

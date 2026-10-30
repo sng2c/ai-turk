@@ -926,7 +926,6 @@ export default function App() {
 						const kb = `${b.provider}/${b.name || b.id}`;
 						return ka < kb ? -1 : ka > kb ? 1 : 0;
 					});
-					try { localStorage.setItem("turk-models-cache-v2", JSON.stringify(availableModels.current)); } catch { /* 무시 */ } // 드래프트 메뉴용 — WS 없는 첫 페이지가 캐시로 렌더 (서버 왕복 없음)
 					openModelMenu(); // 최근 선택 모델 로드 후 렌더 (비동기)
 				}
 				break;
@@ -1253,37 +1252,37 @@ export default function App() {
 		});
 	};
 
-	// 드래프트 모델 메뉴 — WS 없음: localStorage 캐시(turk-models-cache — 마지막 get_available_models 응답)로 즉시 렌더.
-	// 캐시 없으면(신규 브라우저·서버 재시작 후 목록을 한 번도 받지 못한 상태) 안내 화면 — 드래프트는 서버에 아무 요청도 날리지 않는다.
-	const openModelMenuFromCache = () => {
-		let cached: any[] | null = null;
-		try {
-			const raw = localStorage.getItem("turk-models-cache-v2"); // v2 — provider 화이트리스트 도입 전 미색 목록 무효화
-			const p = raw ? JSON.parse(raw) : null;
-			if (Array.isArray(p) && p.length) cached = p;
-		} catch { /* 파손 캐시 = 없음 취급 */ }
-		if (!cached) {
+	// 모델 목록 fetch — 매번 서버(GET /api/models — 서버 캐시는 화이트리스트 필터본·부팅 예열)에서 가져온다.
+	// 로컬 저장 캐시 폐지 — 낡은 목록이 재생되는 것 자체를 차단. 드래프트(WS 없음)·폴백(라이브 무응답) 공용 경로.
+	const openModelMenuFetch = () => {
+		fetch("/api/models").then((r) => (r.ok ? r.json() : null)).then((j: any) => {
+			const models = Array.isArray(j?.models) ? j.models : [];
+			if (!models.length) {
+				menuMode.current = "none";
+				setState({ message: "**모델 목록 없음**\n\n서버가 아직 목록을 수집하지 못했습니다 — 잠시 후 다시 열어주세요.", buttons: {}, answerTo: "모델 선택" });
+				return;
+			}
+			availableModels.current = models;
+			openModelMenu();
+		}).catch(() => {
 			menuMode.current = "none";
-			setState({ message: "**모델 목록 없음**\n\n대화를 시작한 후 모델 메뉴를 열면 서버에서 목록을 받아 옵니다.", buttons: {}, answerTo: "모델 선택" });
-			return;
-		}
-		availableModels.current = cached;
-		openModelMenu();
+			setState({ message: "**모델 목록 조회 실패**\n\n잠시 후 다시 시도해주세요.", buttons: {}, answerTo: "모델 선택" });
+		});
 	};
 
 	// ── 대화 모델 메뉴 — 서버 요청 + 캐시 폴백 (서버 재시작 직후 get_available_models 무응답 → 빈 메뉴 해소) ──
 	// 800ms 내 응답(modelsCache 합성 재전달 포함)이 오면 응답 핸들러가 타이머를 해제하고 메뉴를 연다.
-	// 무응답(modelsCache 소실 — 서버 재시작 직후 라이브 목록 수신 전)이면 localStorage 캐시로 즉시 렌더 —
-	// 드래프트 경로(openModelMenuFromCache) 재사용. 폴백 발동 시점에도 '오픈 여부' 기준 이중 오픈 방지.
+	// 무응답(dormant·서버 재시작 직후)이면 HTTP /api/models로 서버 캐시에서 가져온다(로컬 캐시 폐지).
+	// 폴백 발동 시점에도 '오픈 여부' 기준 이중 오픈 방지.
 	const requestModelsWithFallback = () => {
 		const ws = wsRef.current;
-		if (!ws || ws.readyState !== WebSocket.OPEN) { openModelMenuFromCache(); return; } // WS 없음 — 드래프트 캐시 경로
+		if (!ws || ws.readyState !== WebSocket.OPEN) { openModelMenuFetch(); return; } // WS 없음 — 드래프트 캐시 경로
 		ws.send(JSON.stringify({ type: "get_available_models" }));
 		clearTimeout(modelsFallbackTimerRef.current);
 		modelsFallbackTimerRef.current = setTimeout(() => {
 			modelsFallbackTimerRef.current = undefined;
 			if (menuMode.current === "model") return; // 응답이 이미 메뉴를 열었다 — 이중 오픈 금지
-			openModelMenuFromCache();
+			openModelMenuFetch();
 		}, 800);
 	};
 
@@ -1388,7 +1387,7 @@ export default function App() {
 		if (isDraft && menuMode.current === "none") {
 			if (text === "/model") { // WS 없는 첫 페이지 — 캐시 메뉴 (서버 왕복 없음)
 				prevStateRef.current = state;
-				openModelMenuFromCache();
+				openModelMenuFetch();
 				return;
 			}
 			if (text.startsWith("/")) return; // /session·/compact 등 제어 명령 — WS 없는 첫 페이지에서 무의미 (대화 생성도 않음)
@@ -1428,7 +1427,7 @@ export default function App() {
 				requestModelsWithFallback(); // 서버 응답 우선 — 800ms 무응답 시 localStorage 캐시 폴백
 			} else if (isDraft) {
 				// 드래프트 — WS 없음: 캐시 메뉴 재렌더 (메뉴 중이면 prevState 보존)
-				openModelMenuFromCache();
+				openModelMenuFetch();
 			}
 			return;
 		}
@@ -1596,7 +1595,7 @@ export default function App() {
 					if (ws?.readyState === WebSocket.OPEN) {
 						requestModelsWithFallback(); // 서버 응답 우선 — 800ms 무응답 시 localStorage 캐시 폴백
 					} else if (isDraft) {
-						openModelMenuFromCache(); // 드래프트 — WS 없음: 캐시 메뉴 (서버 왕복 없음)
+						openModelMenuFetch(); // 드래프트 — WS 없음: 캐시 메뉴 (서버 왕복 없음)
 					}
 				}} title={currentModel || "모델 선택"}>{(currentModel.split("/").pop() || currentModel) || "모델 선택"}</button> {!!(supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0) ? null : (<button className="turk-thinking-btn" onClick={cycleThinking} style={{ color: (supportedThinkingLevelsRef.current.filter(k => k !== "off").length === 0 || thinkingLevel === "off") ? "var(--muted-foreground)" : "var(--success)" }} title={`씽킹 레벨 순환: ${thinkingLevel}`}><Sparkles className="turk-ico" />{((({ off: "--", none: "--", minimal: "MI", low: "LO", medium: "ME", high: "HI", xhigh: "XH", max: "MA" } as Record<string, string>)[thinkingLevel]) ?? thinkingLevel.slice(0, 2))}</button>)} <button className="turk-new-btn" onClick={() => {
 				if (menuMode.current === "ctx") {

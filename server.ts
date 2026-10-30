@@ -272,6 +272,17 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		return;
 	}
 
+	// 모델 목록 — 서버 캐시 단일 진원(화이트리스트 필터본·부팅 예열). 클라는 매번 여기서 가져온다(로컬 캐시 폐지)
+	if (url.pathname === "/api/models" && req.method === "GET") {
+		if (AUTH) {
+			const user = auth ? await auth.authorizeRequest(req) : null;
+			if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; }
+		}
+		res.writeHead(200, JSONH);
+		res.end(JSON.stringify({ models: core.getModels() }));
+		return;
+	}
+
 	if (url.pathname === "/api/conversations") {
 		// 1c 대화 레지스트리 — 목록 단일 진원 core.listConversations() (정적 파일 처리 앞에서 가로채기)
 		// Phase 2 — AUTH시 미인증 401, 인증시 username의 own만 필터 (orphan·foreign 제외)

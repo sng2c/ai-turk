@@ -105,6 +105,15 @@ function findSessionFile(sessionId: string): string | null {
 	return best;
 }
 
+// get_available_models 응답 화이트리스트 필터 — 라이브 기록·부팅 예열 공용 (TURK_PI_PROVIDERS)
+function filterModelsEvent(ev: any): void {
+	if (!MODELS_PROVIDERS_WHITELIST.length || !Array.isArray(ev?.data?.models)) return;
+	const all = ev.data.models as any[];
+	const kept = all.filter((m) => MODELS_PROVIDERS_WHITELIST.includes(String(m?.provider)));
+	if (!kept.length) console.log(`[Models] 화이트리스트(TURK_PI_PROVIDERS) 매칭 0 — 전체 ${all.length}개 그대로 (설정 확인 필요)`);
+	if (kept.length) ev.data = { ...ev.data, models: kept };
+}
+
 // AgentMessage 텍스트 블록 적출 — content가 배열이면 text 블록 join, 문자열이면 그대로
 function agentMessageText(m: any): string {
 	if (typeof m?.content === "string") return m.content;
@@ -191,6 +200,7 @@ export interface SessionCore {
 	reclaimSweep(): number; // 유휴 백엔드 회수 스윕 1회 실행 (60s 인터벌 + 테스트·수동 트리거용) — 회수 수 반환
 	listConversations(username?: string): ConversationSummary[]; // 대화 레지스트리 목록 (1c) — authorize 주입 시 username의 own만 필터 (orphan·foreign 제외)
 	readConversationHistory(userKey: string): HistoryTurn[]; // 히스토리 리더 — pi 세션 JSONL에서 활성 브랜치 턴 목록 (페이지 뷰어 원료). 스폰 없이 디스크 직접 판독
+	getModels(): any[]; // 모델 목록 단일 진원 — 전역 캐시(화이트리스트 필터본·부팅 예열). GET /api/models 응답 본체
 	renameConversation(userKey: string, title: string): boolean; // 대화 이름 변경 (Phase 3) — 세션 셸·conversation.json 동시 갱신. 형식 위반·미존재 → false
 	deleteConversation(userKey: string): boolean; // 대화 삭제 (Phase 3) — 셸 제거(removeSession 재사용) + 데이터·워크스페이스 dir 소멸. 멱등 — 형식 위반만 false
 }
@@ -423,6 +433,37 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 	// ── get_available_models 전역 캐시 (열림 무지연) — 마지막 라이브 성공 응답 1건 보관 → dormant 재요청에
 	//    재전달. 모델 목록은 계정·대화 공통 자원이라 코어 단위 1슬롯 캐시로 족하다 (세션 키 불필요).
 	let modelsCache: TurkEvent | null = null;
+
+	// 모델 목록 단일 진원 — 캐시(화이트리스트 필터본) 반환. 빈 캐시는 부팅 예열·첫 라이브 응답이 채운다
+	function getModels(): any[] {
+		const list = (modelsCache?.data as any)?.models;
+		return Array.isArray(list) ? list : [];
+	}
+
+	// 부팅 예열 — throwaway pi(--no-session)로 get_available_models를 1회 조회해 캐시 선적.
+	// 스폰은 이 1회뿐 (이후 라이브 백엔드 응답이 갱신). 실패·지연은 조용히 — 첫 라이브 응답이 대신 채운다.
+	let modelsWarming = false;
+	function warmModelsCache(): void {
+		if (cfg?.backendFactory) return; // 테스트 팩터리 주입 환경 — 예열 스킵(FakeBackend 명령 시퀀스 오염 방지). prod(vite·server)은 미주입이라 항상 예열
+		if (modelsWarming || modelsCache) return;
+		modelsWarming = true;
+		try {
+			const warm = createBackendFn({ cwd: DATA_DIR, noSession: true, onLog: (m: string) => console.log(`[Models-warm] ${m}`) });
+			warm.onEvent((ev: any) => {
+				if (ev.type === "response" && ev.command === "get_available_models" && ev.success) {
+					filterModelsEvent(ev);
+					modelsCache = ev;
+					console.log(`[Models-warm] 예열 완료 — ${getModels().length}개 캐시`);
+					warm.stop();
+					modelsWarming = false;
+				}
+			});
+			warm.start();
+			warm.send({ type: "get_available_models" });
+			const t = setTimeout(() => { if (modelsWarming) { warm.stop(); modelsWarming = false; console.log("[Models-warm] 예열 타임아웃 — 첫 라이브 응답이 채움"); } }, 10000);
+			t.unref?.(); // 프로세스 라이프사이클에 붙잡지 않게 (테스트·종료)
+		} catch { modelsWarming = false; }
+	}
 
 	// ── 1c 부팅 스윕 — 대화 레지스트리 복원: 데이터 dir 스캔 → 전 대화 셸 생성 (백엔드 스폰 없음) ──
 	// createSession의 Scheduler가 schedules.json을 로드해 즉시 부활 — 과거 nextRun은 delay 0 즉시발화,
@@ -810,12 +851,7 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			// 화이트리스트(TURK_PI_PROVIDERS) 지정 시 캐시·브로드캐스트 전에 응답 본체를 필터 — 클라 메뉴·localStorage
 			// 캐시·합성 재전달이 전부 같은 좁힌 목록을 보게 단일 진원 유지. 빈 결과는 설정 오타 의심 경고만(동작은 그대로).
 			if (ev.type === "response" && ev.command === "get_available_models" && (ev as any).success) {
-				if (MODELS_PROVIDERS_WHITELIST.length && Array.isArray((ev as any).data?.models)) {
-					const all = (ev as any).data.models as any[];
-					const kept = all.filter((m) => MODELS_PROVIDERS_WHITELIST.includes(String(m?.provider)));
-					if (!kept.length) console.log(`[Models] 화이트리스트(TURK_PI_PROVIDERS) 매칭 0 — 전체 ${all.length}개 그대로 (설정 확인 필요)`);
-					if (kept.length) (ev as any).data = { ...(ev as any).data, models: kept };
-				}
+				filterModelsEvent(ev); // 화이트리스트(TURK_PI_PROVIDERS) — 캐시·브로드캐스트 전 본체 필터
 				modelsCache = ev;
 			}
 			// get_state 응답에서 실제 agentSessionId 확인 → 파일 영속 (ready 후 갱신)
@@ -1227,5 +1263,6 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 		iv.unref?.(); // 서버 생명 유지 책임은 listen 쪽 — keepalive가 프로세스를 붙잡지 않게 (dev·prod 동일)
 	}
 
-	return { sessions, maxSessions: MAX_BACKENDS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive, ensureBackend, reclaimSweep, listConversations, readConversationHistory, renameConversation, deleteConversation };
+	warmModelsCache(); // 부팅 예열 — 코어 생성 시 1회 (fire-and-forget)
+	return { sessions, maxSessions: MAX_BACKENDS, getOrCreateSession, removeSession, removeAllSessions, handleConnection, keepAlive, ensureBackend, reclaimSweep, listConversations, readConversationHistory, getModels, renameConversation, deleteConversation };
 }

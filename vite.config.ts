@@ -44,6 +44,13 @@ function turkPlugin(): Plugin {
 
 			wss.on("connection", (ws, req) => core.handleConnection(ws, req));
 
+			// 모델 목록 — prod server.ts와 동일 단일 진원 (dev 무인증)
+			server.middlewares.use("/api/models", (_req, res) => {
+				res.setHeader("Content-Type", "application/json");
+				res.setHeader("Cache-Control", "no-store");
+				res.end(JSON.stringify({ models: core.getModels() }));
+			});
+
 			// 히스토리 뷰어 — GET /api/conversations/<key>/history (dev 무인증 경로 — prod server.ts의 3단 검증 대응체).
 			// 기존 "/api/conversations" 마운트보다 먼저 등록: connect 마운트(/api/conversations)는 서브패스도 흡수하므로
 			// 여기서 history 패턴만 소비하고 나머지는 next()로 통과시킨다.
