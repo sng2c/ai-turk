@@ -43,6 +43,11 @@ import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, readdirSync
 
 const DATA_DIR = envPaths("ai-turk").data;
 
+// 모델 메뉴 provider 화이트리스트 — TURK_PI_PROVIDERS (쉼표 구분, 예: "provider-a,provider-b").
+// 미지정=필터 없음(전체 — 기존 동작). 지정 시 get_available_models 응답을 그 provider들만으로 좁힌다:
+// 커스텀 provider(개인 게이트웨이 등)만 노출하는 운영 설정이며 값은 배포 .env(비공개)에만 존재 — 리포에는 변수 계약만.
+const MODELS_PROVIDERS_WHITELIST = (process.env.TURK_PI_PROVIDERS ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+
 // ── 워크스페이스 위치 분리 (261010 B확정) — 상태(DATA_DIR)와 작업물(산출물) 분리, 코드 마이그레이션 없음 ──
 // TURK_WORKSPACES_ROOT 미설정 → 현행 경로 유지(join(DATA_DIR, userKey, "workspace") — 동작 0변경).
 // 설정(절대경로) → join(ROOT, userKey). 호출시점 env 판독 — 테스트에서 동적 스위칭 가능.
@@ -802,7 +807,15 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 				}
 			}
 			// get_available_models 전역 캐시 — 성공 응답만 보관 (dormant 재요청 합성 응답원, 실패·위반 응답은 미보관)
+			// 화이트리스트(TURK_PI_PROVIDERS) 지정 시 캐시·브로드캐스트 전에 응답 본체를 필터 — 클라 메뉴·localStorage
+			// 캐시·합성 재전달이 전부 같은 좁힌 목록을 보게 단일 진원 유지. 빈 결과는 설정 오타 의심 경고만(동작은 그대로).
 			if (ev.type === "response" && ev.command === "get_available_models" && (ev as any).success) {
+				if (MODELS_PROVIDERS_WHITELIST.length && Array.isArray((ev as any).data?.models)) {
+					const all = (ev as any).data.models as any[];
+					const kept = all.filter((m) => MODELS_PROVIDERS_WHITELIST.includes(String(m?.provider)));
+					if (!kept.length) console.log(`[Models] 화이트리스트(TURK_PI_PROVIDERS) 매칭 0 — 전체 ${all.length}개 그대로 (설정 확인 필요)`);
+					if (kept.length) (ev as any).data = { ...(ev as any).data, models: kept };
+				}
 				modelsCache = ev;
 			}
 			// get_state 응답에서 실제 agentSessionId 확인 → 파일 영속 (ready 후 갱신)
