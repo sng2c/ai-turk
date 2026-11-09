@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
-import { Bot, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu, RefreshCw } from "lucide-react";
+import { Bot, Sparkles, Wrench, AlarmClock, Copy, Settings, Paperclip, Menu, RefreshCw, X, Download } from "lucide-react";
 import { DEFAULT_COLS, DEFAULT_ROWS } from "./lib/agents-md";
 import {
 	TURK_USER_KEY, resolveUserKey, reflectUserKey, uuidv4Fallback,
@@ -20,6 +20,183 @@ type PageTurn = { id: string; qId: string; q: string; a: string; parsed: TurkSta
 type PageView = { kind: "past"; turn: PageTurn } | { kind: "live" };
 // 첨부 경로 주입 헤더 제거 — 히스토리 질문 표시는 순수 유저 입력만 (composePrompt 원문 중 display용 박리)
 const stripAttachHeader = (q: string) => q.replace(/^\[첨부 파일 — 아래 경로를 read 도구로 읽어 확인하세요\]\n(?:- .*\n)+\n?/, "").trim();
+
+// ── 이미지 라이트박스 — 출력 이미지 탭 → 전체화면 확대 뷰 (핀치줌·팬·더블탭·휠·스와이프 닫기) ──
+// 리렌더 0 설계: 스케일/좌표는 ref + 직접 style 기입(리팬터만 style 텍스트), 제스처는 비패시브 리스너로
+// 브라우저 기본(스크롤·풀리프레시·뷰포트 핀치) 차단. 더블탭·휠·핀치 모두 zoomAt(초점점 유지) 경유.
+// 배경 밝다 1x 세로 스와이프 = 닫기(페이드 동반) — 풀리프레시 제스처와 어법 동일.
+const ZOOM_MAX = 12;
+function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+	const wrapRef = useRef<HTMLDivElement | null>(null);
+	const imgRef = useRef<HTMLImageElement | null>(null);
+	const view = useRef({ s: 1, x: 0, y: 0 }); // img transform — translate(px) + scale, 초기 1x 중앙
+	const gest = useRef({
+		mode: "" as "" | "pan" | "pinch",
+		id: -1, // 싱글팬 트랙 touch identifier
+		p0: { x: 0, y: 0 }, v0: { s: 1, x: 0, y: 0 }, // 팬 시작 지점·변환 원본
+		mid0: { x: 0, y: 0 }, d0: 1, // 핀치 시작 중점·두 손가락 거리
+		lastTap: 0, tap0: { x: 0, y: 0 }, // 더블탭 판정 — 직전 탭 시각·지점
+		pull: 0, // 1x 세로 스와이프 진행량 (px)
+	});
+	const sameOrigin = !!src && (src.startsWith("/") || (() => { try { return new URL(src, location.href).origin === location.origin; } catch { return false; } })());
+
+	const apply = () => {
+		const img = imgRef.current;
+		if (img) img.style.transform = `translate3d(${view.current.x}px, ${view.current.y}px, 0) scale(${view.current.s})`;
+	};
+	const anim = (on: boolean) => { imgRef.current?.classList.toggle("turk-lightbox-fast", !on); }; // 제스처 조작 중엔 트랜지션 off
+	const clampView = () => {
+		const wrap = wrapRef.current, img = imgRef.current;
+		if (!wrap || !img) return;
+		const v = view.current;
+		const maxX = Math.max(0, (img.offsetWidth * v.s - wrap.clientWidth) / 2);
+		const maxY = Math.max(0, (img.offsetHeight * v.s - wrap.clientHeight) / 2);
+		v.x = Math.min(maxX, Math.max(-maxX, v.x));
+		v.y = Math.min(maxY, Math.max(-maxY, v.y));
+	};
+	/** 초점점(뷰포트 로컬 좌표) 유지 확대·축소 — 휠·더블탭·핀치 공용 경유 */
+	const zoomAt = (cx: number, cy: number, factor: number) => {
+		const wrap = wrapRef.current;
+		if (!wrap) return;
+		anim(true);
+		const W = wrap.clientWidth, H = wrap.clientHeight;
+		const { s: s0, x: x0, y: y0 } = view.current;
+		const s = Math.min(ZOOM_MAX, Math.max(1, s0 * factor));
+		if (s === s0) return;
+		if (s <= 1.001) view.current = { s, x: 0, y: 0 }; // 1x — 중앙 스냅
+		else {
+			const lx = (cx - W / 2 - x0) / s0; // 초점의 이미지 로컬 좌표 — 스케일 후에도 같은 화면점 고정
+			const ly = (cy - H / 2 - y0) / s0;
+			view.current = { s, x: cx - W / 2 - lx * s, y: cy - H / 2 - ly * s };
+			clampView();
+		}
+		apply();
+	};
+
+	useEffect(() => {
+		const wrap = wrapRef.current, img = imgRef.current;
+		if (!wrap || !img) return;
+		const rectWrap = () => wrap.getBoundingClientRect();
+		const onWheel = (e: WheelEvent) => {
+			e.preventDefault();
+			e.stopPropagation(); // 앱의 전역(윈도우) 휠 핸들에 침범 안 함 — 라이트박스 제스처 전담 (플립·스크롤 오발 방지)
+			const r = rectWrap();
+			zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.2 : 1 / 1.2);
+		};
+		const onDbl = (e: MouseEvent) => {
+			const r = rectWrap();
+			zoomAt(e.clientX - r.left, e.clientY - r.top, view.current.s > 1.01 ? 1 / view.current.s : 2.5);
+		};
+		const onTouchStart = (e: TouchEvent) => {
+			e.stopPropagation(); // 앱 전역 드래그 페이저와 겸침 방지 — 라이트박스 중엔 여기만 동작
+			const g = gest.current;
+			if (e.touches.length === 2) {
+				const a = e.touches[0], b = e.touches[1];
+				g.mode = "pinch";
+				g.d0 = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+				g.mid0 = { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+				g.v0 = { ...view.current };
+				wrap.style.opacity = "1";
+				anim(false); // 핀치 중 — 손을 즉시 따라오게 (마감 때 트랜지션 복귀)
+			} else if (e.touches.length === 1) {
+				const t = e.touches[0];
+				g.mode = "pan";
+				g.id = t.identifier;
+				g.p0 = { x: t.clientX, y: t.clientY };
+				g.v0 = { ...view.current };
+				g.pull = 0;
+			}
+		};
+		const onTouchMove = (e: TouchEvent) => {
+			e.preventDefault(); // 라이트박스가 제스처 전담 — 페이지 스크롤·풀리프레시 차단 (비패시브 필수)
+			e.stopPropagation(); // 앱 전역 드래그 페이저 무력화
+			const g = gest.current;
+			if (g.mode === "pinch" && e.touches.length >= 2) {
+				const a = e.touches[0], b = e.touches[1];
+				const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+				const mid = { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+				const s = Math.min(ZOOM_MAX, Math.max(1, g.v0.s * (d / g.d0)));
+				view.current.s = s;
+				view.current.x = g.v0.x + (mid.x - g.mid0.x);
+				view.current.y = g.v0.y + (mid.y - g.mid0.y);
+				clampView();
+				apply();
+			} else if (g.mode === "pan" && e.touches.length === 1) {
+				const t = e.touches[0];
+				const dx = t.clientX - g.p0.x, dy = t.clientY - g.p0.y;
+				if (g.v0.s <= 1.001) {
+					if (dy > 0) { // 1x — 아래로 당김만 인정 (빈 사이드 드래그 무시) + 배경 페이드
+						g.pull = dy;
+						view.current.x = 0; view.current.y = dy;
+						apply();
+						wrap.style.opacity = String(Math.max(0.25, 1 - dy / 260));
+					} else wrap.style.opacity = "1";
+				} else {
+					view.current.x = g.v0.x + dx; view.current.y = g.v0.y + dy;
+					clampView();
+					apply();
+				}
+			}
+		};
+		const onTouchEnd = (e: TouchEvent) => {
+			e.stopPropagation(); // 터치 후 합성 클릭이 앱 전역 위임(이미지 열기)로 오발하지 않게
+			const g = gest.current;
+			wrap.style.opacity = "1";
+			anim(true); apply(); // 제스처 마감 — 잔여 위치는 트랜지션으로 스냅
+			if (g.mode === "pan" && g.v0.s <= 1.001 && e.touches.length === 0) {
+				if (g.pull > 90) { onClose(); return; } // 스와이프-다운 닫기 (스냅백 생략 — 그냥 내려가서 닫힘)
+			}
+			// 더블탭 — 이동 없는 짧은 탭 두 번 (320ms·60px 이내) → 탭점 초으로 토글 확대
+			if (g.mode === "pan" && e.touches.length === 0) {
+				const t = e.changedTouches[0];
+				if (t && Math.hypot(t.clientX - g.p0.x, t.clientY - g.p0.y) < 12) {
+					const now = Date.now();
+					if (now - g.lastTap < 320 && Math.hypot(t.clientX - g.tap0.x, t.clientY - g.tap0.y) < 60) {
+						g.lastTap = 0;
+						const r = rectWrap();
+						zoomAt(t.clientX - r.left, t.clientY - r.top, view.current.s > 1.01 ? 1 / view.current.s : 2.5);
+					} else { g.lastTap = now; g.tap0 = { x: t.clientX, y: t.clientY }; }
+				}
+			}
+			g.mode = "";
+		};
+		wrap.addEventListener("wheel", onWheel, { passive: false });
+		wrap.addEventListener("dblclick", onDbl);
+		wrap.addEventListener("touchstart", onTouchStart, { passive: true });
+		wrap.addEventListener("touchmove", onTouchMove, { passive: false });
+		wrap.addEventListener("touchend", onTouchEnd, { passive: true });
+		const onResize = () => { clampView(); apply(); };
+		window.addEventListener("resize", onResize);
+		return () => {
+			wrap.removeEventListener("wheel", onWheel);
+			wrap.removeEventListener("dblclick", onDbl);
+			wrap.removeEventListener("touchstart", onTouchStart);
+			wrap.removeEventListener("touchmove", onTouchMove);
+			wrap.removeEventListener("touchend", onTouchEnd);
+			window.removeEventListener("resize", onResize);
+		};
+	}, [onClose]);
+
+	// 배경(이미지·버튼 외) 탭 — 닫기. 이미지 탭은 확대 로직 소관이라 무시.
+	const onWrapClick = (e: React.MouseEvent) => {
+		const t = e.target as HTMLElement;
+		if (t === imgRef.current) return;
+		if (t.closest("button, a")) return; // 닫기·다운로드 버튼 자체 동작
+		onClose();
+	};
+
+	// ── 이미지 라이트박스 (output 이미지 탭 — 전체화면 확대·핀치줌·팬) ──
+	return (
+		<div ref={wrapRef} className="turk-lightbox" role="dialog" aria-modal="true" aria-label="이미지 확대 보기" onClick={onWrapClick}>
+			<img ref={imgRef} src={src} alt={alt} className="turk-lightbox-img" draggable={false} />
+			<div className="turk-lightbox-hud">
+				<span className="turk-lightbox-cap" title={alt}>{alt || "이미지"}</span>
+				{sameOrigin && <button className="turk-lightbox-btn" onClick={() => { const a = document.createElement("a"); a.href = src; a.download = decodeURIComponent(new URL(src, location.href).pathname.split("/").pop() || "image"); a.click(); }} title="다운로드 (?dl=1)"><Download className="turk-ico" /></button>}
+				<button className="turk-lightbox-btn" onClick={onClose} title="닫기 (Esc)"><X className="turk-ico" /></button>
+			</div>
+		</div>
+	);
+}
 
 // ── 앱 ─────────────────────────────────────────────────────────────────
 export default function App() {
@@ -82,6 +259,12 @@ export default function App() {
 
 	// ── 대화 드로어 (Phase 3) — 열림 상태만 소유. 목록·폴링·비번 모달은 ConversationDrawer 내부 ──
 	const [drawerOpen, setDrawerOpen] = useState(false);
+
+	// ── 이미지 라이트박스 (ImageLightbox) — 출력 이미지 탭 → 전체화면 확대 ──
+	const [zoomBox, setZoomBox] = useState<{ src: string; alt: string } | null>(null);
+	const zoomOpenRef = useRef(false);
+	zoomOpenRef.current = !!zoomBox; // 글로벌 키핸들러(Esc)가 읽는 참조 — state와 렌더 동기
+	const closeZoom = useCallback(() => setZoomBox(null), []); // 안정 콜백 — 라이트박스 이펙트 재구성 방지 (리스너 재부착 억제)
 
 	// WebSocket 상태
 	const [connected, setConnected] = useState(false);
@@ -1178,6 +1361,7 @@ export default function App() {
 			}
 			if (e.key === "Escape") {
 				if (inField) return; // 폼 내부 Escape — 폼 onKeyDown(취소)이 담당, 이중 발사 방지
+				if (zoomOpenRef.current) { setZoomBox(null); e.preventDefault(); return; } // 라이트박스 — 최우선 닫기 (턴 취소·메뉴닫기보다 앞)
 				if (menuMode.current !== "none") { // 열린 메뉴 닫기 — 취소 버튼과 동일 마무리(원 화면 복원)
 					menuMode.current = "none";
 					setState(prevStateRef.current ?? emptyState(gridRef.current.rows, gridRef.current.cols));
@@ -1647,7 +1831,16 @@ export default function App() {
 				<button className="turk-copy-btn" onClick={() => { const text = activePast ? (activePast.parsed?.message ?? activePast.a) : state.message; navigator.clipboard?.writeText(text).then(() => { const b = document.querySelector(".turk-copy-btn"); if (b) { b.classList.add("turk-copy-done"); setTimeout(() => b.classList.remove("turk-copy-done"), 800); } }); }} title="마크다운 복사"><Copy className="turk-ico" /></button>
 				{/* 페이저 — 3슬롯(prev·cur·next) 가상 트랙. translateY는 applyTrack이 직접 구동(드래그·플립),
 					경계 밖 슬롯은 빈 칸으로 자리 유지(지오메트리 일정). 짝 라벨·pop 애니메이션은 페이지 내부에 승계 */}
-				<div className="turk-pager" ref={pagerRef}>
+				<div className="turk-pager" ref={pagerRef}
+					onClick={(e) => {
+						// 이미지 클릭 위임 — 출력 본문(.turk-message) 안의 <img>만 라이트박스로 (그리드 버튼·질문칩은 무관)
+						const t = e.target as HTMLElement;
+						if (t.tagName !== "IMG" || !t.closest(".turk-message")) return;
+						const img = t as HTMLImageElement;
+						e.preventDefault();
+						setZoomBox({ src: img.currentSrc || img.src, alt: img.alt || "" });
+					}}
+				>
 					<div className="turk-pager-track" ref={trackRef}>
 						{[-1, 0, 1].map((rel) => {
 							const i = pageIdx + rel;
@@ -1774,6 +1967,7 @@ export default function App() {
 			{(!restored || modelChanging || loading || !piReady) && <div className="turk-dim-overlay" />}
 			{/* 대화 드로어 (Phase 3) — 조건부 마운트: 폴링·계정 fetch는 close(unmount)와 함께 해제 */}
 			{drawerOpen && <ConversationDrawer userKey={userKey} onClose={() => setDrawerOpen(false)} />}
+			{zoomBox && <ImageLightbox src={zoomBox.src} alt={zoomBox.alt} onClose={closeZoom} />}
 		</div>
 	);
 }

@@ -568,7 +568,75 @@ body {
 	border-radius: var(--radius-md);
 	box-shadow: var(--pixel-box-shadow);
 	background: var(--muted);
+	cursor: zoom-in; /* 탭 확대 — 라이트박스 (ImageLightbox) */
 }
+
+/* ── 이미지 라이트박스 — 출력 이미지 탭 확대 뷰 (핀치줌·팬·더블탭·휠) ── */
+.turk-lightbox {
+	position: fixed;
+	inset: 0;
+	z-index: 100;
+	background: rgba(0, 0, 0, 0.93);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	touch-action: none; /* 자체 제스처 전담 — 브라우저 핀치·스크롤 차단 */
+	transition: opacity 0.2s ease;
+}
+.turk-lightbox-img {
+	max-width: 100%;
+	max-height: 100%;
+	transition: transform 0.18s ease;
+	cursor: zoom-out;
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none; /* 길게누름 저장 메뉴 봉인 대신 — 저장은 HUD 다운로드 버튼 */
+	touch-action: none;
+}
+.turk-lightbox-fast { transition: none; } /* 제스처 조작 중 — 손을 즉시 따라오게 */
+.turk-lightbox-hud {
+	position: absolute;
+	top: 0.5rem;
+	left: 0.5rem;
+	right: 0.5rem;
+	display: flex;
+	gap: 0.4rem;
+	align-items: center;
+	pointer-events: none; /* 캡션은 통과, 버튼만 개별 auto */
+}
+.turk-lightbox-cap {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	background: var(--card);
+	border: 0.143rem solid var(--foreground);
+	box-shadow: var(--pixel-box-shadow);
+	border-radius: var(--radius-md);
+	padding: 0.05rem 0.5rem;
+	color: var(--foreground);
+	font-family: "NeoDunggeunmo", monospace;
+	font-size: calc(var(--turk-font-size) * 0.85);
+}
+.turk-lightbox-btn {
+	flex: 0 0 auto;
+	pointer-events: auto;
+	width: 2rem;
+	height: 2rem;
+	padding: 0;
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--card);
+	border: 0.143rem solid var(--foreground);
+	box-shadow: var(--pixel-box-shadow);
+	border-radius: var(--radius-md);
+	color: var(--foreground);
+	cursor: pointer;
+}
+.turk-lightbox-btn:active { transform: translateY(0.1rem); }
 .turk-message hr { border: none; border-top: 0.071rem solid currentColor; opacity: 0.3; margin: 0.3em 0; }
 .turk-message pre { background: var(--muted); padding: 0.4em; overflow: auto; margin: 0.2em 0; border-radius: var(--radius-md); }
 .turk-message table { border-collapse: collapse; margin: 0.2em 0; }
