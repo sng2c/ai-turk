@@ -559,12 +559,13 @@ body {
 .turk-message p { margin: 0.2em 0; }
 .turk-message blockquote { padding-left: 0.5em; border-left: 0.143rem solid currentColor; opacity: 0.7; margin: 0.2em 0; }
 .turk-message img {
-	/* 마크다운 이미지 (워크스페이스 생성물 /files/…·외부) — 박스 폭 안에 봉입·앱 박스 어법 (픽셀 보더+링 섀도우) */
+	/* 마크다운 이미지 (워크스페이스 생성물 /files/…·외부) — 박스 폭 안에 봉입.
+	   보더=success(녹) — 출력 본문 텍스트·strong과 동일 어법: 이미지도 응답 컨텐츠 (앱 크롬(흑백 박스)과 구별) */
 	max-width: 100%;
 	height: auto;
 	display: block;
 	margin: 0.4em 0;
-	border: 0.143rem solid var(--foreground);
+	border: 0.143rem solid var(--success);
 	border-radius: var(--radius-md);
 	box-shadow: var(--pixel-box-shadow);
 	background: var(--muted);
