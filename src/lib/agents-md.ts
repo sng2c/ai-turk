@@ -14,6 +14,12 @@ export const AGENTS_MD_HEADER = "# AI-Turk UI Controller";
 export const ENV_SECTION_OPEN = "<!-- env:section -->";
 export const ENV_SECTION_CLOSE = "<!-- /env:section -->";
 
+// ── 파일 서빙 섹션 마커 — applyFilesSection(agents-md-server.ts)이 두 마커 사이를 교체한다.
+//    백엔드 cwd(워크스페이스) → 브라우저 /files/<userKey>/ 매핑을 모델에게 알린다 (userKey별 내용 상이 — env 섹션과
+//    별도 마커로 관리. 라이브 세션은 /reload 재기동 시 재독).
+export const FILES_SECTION_OPEN = "<!-- files:section -->";
+export const FILES_SECTION_CLOSE = "<!-- /files:section -->";
+
 // 본문 해시(djb2) — 마커에 포함해 콘텐츠 변경을 감지. grid만 같아도 텍스트가 바뀌면
 // 마이그레이션이 트리거되도록 한다. 입력은 마커 줄을 제외한 본문.
 function bodyHash(s: string): string {

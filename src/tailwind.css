@@ -558,6 +558,17 @@ body {
 .turk-message a { color: inherit; text-decoration: underline; }
 .turk-message p { margin: 0.2em 0; }
 .turk-message blockquote { padding-left: 0.5em; border-left: 0.143rem solid currentColor; opacity: 0.7; margin: 0.2em 0; }
+.turk-message img {
+	/* 마크다운 이미지 (워크스페이스 생성물 /files/…·외부) — 박스 폭 안에 봉입·앱 박스 어법 (픽셀 보더+링 섀도우) */
+	max-width: 100%;
+	height: auto;
+	display: block;
+	margin: 0.4em 0;
+	border: 0.143rem solid var(--foreground);
+	border-radius: var(--radius-md);
+	box-shadow: var(--pixel-box-shadow);
+	background: var(--muted);
+}
 .turk-message hr { border: none; border-top: 0.071rem solid currentColor; opacity: 0.3; margin: 0.3em 0; }
 .turk-message pre { background: var(--muted); padding: 0.4em; overflow: auto; margin: 0.2em 0; border-radius: var(--radius-md); }
 .turk-message table { border-collapse: collapse; margin: 0.2em 0; }

@@ -91,7 +91,7 @@ npm run build
 
 # ── 8. 조건부 재시작 — 서버/설정 쪽 파일이 바뀐 경우만 ──
 # 정적(UI) 전용 변경은 빌드된 번들 교체로 즉시 서빙되므로 재시작 불필요.
-WATCH='server.ts|backend.ts|session-core.ts|auth.ts|scheduler.ts|user-cli.ts|vite.config.ts|package.json|tsconfig.node.json|turkctl'
+WATCH='server.ts|backend.ts|session-core.ts|auth.ts|scheduler.ts|user-cli.ts|src/lib/workspace-serve.ts|src/lib/agents-md-server.ts|src/lib/agents-md.ts|vite.config.ts|package.json|tsconfig.node.json|turkctl'
 RESTART="정적 전용 — 재시작 생략 (빌드 즉시 반영)"
 if grep -Eq "$WATCH" <<<"$CHANGED"; then
   if command -v pm2 >/dev/null 2>&1; then

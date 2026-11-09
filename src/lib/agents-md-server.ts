@@ -9,6 +9,8 @@ import {
 	AGENTS_MD_HEADER,
 	ENV_SECTION_OPEN,
 	ENV_SECTION_CLOSE,
+	FILES_SECTION_OPEN,
+	FILES_SECTION_CLOSE,
 } from "./agents-md.ts";
 
 /**
@@ -62,30 +64,70 @@ function buildEnvSection(keys: string[]): string {
 }
 
 /**
+ * 마커 섹션 교체 공용 본체 — `${open}...${close}` 쌍이 있으면 사이를 교체, 없으면 문서 말미에 섹션째 추가.
+ * 내용이 바뀔 때만 write — 불변 호출은 no-op (mtime 보존 — pi의 AGENTS.md 감시 오동작 방지).
+ */
+function writeMarkerSection(open: string, close: string, section: string, content: string): string {
+	const openIdx = content.indexOf(open);
+	const closeIdx = content.indexOf(close);
+	let next: string;
+	if (openIdx !== -1 && closeIdx > openIdx) {
+		// 마커 쌍 존재 — 사이 교체
+		next = content.slice(0, openIdx) + section + content.slice(closeIdx + close.length);
+	} else {
+		// 마커 없음 — 문서 말미에 추가
+		const base = content.length > 0 && !content.endsWith("\n") ? content + "\n" : content;
+		next = base.length > 0 ? `${base}\n${section}\n` : `${section}\n`;
+	}
+	return next === content ? "" : next; // "" = 불변 (write 생략)
+}
+
+/**
  * 섹션 적용. 반환: true = 성공(write 또는 이미 원하는 상태), false = fs 오류.
- * 순서 계약: ensureAgentsMd(템플릿 생성·마이그레이션) → applyEnvSection (마커 존재 보장 후 교체).
+ * 순서 계약: ensureAgentsMd(템플릿 생성·마이그레이션) → applyEnvSection → applyFilesSection (마커 재촉 후 교체).
  */
 export function applyEnvSection(path: string, keys: string[], log: (msg: string) => void = console.log): boolean {
 	const section = `${ENV_SECTION_OPEN}\n${buildEnvSection(keys)}\n${ENV_SECTION_CLOSE}`;
 	try {
 		const content = existsSync(path) ? readFileSync(path, "utf8") : "";
-		const openIdx = content.indexOf(ENV_SECTION_OPEN);
-		const closeIdx = content.indexOf(ENV_SECTION_CLOSE);
-		let next: string;
-		if (openIdx !== -1 && closeIdx > openIdx) {
-			// 마커 쌍 존재 — 사이 교체
-			next = content.slice(0, openIdx) + section + content.slice(closeIdx + ENV_SECTION_CLOSE.length);
-		} else {
-			// 마커 없음 — 문서 말미에 추가
-			const base = content.length > 0 && !content.endsWith("\n") ? content + "\n" : content;
-			next = base.length > 0 ? `${base}\n${section}\n` : `${section}\n`;
-		}
-		if (next === content) return true; // 불변 — write 생략 (mtime 보존)
+		const next = writeMarkerSection(ENV_SECTION_OPEN, ENV_SECTION_CLOSE, section, content);
+		if (!next) return true; // 불변 — write 생략 (mtime 보존)
 		writeFileSync(path, next, "utf8");
 		log(`[Turk] AGENTS.md 환경변수 섹션 갱신: ${path} (${keys.length}개)`); // 이름 개수만 로그 — 값 무관
 		return true;
 	} catch (err) {
 		log(`[Turk] AGENTS.md 환경변수 섹션 갱신 실패: ${err instanceof Error ? err.message : err}`);
+		return false;
+	}
+}
+
+// ── 파일 서빙 섹션 적용 — 백엔드 cwd가 브라우저 /files/<userKey>/으로 매핑된다는 사실을 모델에게 알린다.
+//    userKey는 대화 식별자라 세션마다 내용 상이 — env 섹션과 별도 마커(FILES_SECTION)로 관리.
+function buildFilesSection(userKey: string): string {
+	return [
+		"## Your files in the chat",
+		"",
+		`Your working directory is exposed to the user's chat UI at \`/files/${userKey}/\` (root-relative URL, same mapping — \`./x.png\` is \`/files/${userKey}/x.png\`).`,
+		"",
+		"- Any file you create in your cwd (svg, png, jpg, webp, gif, txt, json, csv…) is served there — subdirectories work too.",
+		`- To show an image inline in your message, first create the file in your cwd, then reference it with an ABSOLUTE markdown image: \`![description](/files/${userKey}/chart.svg)\`.`,
+		`- Links work the same: \`[download](/files/${userKey}/data.csv)\`.`,
+		"- URLs must start with `/files/` and percent-encode spaces and non-ASCII characters. NEVER show local filesystem paths in the message — they do not resolve in the browser.",
+	].join("\n");
+}
+
+/** files 섹션 적용 — startBackend가 ensureAgentsMd·applyEnvSection 이후에 호출 (섹션 순서: env → files). */
+export function applyFilesSection(path: string, userKey: string, log: (msg: string) => void = console.log): boolean {
+	const section = `${FILES_SECTION_OPEN}\n${buildFilesSection(userKey)}\n${FILES_SECTION_CLOSE}`;
+	try {
+		const content = existsSync(path) ? readFileSync(path, "utf8") : "";
+		const next = writeMarkerSection(FILES_SECTION_OPEN, FILES_SECTION_CLOSE, section, content);
+		if (!next) return true; // 불변 — write 생략 (mtime 보존)
+		writeFileSync(path, next, "utf8");
+		log(`[Turk] AGENTS.md 파일 서빙 섹션 갱신: ${path} (/files/${userKey}/)`);
+		return true;
+	} catch (err) {
+		log(`[Turk] AGENTS.md 파일 서빙 섹션 갱신 실패: ${err instanceof Error ? err.message : err}`);
 		return false;
 	}
 }

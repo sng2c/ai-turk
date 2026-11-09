@@ -46,6 +46,16 @@ The message box is a **1-turn-1-page pager** over the full server conversation l
 - **Keyboard** (PC): `/` focuses the input (Gmail/Slack convention; typed normally while already in the input for `/model` etc.); `Enter` never interferes — form submit / focused-button activation; `Enter` on empty input blurs (dismiss keyboard); `Esc` cancels the running turn / closes a menu; `PgUp/PgDn` scroll the output (0.9 viewport) and at a boundary flip pages through a two-push resistance (peek → confirm, one flip per key-press, momentum chaining canceled); arrow keys move focus across grid buttons (↑↓ rows, ←→ columns, skipping empty cells).
 - **Past pages**: render that turn's Q header + markdown + that turn's grid buttons. Buttons stay **active** — pressing one sends its label as a prompt to the current session (same contract as the input field, which also sends while viewing a past page). The response commit jumps back to the live (last) page. Branch-from-answer (pi `fork` via `qId`) is planned Phase 2.
 
+### Workspace File Serving (`/files/<key>/…`)
+
+The agent's working directory (workspace) is exposed to the browser at `GET /files/<userKey>/<relpath>` — files the model writes into its cwd are directly referenceable in the markdown message.
+
+- **Model side**: injected into the workspace `AGENTS.md` as the `<!-- files:section -->` block (`applyFilesSection` in `agents-md-server.ts`, wired in `startBackend`) — the model knows the mapping and writes e.g. `![chart](/files/<key>/chart.svg)`. Live conversations pick it up on the next `/reload` (AGENTS.md re-read at spawn).
+- **Server**: single-source parser/reader in `src/lib/workspace-serve.ts` — consumed by prod `server.ts` (with the same 3-stage validation as history: format → cookie auth → ownership `own`) and by dev `vite.config.ts` middleware (no-auth dev contract).
+- **Safety**: userKey format check + per-segment relpath validation (`..`/`.`/NUL/`..` encoded variants/decoded slashes all rejected) + dual-path `realpath` containment (symlink escape denied) + 20MB cap (413). Scriptable types (`text/html`, `image/svg+xml`) are served with `Content-Security-Policy: sandbox` (blocks same-origin scripts of model artifacts; `<img>` embeds unaffected) + `X-Content-Type-Options: nosniff`; `.md` is served as `text/plain`.
+- **Rendering**: react-markdown's default URL sanitizer passes root-relative paths; images render inside `.turk-message` (pixel border style, max-width 100%). Deleted conversations (workspace rm) serve 404.
+- **Dev/test**: `tests/workspace-serve.test.ts` — parsing/path-traversal/section-injection coverage (30 checks).
+
 ### Backend Protocol
 
 - **Common Events (pi format received by App.tsx)**: `pi_ready`, `agent_start`, `message_update` (text_delta/thinking_delta), `tool_execution_start/end`, `agent_end`, `pi_exit`

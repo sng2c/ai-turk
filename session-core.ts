@@ -34,7 +34,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createBackend, type Backend, type BackendOptions, type TurkEvent } from "./backend.ts";
 import { Scheduler, formatTriggerMessage } from "./scheduler.ts";
 import { validateTurkResponse } from "./src/lib/response-schema.ts";
-import { ensureAgentsMd, applyEnvSection } from "./src/lib/agents-md-server.ts";
+import { ensureAgentsMd, applyEnvSection, applyFilesSection } from "./src/lib/agents-md-server.ts";
 import envPaths from "env-paths";
 import webpush from "web-push";
 import { join } from "node:path";
@@ -813,8 +813,9 @@ export function createSessionCore(cfg?: SessionCoreConfig): SessionCore {
 			const agentCwd = workspacePath(session.userKey); // 위치 분리(TURK_WORKSPACES_ROOT) — 미설정 시 현행 경로
 			mkdirSync(agentCwd, { recursive: true });
 			const agentsMdPath = join(agentCwd, "AGENTS.md");
-			ensureAgentsMd(agentsMdPath); // 순서 계약: 템플릿 생성 → 환경변수 섹션 갱신 (마커 존재 보장 후 교체)
+			ensureAgentsMd(agentsMdPath); // 순서 계약: 템플릿 생성 → 환경변수 섹션 갱신 → 파일 서빙 섹션 갱신
 			applyEnvSection(agentsMdPath, Object.keys(workspaceEnv)); // 계정 env 이름 목록 — 같은 계정 대화들 동일 목록(일관성) / 값은 절대 문서화 금지 / 불변 시 write 없음
+			applyFilesSection(agentsMdPath, session.userKey); // workspace → /files/<userKey>/ 매핑 안내 — 모델이 응답 마크다운에 이미지·링크로 걸 수 있게
 		} catch (e) { console.error(`[Turk] AGENTS.md 생성 실패: ${e}`); }
 		session.backend = createBackendFn({
 			cwd: workspacePath(session.userKey),

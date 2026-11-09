@@ -16,6 +16,7 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
+import { parseWorkspaceFilesPath, readWorkspaceFile, type WorkspaceFile } from "./src/lib/workspace-serve.ts"; // workspace → /files/<userKey>/ 서빙 단일 진원
 import { loadAccountEnv, setAccountEnv, deleteAccountEnvKey, isEnvKeyName, migrateConversationEnvToAccounts } from "./env-store.ts"; // 4c-refit — 계정별 환경변수 (값 열림=소유자만·upsert·멱듬 삭제·구 대화 env.json 이관 — 모델 컨텍스트로만 값은 0)
 import { createAuthorizer, attemptLogin, clearCookie, changePassword, reconcileUsersWithDisk, ensureAnonAccount, ANON_ACCOUNT } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경 · reconcileUsersWithDisk는 Phase 4a 부팅 잔여키 대사
 
@@ -340,6 +341,36 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 		auth?.releaseConversation(user, id); // Phase 4a — 장부 소유 등록 해제: core가 users.json을 모르므로 이 응답 직전에 여기서 해제 (미해제 잔여키는 타 계정 foreign 오판 → 고아 자동클레임 차단 결함의 근원). 동기 소량 — 응답 지연 없음
 		res.writeHead(200, JSONH);
 		res.end(JSON.stringify({ ok: true }));
+		return;
+	}
+
+	// ── 세션 workspace 파일 서빙 — GET /files/<userKey>/<rel> (정적 게이트보다 앞 — 자체 인증 수행) ────────
+	// 백엔드 cwd(워크스페이스)에 셔 모델이 쓴 파일을 그대로 매핑 — 출력 마크다운에서 ![…](/files/…) 인라인 렌더 원료.
+	// 검증 3단 계약 (history·PATCH/DELETE와 동일): ①형식(파서=null) → ②쿠키 인증(AUTH시) → ③소유권(own만).
+	// AUTH off(dev·폴백)는 무인증 허용 — vite dev 미들웨어와 동일 계약.
+	const WF_PREFIX = "/files/";
+	if (url.pathname.startsWith(WF_PREFIX)) {
+		const parsed = parseWorkspaceFilesPath(url.pathname);
+		if (!parsed) { res.writeHead(404, JSONH); res.end(JSON.stringify({ error: "찾을 수 없는 파일" })); return; }
+		if (AUTH) {
+			const user = auth ? await auth.authorizeRequest(req) : null;
+			if (!user) { res.writeHead(401, JSONH); res.end(JSON.stringify({ error: "인증 필요" })); return; } // ②
+			if (auth?.checkConversation(user, parsed.userKey) !== "own") { res.writeHead(403, JSONH); res.end(JSON.stringify({ error: "권한 없음" })); return; } // ③ orphan·foreign 배제
+		}
+		const f: WorkspaceFile = await readWorkspaceFile(parsed.userKey, parsed.rel);
+		if (!f.ok) {
+			const status = f.code === "toolarge" ? 413 : 404; // 상한 초과 — 메모리 폭탄 방지 (20MB)
+			res.writeHead(status, JSONH); res.end(JSON.stringify({ error: f.code === "toolarge" ? "파일 크기 초과 — 20MB 상한" : "찾을 수 없는 파일" }));
+			return;
+		}
+		// sandbox — html/svg 생성물의 same-origin 스크립트 봉쇄 (XSS 원천 제거; <img> 임베드에는 영향 없음)
+		res.writeHead(200, {
+			"Content-Type": f.mime,
+			"Cache-Control": "no-cache", // 세션이 파일을 계속 갱신 — 재검증 강제
+			...(f.sandbox ? { "Content-Security-Policy": "sandbox" } : {}),
+			"X-Content-Type-Options": "nosniff",
+		});
+		res.end(f.data);
 		return;
 	}
 
