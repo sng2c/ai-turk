@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 // @tailwindcss/vite 제거 — @tailwindcss/postcss 전환 (CSS HMR full-reload 방지, tailwindlabs/tailwindcss#19903)
 import { WebSocketServer } from "ws";
 import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
-import { parseWorkspaceFilesPath, readWorkspaceFile } from "./src/lib/workspace-serve.ts"; // workspace → /files/<userKey>/ 서빙 단일 진원
+import { parseWorkspaceFilesPath, readWorkspaceFile, contentDispositionValue, downloadRequested } from "./src/lib/workspace-serve.ts"; // workspace → /files/<userKey>/ 서빙 단일 진원 (download = ?dl=1 attachment 강제)
 import { ensureAnonAccount, ANON_ACCOUNT } from "./auth.ts"; // 익명 도서관 — prod와 동일 진원
 import { loadAccountEnv, setAccountEnv, deleteAccountEnvKey } from "./env-store.ts"; // env 저장소 단일 진원
 
@@ -98,7 +98,9 @@ function turkPlugin(): Plugin {
 			// /files/<userKey>/<rel> — 세션 워크스페이스 파일 서빙 (prod server.ts와 동일 단일 진원, dev 무인증 계약).
 			// 백엔드 cwd에 셔 모델이 쓴 파일을 마크다운 이미지·링크로 인라인 렌더할 수 있게 한다.
 			server.middlewares.use("/files", async (req, res, _next) => {
-				const parsed = parseWorkspaceFilesPath("/files" + (req.url || ""));
+				// connect는 req.url에 쿼리를 실어온다(?…) — URL 파싱으로 pathname·search 분리 (prod server.ts와 동일 계약)
+				const u = new URL("http://t" + "/files" + (req.url || ""));
+				const parsed = parseWorkspaceFilesPath(u.pathname);
 				if (!parsed) { res.statusCode = 404; res.end(JSON.stringify({ error: "찾을 수 없는 파일" })); return; }
 				const f = await readWorkspaceFile(parsed.userKey, parsed.rel);
 				if (!f.ok) {
@@ -109,6 +111,7 @@ function turkPlugin(): Plugin {
 				res.setHeader("Content-Type", f.mime);
 				res.setHeader("Cache-Control", "no-cache");
 				if (f.sandbox) res.setHeader("Content-Security-Policy", "sandbox"); // html/svg 스크립트 봉쇄 — prod와 동일 계약
+				if (downloadRequested(u.searchParams)) res.setHeader("Content-Disposition", contentDispositionValue(parsed.rel)); // ?dl=1 강제 다운로드
 				res.setHeader("X-Content-Type-Options", "nosniff");
 				res.end(f.data);
 			});

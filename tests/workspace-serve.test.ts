@@ -93,6 +93,19 @@ ok("어휘 가드 밖 경로 거부", (await readWorkspaceFile(KEY, join("..", "
 	void before;
 }
 
+// ── 4. 다운로드 헤더 (?dl=1 — Content-Disposition attachment) ──────────
+{
+	const { contentDispositionValue, downloadRequested } = await import("../src/lib/workspace-serve.ts");
+	ok("basename 추출", contentDispositionValue("sub/out report.csv").startsWith(`attachment; filename="out report.csv"; filename*=UTF-8''out%20report.csv`));
+	ok("비ASCII 파일명 — ASCII 폴백+UTF-8 인코딩", contentDispositionValue("한글보고서.pdf").startsWith(`attachment; filename="_____.pdf"; filename*=UTF-8''%ED%95%9C%EA%B8%80%EB%B3%B4%EA%B3%A0%EC%84%9C.pdf`));
+	ok("ASCII 근사치 치환", contentDispositionValue('a#b"c.png').startsWith(`attachment; filename="a#b'c.png"; filename*=UTF-8''a%23b%22c.png`));
+	const sp = (s: string) => new URL(`http://t/p?${s}`).searchParams;
+	ok("dl=1 인식", downloadRequested(sp("dl=1")) === true);
+	ok("download=1 인식", downloadRequested(sp("download=1")) === true);
+	ok("dl=0·미지정 인식 안 함", downloadRequested(sp("dl=0")) === false && downloadRequested(sp("x=1")) === false);
+	ok("혼합 쿼리에서 dl 인식", downloadRequested(sp("foo=bar&dl=1&baz=qux")) === true);
+}
+
 // ── 마무리 ────────────────────────────────────────────────────────────────
 rmSync(TMP, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);

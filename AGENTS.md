@@ -54,6 +54,7 @@ The agent's working directory (workspace) is exposed to the browser at `GET /fil
 - **Server**: single-source parser/reader in `src/lib/workspace-serve.ts` — consumed by prod `server.ts` (with the same 3-stage validation as history: format → cookie auth → ownership `own`) and by dev `vite.config.ts` middleware (no-auth dev contract).
 - **Safety**: userKey format check + per-segment relpath validation (`..`/`.`/NUL/`..` encoded variants/decoded slashes all rejected) + dual-path `realpath` containment (symlink escape denied) + 20MB cap (413). Scriptable types (`text/html`, `image/svg+xml`) are served with `Content-Security-Policy: sandbox` (blocks same-origin scripts of model artifacts; `<img>` embeds unaffected) + `X-Content-Type-Options: nosniff`; `.md` is served as `text/plain`.
 - **Rendering**: react-markdown's default URL sanitizer passes root-relative paths; images render inside `.turk-message` (pixel border style, max-width 100%). Deleted conversations (workspace rm) serve 404.
+- **Download**: appending `?dl=1` (or `?download=1`) to a `/files/…` URL adds `Content-Disposition: attachment` (ASCII fallback + RFC 5987 `filename*` for non-ASCII basenames) — the model is taught to offer `[download](/files/<key>/data.csv?dl=1)` for binary/large artifacts; without the param files are opened inline in the browser.
 - **Dev/test**: `tests/workspace-serve.test.ts` — parsing/path-traversal/section-injection coverage (30 checks).
 
 ### Backend Protocol

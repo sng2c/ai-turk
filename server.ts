@@ -16,7 +16,7 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createSessionCore, verifyUserKeyFormat } from "./session-core.ts";
-import { parseWorkspaceFilesPath, readWorkspaceFile, type WorkspaceFile } from "./src/lib/workspace-serve.ts"; // workspace → /files/<userKey>/ 서빙 단일 진원
+import { parseWorkspaceFilesPath, readWorkspaceFile, contentDispositionValue, downloadRequested, type WorkspaceFile } from "./src/lib/workspace-serve.ts"; // workspace → /files/<userKey>/ 서빙 단일 진원
 import { loadAccountEnv, setAccountEnv, deleteAccountEnvKey, isEnvKeyName, migrateConversationEnvToAccounts } from "./env-store.ts"; // 4c-refit — 계정별 환경변수 (값 열림=소유자만·upsert·멱듬 삭제·구 대화 env.json 이관 — 모델 컨텍스트로만 값은 0)
 import { createAuthorizer, attemptLogin, clearCookie, changePassword, reconcileUsersWithDisk, ensureAnonAccount, ANON_ACCOUNT } from "./auth.ts"; // Phase 2 — import는 상단, 사용은 조건부 (AUTH) · changePassword는 Phase 3 비밀번호 변경 · reconcileUsersWithDisk는 Phase 4a 부팅 잔여키 대사
 
@@ -363,11 +363,14 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 			res.writeHead(status, JSONH); res.end(JSON.stringify({ error: f.code === "toolarge" ? "파일 크기 초과 — 20MB 상한" : "찾을 수 없는 파일" }));
 			return;
 		}
+		// ?dl=1(/download=1) — attachment 강제. 마크다운 링크에 붙이면 열람 대신 다운로드 대화상자.
+		const dl = downloadRequested(url.searchParams);
 		// sandbox — html/svg 생성물의 same-origin 스크립트 봉쇄 (XSS 원천 제거; <img> 임베드에는 영향 없음)
 		res.writeHead(200, {
 			"Content-Type": f.mime,
 			"Cache-Control": "no-cache", // 세션이 파일을 계속 갱신 — 재검증 강제
 			...(f.sandbox ? { "Content-Security-Policy": "sandbox" } : {}),
+			...(dl ? { "Content-Disposition": contentDispositionValue(parsed.rel) } : {}),
 			"X-Content-Type-Options": "nosniff",
 		});
 		res.end(f.data);

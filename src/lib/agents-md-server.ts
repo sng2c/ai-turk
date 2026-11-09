@@ -111,7 +111,7 @@ function buildFilesSection(userKey: string): string {
 		"",
 		"- Any file you create in your cwd (svg, png, jpg, webp, gif, txt, json, csv…) is served there — subdirectories work too.",
 		`- To show an image inline in your message, first create the file in your cwd, then reference it with an ABSOLUTE markdown image: \`![description](/files/${userKey}/chart.svg)\`.`,
-		`- Links work the same: \`[download](/files/${userKey}/data.csv)\`.`,
+		`- Links work the same: \`[download](/files/${userKey}/data.csv)\`. To force a download dialog instead of inline display, append \`?dl=1\`: \`[download](/files/${userKey}/data.csv?dl=1)\`. Recommended for binary/large artifacts (zip, csv, pdf, …).`,
 		"- URLs must start with `/files/` and percent-encode spaces and non-ASCII characters. NEVER show local filesystem paths in the message — they do not resolve in the browser.",
 	].join("\n");
 }

@@ -48,6 +48,21 @@ function needsSandbox(mime: string): boolean {
 	return mime.startsWith("text/html") || mime === "image/svg+xml";
 }
 
+/**
+ * Content-Disposition 헤더 값 (attachment 강제 — ?dl=1 다운로드 파라미터용).
+ * 헤더는 ASCII 한정이라 filename= ASCII 폴백(비ASCII → "_") + filename*=RFC 5987 인코딩 쌍으로.
+ */
+export function contentDispositionValue(rel: string): string {
+	const base = rel.split("/").pop() || "file";
+	const ascii = base.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'");
+	return `attachment; filename="${ascii || "file"}"; filename*=UTF-8''${encodeURIComponent(base)}`;
+}
+
+/** ?dl=1(/download=1) 판정 — URLSearchParams(req)와 vite URL 파싱 양쪽에서 공용. */
+export function downloadRequested(sp: URLSearchParams): boolean {
+	return sp.get("dl") === "1" || sp.get("download") === "1";
+}
+
 export interface WorkspaceFileParse {
 	userKey: string;
 	rel: string; // 워크스페이스(백엔드 cwd) 기준 상대경로 — 슬래시 join, 빈 세그먼트·위험 세그먼트 제거 완료
